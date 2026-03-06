@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: closing-bet-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn flask_app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 300 --preload
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+      - key: PYTHONIOENCODING
+        value: utf-8
+      - key: AUTH_DISABLED
+        value: "true"
+      - key: RENDER_EXTERNAL_URL
+        value: "https://closing-bet-api.onrender.com"
+      # ── Render Dashboard > Environment 에서 직접 설정할 키 ──
+      # GEMINI_API_KEY
+      # OPENAI_API_KEY
+      # PERPLEXITY_API_KEY
+      # TELEGRAM_BOT_TOKEN
+      # TELEGRAM_CHAT_ID
+      # TELEGRAM_CHANNEL_BOT_TOKEN
+      # TELEGRAM_CHANNEL_CHAT_ID
+      # DART_API_KEY

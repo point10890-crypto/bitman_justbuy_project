@@ -1,0 +1,116 @@
+# Environment & Secrets
+.env
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Data (large files - keep essential JSON for deployment)
+*.csv
+!ticker_to_yahoo_map.csv
+!package.json
+!package-lock.json
+!tsconfig.json
+!next.config.*
+!tailwind.config.*
+!postcss.config.*
+!components.json
+!render.yaml
+
+# Data directory: exclude heavy/generated files, keep essential
+data/*.csv
+!data/signals_log.csv
+!data/ticker_to_yahoo_map.csv
+data/*.db
+data/history/
+data/backtest/
+data/ai/
+data/institutional/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Backup files
+*_backup.py
+*_backup_*.py
+
+# Archives & binaries
+*.zip
+*.tar.gz
+*.rar
+__MACOSX/
+backups/
+
+# Extracted / duplicate source folders
+closing-bet-api/
+korean market/
+us-market-pro/
+kr_market_package/
+
+# Stale temp/test files (prevent re-creation)
+login_output.txt
+test_analyze.py
+run_flask.py
+start-frontend.sh
+
+# Output data (generated)
+us_market_preview/output/
+us_market/data/
+us_market/history/
+
+# Chatbot test data
+chatbot/data/
+
+# Crypto analytics cache
+crypto-analytics/crypto_market/vcp_backtest/cache/
+
+# Spring Boot / Gradle
+backend/.gradle/
+backend/build/
+backend/bin/
+*.class
+*.jar
+!backend/gradle/wrapper/gradle-wrapper.jar
+
+# Misc
+.claude/
+*.bak
+*.pid
+*.lock
+nul
+*.db
+us_market/output/
+
+# Trading skills reports (generated output)
+reports/
+
+# Temp scripts
+fix_path_issue.bat
+kill_zombies.ps1
+schtask_result.txt
+
+.vercel
+backend/start.bat

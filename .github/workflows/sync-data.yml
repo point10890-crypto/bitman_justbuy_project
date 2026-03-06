@@ -1,0 +1,160 @@
+name: Sync Dashboard Data
+
+on:
+  schedule:
+    # UTC 시간 (KST = UTC + 9)
+    - cron: '30 22 * * *'      # 매일 07:30 KST — 전체 동기화
+    - cron: '30 19 * * 1-5'    # 평일 04:30 KST — US 업데이트 후
+    - cron: '40 6 * * 1-5'     # 평일 15:40 KST — KR 종가베팅 후
+    - cron: '30 7 * * 1-5'     # 평일 16:30 KST — KR 수급/VCP 후
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: 'Sync scope'
+        required: false
+        default: 'all'
+        type: choice
+        options: [all, kr, us, crypto]
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wake up Render
+        run: |
+          echo "=== Waking up Render ==="
+          for i in 1 2 3; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 60 \
+              https://closing-bet-api.onrender.com/api/health 2>/dev/null || echo "000")
+            echo "  Ping $i: HTTP $CODE"
+            if [ "$CODE" = "200" ]; then
+              echo "  Render is awake!"
+              break
+            fi
+            sleep 30
+          done
+
+      - name: Check data freshness
+        id: freshness
+        continue-on-error: true
+        run: |
+          RESPONSE=$(curl -s --max-time 15 \
+            https://closing-bet-api.onrender.com/api/system/last-update 2>/dev/null || echo "{}")
+          echo "Last update response: $RESPONSE"
+          # Only write to output if response is valid JSON (not HTML 404)
+          if echo "$RESPONSE" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+            echo "response=$RESPONSE" >> $GITHUB_OUTPUT
+          else
+            echo "response={}" >> $GITHUB_OUTPUT
+            echo "Warning: last-update endpoint not available, continuing anyway"
+          fi
+
+      - name: Fetch API snapshots
+        run: |
+          RENDER_URL="https://closing-bet-api.onrender.com"
+          SNAPSHOT_DIR="frontend/data-snapshot"
+          mkdir -p "$SNAPSHOT_DIR"
+
+          OK=0
+          FAIL=0
+
+          fetch_endpoint() {
+            local endpoint="$1"
+            local filename="$2"
+            local HTTP_CODE
+
+            HTTP_CODE=$(curl -s -o "$SNAPSHOT_DIR/$filename" \
+              -w "%{http_code}" \
+              --max-time 30 \
+              "$RENDER_URL$endpoint" 2>/dev/null || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              SIZE=$(wc -c < "$SNAPSHOT_DIR/$filename" 2>/dev/null || echo "0")
+              echo "  [OK]   $filename ($SIZE bytes)"
+              OK=$((OK+1))
+            else
+              echo "  [FAIL] $filename (HTTP $HTTP_CODE)"
+              rm -f "$SNAPSHOT_DIR/$filename"
+              FAIL=$((FAIL+1))
+            fi
+          }
+
+          echo "=== KR Market ==="
+          fetch_endpoint "/api/kr/signals"             "kr-signals.json"
+          fetch_endpoint "/api/kr/ai-analysis"         "kr-ai-analysis.json"
+          fetch_endpoint "/api/kr/vcp-stats"           "kr-vcp-stats.json"
+          fetch_endpoint "/api/kr/vcp-history?days=90" "kr-vcp-history.json"
+          fetch_endpoint "/api/kr/market-gate"         "kr-market-gate.json"
+          fetch_endpoint "/api/kr/backtest-summary"    "kr-backtest-summary.json"
+          fetch_endpoint "/api/kr/jongga-v2/latest"    "kr-jongga-v2-latest.json"
+          fetch_endpoint "/api/kr/jongga-v2/dates"     "kr-jongga-v2-dates.json"
+
+          echo "=== US Market ==="
+          fetch_endpoint "/api/us/portfolio"               "us-portfolio.json"
+          fetch_endpoint "/api/us/market-gate"             "us-market-gate.json"
+          fetch_endpoint "/api/us/smart-money"             "us-smart-money.json"
+          fetch_endpoint "/api/us/decision-signal"         "us-decision-signal.json"
+          fetch_endpoint "/api/us/market-briefing"         "us-market-briefing.json"
+          fetch_endpoint "/api/us/macro-analysis"          "us-macro-analysis.json"
+          fetch_endpoint "/api/us/market-regime"           "us-market-regime.json"
+          fetch_endpoint "/api/us/index-prediction"        "us-index-prediction.json"
+          fetch_endpoint "/api/us/risk-alerts"             "us-risk-alerts.json"
+          fetch_endpoint "/api/us/sector-rotation"         "us-sector-rotation.json"
+          fetch_endpoint "/api/us/backtest"                "us-backtest.json"
+          fetch_endpoint "/api/us/top-picks-report"        "us-top-picks-report.json"
+          fetch_endpoint "/api/us/cumulative-performance"  "us-cumulative-performance.json"
+          fetch_endpoint "/api/us/earnings-impact"         "us-earnings-impact.json"
+          fetch_endpoint "/api/us/heatmap-data"            "us-heatmap-data.json"
+          fetch_endpoint "/api/us/institutional"           "us-institutional.json"
+          fetch_endpoint "/api/us/etf-flows"               "us-etf-flows.json"
+          fetch_endpoint "/api/us/insider-trading"         "us-insider-trading.json"
+          fetch_endpoint "/api/us/options-flow"            "us-options-flow.json"
+          fetch_endpoint "/api/us/news-analysis"           "us-news-analysis.json"
+          fetch_endpoint "/api/us/super-performance"       "us-super-performance.json"
+          fetch_endpoint "/api/us/track-record"            "us-track-record.json"
+          fetch_endpoint "/api/us/calendar"                "us-calendar.json"
+
+          echo "=== Crypto ==="
+          fetch_endpoint "/api/crypto/overview"         "crypto-overview.json"
+          fetch_endpoint "/api/crypto/dominance"        "crypto-dominance.json"
+          fetch_endpoint "/api/crypto/market-gate"      "crypto-market-gate.json"
+          fetch_endpoint "/api/crypto/briefing"         "crypto-briefing.json"
+          fetch_endpoint "/api/crypto/prediction"       "crypto-prediction.json"
+          fetch_endpoint "/api/crypto/risk"             "crypto-risk.json"
+          fetch_endpoint "/api/crypto/lead-lag"         "crypto-lead-lag.json"
+          fetch_endpoint "/api/crypto/vcp-signals"      "crypto-vcp-signals.json"
+          fetch_endpoint "/api/crypto/backtest-summary" "crypto-backtest-summary.json"
+
+          echo "=== Economy ==="
+          fetch_endpoint "/api/econ/overview"           "econ-overview.json"
+          fetch_endpoint "/api/econ/yield-curve"        "econ-yield-curve.json"
+          fetch_endpoint "/api/econ/fear-greed"         "econ-fear-greed.json"
+
+          # Health meta
+          echo "{\"status\":\"ok\",\"mode\":\"github-actions\",\"updated_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"endpoints_ok\":$OK,\"endpoints_fail\":$FAIL}" \
+            > "$SNAPSHOT_DIR/health.json"
+
+          echo ""
+          echo "=== Summary: $OK OK, $FAIL FAIL ==="
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add frontend/data-snapshot/
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            TIMESTAMP=$(TZ=Asia/Seoul date +"%Y-%m-%d %H:%M KST")
+            git commit -m "data: auto-sync dashboard snapshots ($TIMESTAMP)"
+            git push
+            echo "Pushed snapshot update — Vercel auto-deploy triggered"
+          fi
