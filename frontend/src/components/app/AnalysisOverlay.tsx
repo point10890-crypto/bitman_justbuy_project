@@ -30,7 +30,7 @@ export function AnalysisOverlay({ query, loading, error, result, onClose }: Anal
           {loading && <span className="text-[9px] font-bold px-2 py-0.5 rounded-full animate-pulse" style={{ backgroundColor: 'rgba(66,165,245,0.12)', color: 'var(--color-neutral)' }}>분석중...</span>}
         </div>
         {/* 센터 타이틀 */}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-1" style={{ pointerEvents: 'none' }}>
+        <div className="absolute left-[58%] top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-1" style={{ pointerEvents: 'none' }}>
           <span className="animate-gold-shimmer font-black text-[14px]" style={{ filter: 'drop-shadow(0 0 5px rgba(255,215,0,0.35))' }}>BitMan</span>
           <span className="font-bold text-[13px]" style={{ color: '#E8E0D0' }}>오늘</span>
           <span className="font-black text-[13px]" style={{ color: '#00C853', filter: 'drop-shadow(0 0 4px rgba(0,200,83,0.3))' }}>뭐사?</span>
