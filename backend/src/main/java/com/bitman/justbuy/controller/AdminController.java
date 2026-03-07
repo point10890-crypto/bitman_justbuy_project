@@ -94,16 +94,26 @@ public class AdminController {
         result.put("timestamp", Instant.now().toString());
 
         // AI 에이전트 상태
-        Map<String, Object> agentStatus = new LinkedHashMap<>();
-        for (AiAgent agent : agents) {
-            agentStatus.put(agent.name(), Map.of("available", agent.isAvailable()));
+        try {
+            Map<String, Object> agentStatus = new LinkedHashMap<>();
+            for (AiAgent agent : agents) {
+                agentStatus.put(agent.name(), Map.of("available", agent.isAvailable()));
+            }
+            result.put("agents", agentStatus);
+            result.put("totalAgents", agents.size());
+            result.put("availableAgents", agents.stream().filter(AiAgent::isAvailable).count());
+        } catch (Exception e) {
+            result.put("agents", Map.of());
+            result.put("totalAgents", 0);
+            result.put("availableAgents", 0);
         }
-        result.put("agents", agentStatus);
-        result.put("totalAgents", agents.size());
-        result.put("availableAgents", agents.stream().filter(AiAgent::isAvailable).count());
 
         // 캐시 상태
-        result.put("cache", analysisService.getCacheStatus());
+        try {
+            result.put("cache", analysisService.getCacheStatus());
+        } catch (Exception e) {
+            result.put("cache", Map.of("error", e.getMessage() != null ? e.getMessage() : "unknown"));
+        }
 
         // 스케줄러 상태
         result.put("schedulerEnabled", precomputeScheduler != null);

@@ -124,44 +124,49 @@ public class AnalysisService {
             long ttlMinutes = entry.getValue();
             Map<String, Object> modeStatus = new LinkedHashMap<>();
 
-            Path file = dataDir.resolve(mode + ".json");
-            boolean exists = Files.exists(file);
-            modeStatus.put("exists", exists);
+            try {
+                Path file = dataDir.resolve(mode + ".json");
+                boolean exists = Files.exists(file);
+                modeStatus.put("exists", exists);
 
-            if (exists) {
-                try {
-                    String json = Files.readString(file);
-                    AnalysisResponse data = mapper.readValue(json, AnalysisResponse.class);
+                if (exists) {
+                    try {
+                        String json = Files.readString(file);
+                        AnalysisResponse data = mapper.readValue(json, AnalysisResponse.class);
 
-                    if (data.updatedAt() != null) {
-                        Instant updatedAt = Instant.parse(data.updatedAt());
-                        long elapsed = Duration.between(updatedAt, Instant.now()).toMinutes();
-                        boolean valid = elapsed <= ttlMinutes;
+                        if (data.updatedAt() != null) {
+                            Instant updatedAt = Instant.parse(data.updatedAt());
+                            long elapsed = Duration.between(updatedAt, Instant.now()).toMinutes();
+                            boolean valid = elapsed <= ttlMinutes;
 
-                        modeStatus.put("valid", valid);
-                        modeStatus.put("updatedAt", data.updatedAt());
-                        modeStatus.put("elapsedMinutes", elapsed);
-                        modeStatus.put("ttlMinutes", ttlMinutes);
-                    } else {
+                            modeStatus.put("valid", valid);
+                            modeStatus.put("updatedAt", data.updatedAt());
+                            modeStatus.put("elapsedMinutes", elapsed);
+                        } else {
+                            modeStatus.put("valid", false);
+                            modeStatus.put("updatedAt", "N/A");
+                            modeStatus.put("elapsedMinutes", -1L);
+                        }
+                    } catch (Exception e) {
+                        log.warn("[CacheStatus] {} 파일 읽기 실패: {}", mode, e.getMessage());
                         modeStatus.put("valid", false);
-                        modeStatus.put("updatedAt", null);
-                        modeStatus.put("elapsedMinutes", null);
-                        modeStatus.put("ttlMinutes", ttlMinutes);
+                        modeStatus.put("updatedAt", "error");
+                        modeStatus.put("elapsedMinutes", -1L);
                     }
-                } catch (Exception e) {
-                    log.warn("[CacheStatus] {} 파일 읽기 실패: {}", mode, e.getMessage());
+                } else {
                     modeStatus.put("valid", false);
-                    modeStatus.put("updatedAt", null);
-                    modeStatus.put("elapsedMinutes", null);
-                    modeStatus.put("ttlMinutes", ttlMinutes);
+                    modeStatus.put("updatedAt", "N/A");
+                    modeStatus.put("elapsedMinutes", -1L);
                 }
-            } else {
+            } catch (Exception e) {
+                log.error("[CacheStatus] {} 상태 확인 실패: {}", mode, e.getMessage());
+                modeStatus.put("exists", false);
                 modeStatus.put("valid", false);
-                modeStatus.put("updatedAt", null);
-                modeStatus.put("elapsedMinutes", null);
-                modeStatus.put("ttlMinutes", ttlMinutes);
+                modeStatus.put("updatedAt", "error");
+                modeStatus.put("elapsedMinutes", -1L);
             }
 
+            modeStatus.put("ttlMinutes", ttlMinutes);
             status.put(mode, modeStatus);
         }
 

@@ -24,6 +24,7 @@ public class PrecomputeScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(PrecomputeScheduler.class);
     private final AnalysisService analysisService;
+    private final TelegramNotifier telegramNotifier;
     private final Map<String, String> lastRunTimes = new ConcurrentHashMap<>();
 
     /** 서버 시작 시 캐시에 데이터 없는 모드를 자동 실행 */
@@ -34,9 +35,12 @@ public class PrecomputeScheduler {
         "수급분석", "오늘 수급 현황 분석"
     );
 
-    public PrecomputeScheduler(AnalysisService analysisService) {
+    public PrecomputeScheduler(AnalysisService analysisService,
+                               @org.springframework.beans.factory.annotation.Autowired(required = false)
+                               TelegramNotifier telegramNotifier) {
         this.analysisService = analysisService;
-        log.info("[Scheduler] Initialized - precompute schedules active (KST)");
+        this.telegramNotifier = telegramNotifier;
+        log.info("[Scheduler] Initialized - precompute schedules active (KST), telegram={}", telegramNotifier != null);
     }
 
     /** 서버 시작 후 캐시 없는 모드 자동 분석 */
@@ -50,6 +54,8 @@ public class PrecomputeScheduler {
         try { Thread.sleep(30_000); } catch (InterruptedException e) { return; }
 
         log.info("[Scheduler] 🚀 서버 시작 - 캐시 확인 중...");
+        int success = 0;
+        int total = 0;
         for (var entry : STARTUP_MODES.entrySet()) {
             String mode = entry.getKey();
             String query = entry.getValue();
@@ -57,15 +63,23 @@ public class PrecomputeScheduler {
                 var cached = analysisService.getPrecomputed(mode);
                 if (cached != null) {
                     log.info("[Scheduler] ✅ {} - 캐시 유효, 건너뜀", mode);
+                    success++;
+                    total++;
                     continue;
                 }
                 log.info("[Scheduler] ▶ {} - 캐시 없음, 자동 실행", mode);
+                total++;
                 execute(mode, query);
+                success++;
             } catch (Exception e) {
                 log.error("[Scheduler] ❌ {} 시작 시 실행 실패: {}", mode, e.getMessage());
             }
         }
         log.info("[Scheduler] 🏁 시작 시 프리컴퓨트 완료");
+
+        if (telegramNotifier != null) {
+            telegramNotifier.sendStartupComplete(success, total);
+        }
     }
 
     /** 오늘뭐사: 평일 오전 8시, 휴장일 제외 (결과 유효: 다음날 07:50까지) */
@@ -124,8 +138,18 @@ public class PrecomputeScheduler {
             log.info("[Scheduler] \u2705 {} \uc644\ub8cc ({}ms, {}/{} agents)",
                 mode, result.metadata().totalDurationMs(),
                 result.metadata().agentsSucceeded(), result.metadata().agentsUsed());
+
+            if (telegramNotifier != null) {
+                telegramNotifier.sendAnalysisComplete(mode,
+                    result.metadata().totalDurationMs(),
+                    result.metadata().agentsSucceeded(),
+                    result.metadata().agentsUsed());
+            }
         } catch (Exception e) {
             log.error("[Scheduler] \u274C {} \uc2e4\ud328: {}", mode, e.getMessage());
+            if (telegramNotifier != null) {
+                telegramNotifier.sendAnalysisFailed(mode, e.getMessage());
+            }
         }
     }
 
