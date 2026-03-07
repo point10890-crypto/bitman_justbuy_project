@@ -6,7 +6,8 @@ import GoldButton from '../components/common/GoldButton'
 import FormInput from '../components/common/FormInput'
 
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
-const TELEGRAM_URL = 'https://t.me/+411gMUrGnNc2YzU1'
+const _TELEGRAM_URL = 'https://t.me/+411gMUrGnNc2YzU1'
+void _TELEGRAM_URL
 
 type EditMode = 'none' | 'profile' | 'password'
 

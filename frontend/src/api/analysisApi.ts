@@ -1,4 +1,5 @@
 /** 분석 API 클라이언트 — Express 백엔드 경유 Multi-Agent */
+import { API_BASE } from './config'
 
 export interface AgentInfo {
   agent: 'claude' | 'gemini' | 'chatgpt' | 'perplexity' | 'grok'
@@ -58,7 +59,7 @@ export async function fetchPrecomputed(mode: string, token?: string): Promise<An
   try {
     const headers: HeadersInit = {}
     if (token) headers['Authorization'] = `Bearer ${token}`
-    const res = await fetch(`/api/analysis/${encodeURIComponent(mode)}`, { headers })
+    const res = await fetch(`${API_BASE}/api/analysis/${encodeURIComponent(mode)}`, { headers })
     if (res.status === 404) return null
     if (!res.ok) throw new Error(`API error ${res.status}`)
     const data = await res.json()
@@ -72,7 +73,7 @@ export async function fetchPrecomputed(mode: string, token?: string): Promise<An
 export async function fetchLiveAnalysis(query: string, mode: string, token?: string): Promise<AnalysisResponse> {
   const headers: HeadersInit = { 'Content-Type': 'application/json' }
   if (token) headers['Authorization'] = `Bearer ${token}`
-  const res = await fetch('/api/analysis/live', {
+  const res = await fetch(`${API_BASE}/api/analysis/live`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ query, mode }),
