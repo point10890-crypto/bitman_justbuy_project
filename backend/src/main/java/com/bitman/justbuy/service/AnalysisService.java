@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -109,6 +110,62 @@ public class AnalysisService {
         } catch (IOException e) {
             log.error("Failed to save analysis for {}: {}", mode, e.getMessage());
         }
+    }
+
+    /**
+     * 각 모드별 캐시 파일 상태를 반환합니다.
+     * exists, valid, updatedAt, elapsedMinutes, ttlMinutes 정보를 포함합니다.
+     */
+    public Map<String, Map<String, Object>> getCacheStatus() {
+        Map<String, Map<String, Object>> status = new LinkedHashMap<>();
+
+        for (var entry : MODE_TTL_MINUTES.entrySet()) {
+            String mode = entry.getKey();
+            long ttlMinutes = entry.getValue();
+            Map<String, Object> modeStatus = new LinkedHashMap<>();
+
+            Path file = dataDir.resolve(mode + ".json");
+            boolean exists = Files.exists(file);
+            modeStatus.put("exists", exists);
+
+            if (exists) {
+                try {
+                    String json = Files.readString(file);
+                    AnalysisResponse data = mapper.readValue(json, AnalysisResponse.class);
+
+                    if (data.updatedAt() != null) {
+                        Instant updatedAt = Instant.parse(data.updatedAt());
+                        long elapsed = Duration.between(updatedAt, Instant.now()).toMinutes();
+                        boolean valid = elapsed <= ttlMinutes;
+
+                        modeStatus.put("valid", valid);
+                        modeStatus.put("updatedAt", data.updatedAt());
+                        modeStatus.put("elapsedMinutes", elapsed);
+                        modeStatus.put("ttlMinutes", ttlMinutes);
+                    } else {
+                        modeStatus.put("valid", false);
+                        modeStatus.put("updatedAt", null);
+                        modeStatus.put("elapsedMinutes", null);
+                        modeStatus.put("ttlMinutes", ttlMinutes);
+                    }
+                } catch (Exception e) {
+                    log.warn("[CacheStatus] {} 파일 읽기 실패: {}", mode, e.getMessage());
+                    modeStatus.put("valid", false);
+                    modeStatus.put("updatedAt", null);
+                    modeStatus.put("elapsedMinutes", null);
+                    modeStatus.put("ttlMinutes", ttlMinutes);
+                }
+            } else {
+                modeStatus.put("valid", false);
+                modeStatus.put("updatedAt", null);
+                modeStatus.put("elapsedMinutes", null);
+                modeStatus.put("ttlMinutes", ttlMinutes);
+            }
+
+            status.put(mode, modeStatus);
+        }
+
+        return status;
     }
 
     public static class DuplicateAnalysisException extends RuntimeException {

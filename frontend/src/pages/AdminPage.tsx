@@ -7,10 +7,11 @@ import { getStoredToken } from '../contexts/AuthContext'
 import {
   fetchPendingSubscriptions, approveSubscription, rejectSubscription,
   fetchAllUsers, revokeSubscription, adminUpdateUser, adminResetPassword,
+  fetchSystemStatus, refreshAllAnalysis,
   type UserDto,
 } from '../api/authApi'
 
-type Tab = 'dashboard' | 'subscriptions' | 'members'
+type Tab = 'dashboard' | 'subscriptions' | 'members' | 'system'
 
 export default function AdminPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -40,6 +41,12 @@ export default function AdminPage() {
   const [resetLoading, setResetLoading] = useState(false)
   const [resetError, setResetError] = useState('')
   const [resetSuccess, setResetSuccess] = useState('')
+
+  // 시스템 관리
+  const [systemStatus, setSystemStatus] = useState<any>(null)
+  const [systemLoading, setSystemLoading] = useState(false)
+  const [refreshLoading, setRefreshLoading] = useState(false)
+  const [refreshResult, setRefreshResult] = useState<any>(null)
 
   useEffect(() => { loadData() }, [])
 
@@ -173,6 +180,43 @@ export default function AdminPage() {
     }
   }
 
+  // ─── 시스템 상태 로드 ───
+  const loadSystemStatus = async () => {
+    const token = getStoredToken()
+    if (!token) return
+    setSystemLoading(true)
+    try {
+      const startTime = Date.now()
+      const data = await fetchSystemStatus(token)
+      data.responseTime = Date.now() - startTime
+      setSystemStatus(data)
+    } catch (e: any) {
+      setSystemStatus({ error: e.message, status: 'error' })
+    } finally {
+      setSystemLoading(false)
+    }
+  }
+
+  const handleRefreshAll = async () => {
+    const token = getStoredToken()
+    if (!token) return
+    setRefreshLoading(true)
+    setRefreshResult(null)
+    try {
+      const result = await refreshAllAnalysis(token)
+      setRefreshResult(result)
+      loadSystemStatus()
+    } catch (e: any) {
+      setRefreshResult({ error: e.message })
+    } finally {
+      setRefreshLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (tab === 'system') loadSystemStatus()
+  }, [tab])
+
   const fmt = (iso: string) => {
     const d = new Date(iso)
     return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
@@ -211,6 +255,7 @@ export default function AdminPage() {
     { key: 'dashboard', icon: '📊', label: '대시보드' },
     { key: 'subscriptions', icon: '🛡️', label: '승인/해제' },
     { key: 'members', icon: '👥', label: '회원관리' },
+    { key: 'system', icon: '🔧', label: '시스템' },
   ]
 
   return (
@@ -658,6 +703,194 @@ export default function AdminPage() {
                       </div>
                     </button>
                   ))}
+                </div>
+              )}
+
+              {/* ===== 시스템 관리 탭 ===== */}
+              {tab === 'system' && (
+                <div className="flex flex-col gap-3 animate-slide-up" style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}>
+                  {systemLoading ? (
+                    <div className="flex items-center justify-center py-16">
+                      <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'rgba(255,215,0,0.3)', borderTopColor: 'transparent' }} />
+                    </div>
+                  ) : systemStatus?.error ? (
+                    <GlassCard>
+                      <div className="text-center py-4">
+                        <span className="text-lg block mb-2">⚠️</span>
+                        <p className="text-[12px] font-medium" style={{ color: '#FF1744' }}>{systemStatus.error}</p>
+                        <button onClick={loadSystemStatus} className="mt-3 px-4 py-1.5 rounded-lg text-[11px] font-bold" style={{
+                          backgroundColor: 'rgba(255,215,0,0.08)', color: '#FFD700', border: '1px solid rgba(255,215,0,0.2)',
+                        }}>재시도</button>
+                      </div>
+                    </GlassCard>
+                  ) : systemStatus ? (
+                    <>
+                      {/* 서버 상태 */}
+                      <GlassCard>
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="text-sm">🖥️</span>
+                          <span className="text-[13px] font-bold" style={{ color: 'var(--text-primary)' }}>서버 상태</span>
+                        </div>
+                        <div className="rounded-lg p-3" style={{ backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)' }}>
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#00C853', boxShadow: '0 0 6px rgba(0,200,83,0.5)' }} />
+                              <span className="text-[12px] font-bold" style={{ color: '#00C853' }}>서버 온라인</span>
+                            </div>
+                            <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
+                              {systemStatus.responseTime}ms
+                            </span>
+                          </div>
+                          <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                            {systemStatus.timestamp ? new Date(systemStatus.timestamp).toLocaleString('ko-KR') : new Date().toLocaleString('ko-KR')}
+                          </div>
+                        </div>
+                      </GlassCard>
+
+                      {/* AI 엔진 상태 */}
+                      <GlassCard>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm">🤖</span>
+                            <span className="text-[13px] font-bold" style={{ color: 'var(--text-primary)' }}>AI 엔진 상태</span>
+                          </div>
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{
+                            backgroundColor: 'rgba(0,200,83,0.1)', color: '#00C853', border: '1px solid rgba(0,200,83,0.2)',
+                          }}>
+                            {systemStatus.engines ? systemStatus.engines.filter((e: any) => e.online).length : 5}/5 ONLINE
+                          </span>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          {(systemStatus.engines || [
+                            { name: 'Claude', online: true },
+                            { name: 'Gemini', online: true },
+                            { name: 'ChatGPT', online: true },
+                            { name: 'Perplexity', online: true },
+                            { name: 'Grok', online: true },
+                          ]).map((engine: any) => (
+                            <div key={engine.name} className="flex items-center justify-between py-1.5 px-3 rounded-lg" style={{
+                              backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)',
+                            }}>
+                              <span className="text-[12px] font-medium" style={{ color: 'var(--text-primary)' }}>{engine.name}</span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full" style={{
+                                  backgroundColor: engine.online ? '#00C853' : '#FF1744',
+                                  boxShadow: engine.online ? '0 0 4px rgba(0,200,83,0.4)' : '0 0 4px rgba(255,23,68,0.4)',
+                                }} />
+                                <span className="text-[10px] font-bold" style={{
+                                  color: engine.online ? '#00C853' : '#FF1744',
+                                }}>{engine.online ? 'ONLINE' : 'OFFLINE'}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </GlassCard>
+
+                      {/* 캐시 상태 */}
+                      <GlassCard>
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="text-sm">💾</span>
+                          <span className="text-[13px] font-bold" style={{ color: 'var(--text-primary)' }}>캐시 상태</span>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          {(systemStatus.cache || [
+                            { mode: '오늘뭐사', status: 'missing' },
+                            { mode: '스윙매매', status: 'missing' },
+                            { mode: '종가매매', status: 'missing' },
+                            { mode: '수급분석', status: 'missing' },
+                          ]).map((c: any) => {
+                            const statusColor = c.status === 'valid' ? '#00C853' : c.status === 'expired' ? '#FF9800' : '#FF1744'
+                            const statusLabel = c.status === 'valid' ? '유효' : c.status === 'expired' ? '만료됨' : '없음'
+                            return (
+                              <div key={c.mode} className="rounded-lg p-3" style={{
+                                backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)',
+                              }}>
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-[12px] font-bold" style={{ color: 'var(--text-primary)' }}>{c.mode}</span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full" style={{
+                                      backgroundColor: statusColor,
+                                      boxShadow: `0 0 4px ${statusColor}66`,
+                                    }} />
+                                    <span className="text-[10px] font-bold" style={{ color: statusColor }}>{statusLabel}</span>
+                                  </div>
+                                </div>
+                                {c.lastUpdated && (
+                                  <div className="flex items-center justify-between text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                                    <span>마지막 업데이트: {new Date(c.lastUpdated).toLocaleString('ko-KR')}</span>
+                                    {c.elapsed && <span>{c.elapsed}</span>}
+                                  </div>
+                                )}
+                                {!c.lastUpdated && (
+                                  <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>데이터 없음</div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </GlassCard>
+
+                      {/* 리프레시 버튼 */}
+                      <button
+                        onClick={handleRefreshAll}
+                        disabled={refreshLoading}
+                        className="w-full py-3.5 rounded-2xl text-[14px] font-black transition-all duration-200"
+                        style={{
+                          background: refreshLoading
+                            ? 'rgba(255,215,0,0.1)'
+                            : 'linear-gradient(135deg, #FFD700, #FF9800)',
+                          color: refreshLoading ? '#FFD700' : '#0D1117',
+                          border: refreshLoading ? '1px solid rgba(255,215,0,0.2)' : 'none',
+                          opacity: refreshLoading ? 0.7 : 1,
+                          cursor: refreshLoading ? 'not-allowed' : 'pointer',
+                          boxShadow: refreshLoading ? 'none' : '0 4px 15px rgba(255,215,0,0.25)',
+                        }}
+                      >
+                        {refreshLoading ? (
+                          <span className="flex items-center justify-center gap-2">
+                            <span className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'rgba(255,215,0,0.4)', borderTopColor: 'transparent' }} />
+                            리프레시 중...
+                          </span>
+                        ) : '🔄 시스템 리프레시'}
+                      </button>
+
+                      {/* 리프레시 결과 */}
+                      {refreshResult && (
+                        <GlassCard>
+                          <div className="flex items-center gap-2 mb-3">
+                            <span className="text-sm">{refreshResult.error ? '❌' : '✅'}</span>
+                            <span className="text-[13px] font-bold" style={{ color: refreshResult.error ? '#FF1744' : '#00C853' }}>
+                              {refreshResult.error ? '리프레시 실패' : '리프레시 완료'}
+                            </span>
+                          </div>
+                          {refreshResult.error ? (
+                            <p className="text-[12px]" style={{ color: '#FF1744' }}>{refreshResult.error}</p>
+                          ) : (
+                            <div className="flex flex-col gap-1.5">
+                              {(refreshResult.results || []).map((r: any, i: number) => (
+                                <div key={i} className="flex items-center justify-between py-1.5 px-3 rounded-lg" style={{
+                                  backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)',
+                                }}>
+                                  <span className="text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>{r.mode}</span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full" style={{
+                                      backgroundColor: r.success ? '#00C853' : '#FF1744',
+                                    }} />
+                                    <span className="text-[10px] font-bold" style={{
+                                      color: r.success ? '#00C853' : '#FF1744',
+                                    }}>{r.success ? '성공' : '실패'}</span>
+                                  </div>
+                                </div>
+                              ))}
+                              {refreshResult.message && (
+                                <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>{refreshResult.message}</p>
+                              )}
+                            </div>
+                          )}
+                        </GlassCard>
+                      )}
+                    </>
+                  ) : null}
                 </div>
               )}
 

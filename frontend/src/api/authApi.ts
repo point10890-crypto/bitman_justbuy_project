@@ -167,3 +167,22 @@ export async function adminResetPassword(token: string, userId: string, newPassw
   })
   if (!res.ok) await handleError(res)
 }
+
+// ─── Admin: System ───
+
+export async function fetchSystemStatus(token: string) {
+  const res = await fetch(`${API_BASE}/api/admin/system/status`, {
+    headers: authHeaders(token),
+  })
+  if (!res.ok) await handleError(res)
+  return res.json()
+}
+
+export async function refreshAllAnalysis(token: string) {
+  const res = await fetch(`${API_BASE}/api/admin/system/refresh-all`, {
+    method: 'POST',
+    headers: authHeaders(token),
+  })
+  if (!res.ok) await handleError(res)
+  return res.json()
+}

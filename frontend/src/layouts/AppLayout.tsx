@@ -210,6 +210,10 @@ export default function AppLayout() {
                     <div className="menu-item-icon" style={{ background: 'rgba(255,152,0,0.1)' }}>👥</div>
                     <div><div>회원 관리</div><div className="menu-item-desc">전체 회원 목록 · 상태</div></div>
                   </button>
+                  <button className="menu-item" onClick={() => { closeMenu(); navigate('/admin?tab=system') }}>
+                    <div className="menu-item-icon" style={{ background: 'rgba(255,215,0,0.1)' }}>🔧</div>
+                    <div><div>시스템 관리</div><div className="menu-item-desc">서버 상태 · 리프레시</div></div>
+                  </button>
                 </>
               )}
 

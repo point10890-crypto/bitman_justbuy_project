@@ -14,6 +14,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -126,6 +127,30 @@ public class PrecomputeScheduler {
         } catch (Exception e) {
             log.error("[Scheduler] \u274C {} \uc2e4\ud328: {}", mode, e.getMessage());
         }
+    }
+
+    /**
+     * 모든 STARTUP_MODES를 순차 실행하고, 각 모드별 결과를 반환합니다.
+     * 한 모드의 실패가 다른 모드 실행을 막지 않습니다.
+     */
+    public Map<String, String> refreshAll() {
+        Map<String, String> results = new LinkedHashMap<>();
+        log.info("[Scheduler] 전체 새로고침 시작");
+
+        for (var entry : STARTUP_MODES.entrySet()) {
+            String mode = entry.getKey();
+            String query = entry.getValue();
+            try {
+                execute(mode, query);
+                results.put(mode, "success");
+            } catch (Exception e) {
+                log.error("[Scheduler] {} 새로고침 실패: {}", mode, e.getMessage());
+                results.put(mode, "error: " + e.getMessage());
+            }
+        }
+
+        log.info("[Scheduler] 전체 새로고침 완료: {}", results);
+        return results;
     }
 
     public Map<String, String> getLastRunTimes() {
