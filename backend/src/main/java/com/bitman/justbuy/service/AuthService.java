@@ -11,6 +11,7 @@ import com.bitman.justbuy.entity.User;
 import com.bitman.justbuy.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,9 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+
+    @Value("${bitman.admin.email:}")
+    private String adminEmail;
 
     public AuthService(UserRepository userRepository,
                        PasswordEncoder passwordEncoder,
@@ -45,8 +49,10 @@ public class AuthService {
             passwordEncoder.encode(request.password())
         );
 
-        // 첫 번째 가입자는 자동으로 ADMIN + 무기한 PRO
-        if (userRepository.count() == 0) {
+        // 첫 번째 가입자 또는 지정된 관리자 이메일은 ADMIN + 무기한 PRO
+        if (userRepository.count() == 0
+                || (adminEmail != null && !adminEmail.isBlank()
+                    && request.email().equalsIgnoreCase(adminEmail.trim()))) {
             user.setRole(Role.ADMIN);
             user.setSubscription(SubscriptionStatus.PRO);
             user.setSubscriptionEndDate(null);
