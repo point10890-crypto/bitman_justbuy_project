@@ -92,8 +92,16 @@ public class AuthService {
         return UserDto.from(user);
     }
 
-    /** ADMIN은 항상 무기한 PRO 보장 */
+    /** 관리자 이메일이면 ADMIN 승격 + ADMIN은 항상 무기한 PRO 보장 */
     private void ensureAdminPro(User user) {
+        // 관리자 이메일인데 아직 ADMIN이 아니면 승격
+        if (adminEmail != null && !adminEmail.isBlank()
+                && user.getEmail().equalsIgnoreCase(adminEmail.trim())
+                && user.getRole() != Role.ADMIN) {
+            user.setRole(Role.ADMIN);
+            log.info("User promoted to ADMIN: {}", user.getEmail());
+        }
+
         if (user.getRole() == Role.ADMIN && user.getSubscription() != SubscriptionStatus.PRO) {
             user.setSubscription(SubscriptionStatus.PRO);
             user.setSubscriptionEndDate(null);
