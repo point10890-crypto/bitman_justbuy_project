@@ -2,9 +2,11 @@ package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.util.KoreanMarketCalendar;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -23,9 +25,46 @@ public class PrecomputeScheduler {
     private final AnalysisService analysisService;
     private final Map<String, String> lastRunTimes = new ConcurrentHashMap<>();
 
+    /** 서버 시작 시 캐시에 데이터 없는 모드를 자동 실행 */
+    private static final Map<String, String> STARTUP_MODES = Map.of(
+        "오늘뭐사", "오늘 뭐 살까? 당일 매매 추천",
+        "스윙매매", "스윙매매 후보 종목 분석",
+        "종가매매", "종가매매 후보 종목 분석",
+        "수급분석", "오늘 수급 현황 분석"
+    );
+
     public PrecomputeScheduler(AnalysisService analysisService) {
         this.analysisService = analysisService;
         log.info("[Scheduler] Initialized - precompute schedules active (KST)");
+    }
+
+    /** 서버 시작 후 캐시 없는 모드 자동 분석 */
+    @PostConstruct
+    public void onStartup() {
+        new Thread(this::runStartupPrecompute, "startup-precompute").start();
+    }
+
+    private void runStartupPrecompute() {
+        // 서버 완전 시작 후 30초 대기
+        try { Thread.sleep(30_000); } catch (InterruptedException e) { return; }
+
+        log.info("[Scheduler] 🚀 서버 시작 - 캐시 확인 중...");
+        for (var entry : STARTUP_MODES.entrySet()) {
+            String mode = entry.getKey();
+            String query = entry.getValue();
+            try {
+                var cached = analysisService.getPrecomputed(mode);
+                if (cached != null) {
+                    log.info("[Scheduler] ✅ {} - 캐시 유효, 건너뜀", mode);
+                    continue;
+                }
+                log.info("[Scheduler] ▶ {} - 캐시 없음, 자동 실행", mode);
+                execute(mode, query);
+            } catch (Exception e) {
+                log.error("[Scheduler] ❌ {} 시작 시 실행 실패: {}", mode, e.getMessage());
+            }
+        }
+        log.info("[Scheduler] 🏁 시작 시 프리컴퓨트 완료");
     }
 
     /** 오늘뭐사: 평일 오전 8시, 휴장일 제외 (결과 유효: 다음날 07:50까지) */
