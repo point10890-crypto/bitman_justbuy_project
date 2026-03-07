@@ -140,10 +140,7 @@ public class PrecomputeScheduler {
                 result.metadata().agentsSucceeded(), result.metadata().agentsUsed());
 
             if (telegramNotifier != null) {
-                telegramNotifier.sendAnalysisComplete(mode,
-                    result.metadata().totalDurationMs(),
-                    result.metadata().agentsSucceeded(),
-                    result.metadata().agentsUsed());
+                telegramNotifier.sendAnalysisResult(mode, result);
             }
         } catch (Exception e) {
             log.error("[Scheduler] \u274C {} \uc2e4\ud328: {}", mode, e.getMessage());
