@@ -42,6 +42,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Public
                 .requestMatchers(new AntPathRequestMatcher("/api/health")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/api/market/**")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/api/auth/register"),
                                  new AntPathRequestMatcher("/api/auth/login")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/api/analysis/**")).authenticated()
