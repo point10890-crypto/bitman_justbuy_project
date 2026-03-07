@@ -25,12 +25,13 @@ function authHeaders(token: string): HeadersInit {
 }
 
 async function handleError(res: Response): Promise<never> {
+  const text = await res.text()
   let msg: string
   try {
-    const json = await res.json()
-    msg = json.error || JSON.stringify(json)
+    const json = JSON.parse(text)
+    msg = json.error || text
   } catch {
-    msg = await res.text()
+    msg = text || `HTTP ${res.status}`
   }
   throw new Error(msg)
 }
