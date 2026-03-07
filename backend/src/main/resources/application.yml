@@ -29,7 +29,7 @@ bitman:
     perplexity-api-key: ${PERPLEXITY_API_KEY:}
     grok-api-key: ${XAI_API_KEY:}
   cors:
-    allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,https://bitman-justbuy.pages.dev}
+    allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://localhost:5173,https://bitman-justbuy.pages.dev}
   storage:
     data-dir: ${STORAGE_DIR:./data}
   scheduler:
