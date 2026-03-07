@@ -29,8 +29,9 @@ dependencies {
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")
     runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.6")
 
-    // JPA + H2 (파일 기반 영구 저장)
+    // JPA + PostgreSQL (배포) + H2 (로컬 개발)
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    runtimeOnly("org.postgresql:postgresql")
     runtimeOnly("com.h2database:h2")
 
     // Validation

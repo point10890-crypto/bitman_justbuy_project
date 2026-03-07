@@ -11,4 +11,5 @@ WORKDIR /app
 COPY --from=build /app/build/libs/*.jar app.jar
 RUN mkdir -p /app/data
 EXPOSE 8080
+ENV H2_CONSOLE_ENABLED=false
 ENTRYPOINT ["java", "-jar", "app.jar"]
