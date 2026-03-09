@@ -11,6 +11,7 @@ import com.bitman.justbuy.entity.User;
 import com.bitman.justbuy.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -36,6 +37,19 @@ public class AuthService {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+    }
+
+    @PostConstruct
+    public void resetAdminPasswordOnStartup() {
+        if (adminEmail == null || adminEmail.isBlank()) return;
+        userRepository.findByEmail(adminEmail.trim()).ifPresent(user -> {
+            String defaultPassword = "test1234";
+            if (!passwordEncoder.matches(defaultPassword, user.getPasswordHash())) {
+                user.setPasswordHash(passwordEncoder.encode(defaultPassword));
+                userRepository.save(user);
+                log.info("Admin password reset to default on startup: {}", user.getEmail());
+            }
+        });
     }
 
     public AuthResponse register(RegisterRequest request) {
