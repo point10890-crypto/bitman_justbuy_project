@@ -69,6 +69,18 @@ export async function fetchPrecomputed(mode: string, token?: string): Promise<An
   }
 }
 
+/** 종목코드 리스트로 실시간 현재가 조회 (인증 불필요) */
+export async function fetchStockPrices(codes: string[]): Promise<Record<string, string>> {
+  if (codes.length === 0) return {}
+  try {
+    const res = await fetch(`${API_BASE}/api/market/prices?codes=${codes.join(',')}`)
+    if (!res.ok) return {}
+    return await res.json()
+  } catch {
+    return {}
+  }
+}
+
 /** 실시간 멀티에이전트 분석 트리거 */
 export async function fetchLiveAnalysis(query: string, mode: string, token?: string): Promise<AnalysisResponse> {
   const headers: HeadersInit = { 'Content-Type': 'application/json' }

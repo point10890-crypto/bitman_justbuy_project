@@ -1,4 +1,6 @@
+import { useState, useEffect } from 'react'
 import type { AnalysisResult } from '../../hooks/useAnalysis'
+import { fetchStockPrices } from '../../api/analysisApi'
 import { ReportRenderer } from './ReportRenderer'
 
 interface AnalysisOverlayProps {
@@ -148,6 +150,16 @@ interface StockPick {
 }
 
 function StockPickCards({ picks }: { picks: StockPick[] }) {
+  const [livePrices, setLivePrices] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const codes = picks.map(p => p.code).filter(Boolean)
+    if (codes.length === 0) return
+    fetchStockPrices(codes).then(prices => {
+      if (Object.keys(prices).length > 0) setLivePrices(prices)
+    })
+  }, [picks])
+
   const actionMap: Record<string, { bg: string; border: string; color: string; icon: string; label: string }> = {
     '매수': { bg: 'rgba(0,200,83,0.1)', border: 'rgba(0,200,83,0.3)', color: '#00C853', icon: '▲', label: 'BUY' },
     '매도': { bg: 'rgba(255,23,68,0.1)', border: 'rgba(255,23,68,0.3)', color: '#FF1744', icon: '▼', label: 'SELL' },
@@ -165,6 +177,9 @@ function StockPickCards({ picks }: { picks: StockPick[] }) {
       </div>
       {picks.map((pick, i) => {
         const ac = actionMap[pick.action] || defaultAction
+        const livePrice = livePrices[pick.code]
+        const displayPrice = livePrice || pick.currentPrice
+        const isLive = !!livePrice
         return (
           <div key={pick.code} className="relative overflow-hidden rounded-xl animate-slide-up" style={{ backgroundColor: ac.bg, border: `1px solid ${ac.border}`, padding: '10px 12px 10px 16px', animationDelay: `${i * 0.06}s`, animationFillMode: 'backwards' }}>
             <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl" style={{ backgroundColor: ac.color }} />
@@ -172,11 +187,16 @@ function StockPickCards({ picks }: { picks: StockPick[] }) {
               <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 font-black text-[11px]" style={{ backgroundColor: `${ac.color}20`, color: ac.color }}>{i + 1}</div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <span className="font-black text-[14px] truncate" style={{ color: 'var(--text-primary)' }}>{pick.name}</span>
+                  <span className="font-black text-[14px]" style={{ color: 'var(--text-primary)' }}>{pick.name}</span>
                   <span className="flex-shrink-0 px-1.5 py-0.5 rounded font-mono text-[9px] font-bold" style={{ backgroundColor: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)' }}>{pick.code}</span>
                 </div>
                 <div className="flex items-center gap-2.5 mt-0.5">
-                  {pick.currentPrice && <span className="text-[11px] font-bold" style={{ color: 'var(--text-primary)' }}>{pick.currentPrice}원</span>}
+                  {displayPrice && (
+                    <span className="text-[11px] font-bold" style={{ color: 'var(--text-primary)' }}>
+                      {displayPrice}원
+                      {isLive && <span className="ml-1 text-[8px] px-1 py-px rounded" style={{ backgroundColor: 'rgba(0,200,83,0.15)', color: '#00C853' }}>LIVE</span>}
+                    </span>
+                  )}
                   {pick.targetPrice && <span className="text-[9px]" style={{ color: '#00C853' }}>목표 {pick.targetPrice}원</span>}
                   {pick.stopLoss && <span className="text-[9px]" style={{ color: '#FF1744' }}>손절 {pick.stopLoss}원</span>}
                 </div>
