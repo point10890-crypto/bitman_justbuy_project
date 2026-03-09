@@ -57,6 +57,8 @@ public final class StockParser {
     private static final Pattern[] CODE_PATTERNS = {
         Pattern.compile("\uD83D\uDCCC\\s*([\\uAC00-\\uD7A3A-Za-z0-9\u00B7&\\s]{2,20}?)\\s*[\\(\\uFF08](\\d{6})[\\)\\uFF09]"),
         Pattern.compile("\\*\\*([\\uAC00-\\uD7A3A-Za-z0-9\u00B7&\\s]{2,20}?)\\s*[\\(\\uFF08](\\d{6})[\\)\\uFF09]\\*\\*"),
+        // 영문 접두어 종목명: HD현대중공업, KB금융, SK하이닉스, LG에너지 등
+        Pattern.compile("([A-Z]{1,6}[\\uAC00-\\uD7A3][\\uAC00-\\uD7A3A-Za-z0-9\u00B7&\\s]{0,15}?)\\s*[\\(\\uFF08](\\d{6})[\\)\\uFF09]"),
         Pattern.compile("([\\uAC00-\\uD7A3][\\uAC00-\\uD7A3A-Za-z0-9\u00B7&\\s]{1,15}?)\\s*[\\(\\uFF08](\\d{6})[\\)\\uFF09]"),
     };
 
