@@ -51,6 +51,9 @@ public final class StockParser {
         m.put("SK\uc2a4\ud018\uc5b4", "402340");
         m.put("\ud55c\ud654\uc194\ub8e8\uc158", "009830");
         m.put("\ub300\ud55c\ud56d\uacf5", "003490");
+        m.put("\ud14c\ud06c\uc719", "089030");
+        m.put("\uc0bc\uc131\uc804\uae30", "009150");
+        m.put("\ub354\uc874\ubc84\uc988", "199820"); m.put("\ub354\uc874", "199820");
         KNOWN_STOCKS = Collections.unmodifiableMap(m);
     }
 
@@ -61,6 +64,11 @@ public final class StockParser {
         Pattern.compile("([A-Z]{1,6}[\\uAC00-\\uD7A3][\\uAC00-\\uD7A3A-Za-z0-9\u00B7&\\s]{0,15}?)\\s*[\\(\\uFF08](\\d{6})[\\)\\uFF09]"),
         Pattern.compile("([\\uAC00-\\uD7A3][\\uAC00-\\uD7A3A-Za-z0-9\u00B7&\\s]{1,15}?)\\s*[\\(\\uFF08](\\d{6})[\\)\\uFF09]"),
     };
+
+    // 종목명 정제: 가격/숫자 접두어 제거 (예: "XXX원 테크윙" → "테크윙", "55,000원 삼성전자" → "삼성전자")
+    private static final Pattern NAME_PRICE_PREFIX = Pattern.compile("^(?:[0-9,X]+\\s*원\\s*)+");
+    // 종목명 정제: 후행 불필요 텍스트 제거
+    private static final Pattern NAME_SUFFIX_NOISE = Pattern.compile("\\s+(?:등|의|은|는|이|가|을|를|에|도|로|과|와)$");
 
     private static final Pattern CURRENT_PRICE = Pattern.compile("\ud604\uc7ac\uac00\\s*(?:\uc57d\\s*)?([0-9,]+(?:~[0-9,]+)?)\\s*\uc6d0");
     private static final Pattern TARGET_PRICE = Pattern.compile("(?:\ubaa9\ud45c\uac00|1\ucc28\\s*\ubaa9\ud45c)[:\\s]*(?:\uc57d\\s*)?([0-9,]+(?:~[0-9,]+)?)\\s*\uc6d0");
@@ -82,9 +90,9 @@ public final class StockParser {
         for (Pattern pattern : CODE_PATTERNS) {
             Matcher matcher = pattern.matcher(content);
             while (matcher.find()) {
-                String name = matcher.group(1).trim();
+                String name = cleanStockName(matcher.group(1).trim());
                 String code = matcher.group(2);
-                if (seen.contains(code)) continue;
+                if (name.isEmpty() || seen.contains(code)) continue;
                 seen.add(code);
 
                 String context = getContext(content, matcher.start(), 300);
@@ -126,6 +134,22 @@ public final class StockParser {
         }
 
         return picks.size() <= 10 ? picks : picks.subList(0, 10);
+    }
+
+    /** 종목명에서 가격 접두어·접미 노이즈 제거 */
+    private static String cleanStockName(String raw) {
+        if (raw == null || raw.isBlank()) return "";
+        // "XXX원 테크윙" → "테크윙", "55,000원 삼성전자" → "삼성전자"
+        String cleaned = NAME_PRICE_PREFIX.matcher(raw).replaceFirst("").trim();
+        // 후행 조사 제거
+        cleaned = NAME_SUFFIX_NOISE.matcher(cleaned).replaceFirst("").trim();
+        // KNOWN_STOCKS에 있으면 정식 이름 반환
+        for (var entry : KNOWN_STOCKS.entrySet()) {
+            if (cleaned.contains(entry.getKey())) {
+                return entry.getKey();
+            }
+        }
+        return cleaned;
     }
 
     private static String getContext(String content, int idx, int range) {

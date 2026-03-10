@@ -419,6 +419,16 @@ interface StockPickItem {
   reason?: string
 }
 
+/** 종목명 정제: 가격 접두어(XXX원, 55,000원 등) 제거 */
+function cleanPickName(name: string): string {
+  if (!name) return name
+  // "XXX원 테크윙" → "테크윙", "55,000원 삼성전자" → "삼성전자"
+  let cleaned = name.replace(/^(?:[0-9,X]+\s*원\s*)+/, '').trim()
+  // 후행 조사 제거
+  cleaned = cleaned.replace(/\s+(?:등|의|은|는|이|가|을|를|에|도|로|과|와)$/, '').trim()
+  return cleaned || name
+}
+
 function LiveStockPickCards({ picks }: { picks: StockPickItem[] }) {
   const [livePrices, setLivePrices] = useState<Record<string, string>>({})
 
@@ -457,7 +467,7 @@ function LiveStockPickCards({ picks }: { picks: StockPickItem[] }) {
               <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 font-black text-[11px]" style={{ backgroundColor: `${ac.color}20`, color: ac.color }}>{i + 1}</div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <span className="font-black text-[14px]" style={{ color: 'var(--text-primary)' }}>{pick.name}</span>
+                  <span className="font-black text-[14px]" style={{ color: 'var(--text-primary)' }}>{cleanPickName(pick.name)}</span>
                   <span className="flex-shrink-0 px-1.5 py-0.5 rounded font-mono text-[9px] font-bold" style={{ backgroundColor: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)' }}>{pick.code}</span>
                 </div>
                 <div className="flex items-center gap-2.5 mt-0.5">
