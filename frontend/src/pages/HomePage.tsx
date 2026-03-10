@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, type FormEvent } from 'react'
 import { useAnalysis } from '../hooks/useAnalysis'
 import { getRecentHistory, formatTimeAgo, type HistoryEntry } from '../lib/analysisHistory'
+import { fetchStockPrices } from '../api/analysisApi'
 
 function EngineBadge({ name, role, color }: { name: string; role: string; color: string }) {
   return (
@@ -375,47 +376,7 @@ export default function HomePage() {
                 </div>
 
                 {/* 종목 추천 카드 */}
-                {result.stockPicks && result.stockPicks.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
-                    <div className="flex items-center gap-2">
-                      <span className="text-base">🎯</span>
-                      <span className="text-[13px] font-black" style={{ color: 'var(--text-primary)' }}>추천 종목 TOP {result.stockPicks.length}</span>
-                      <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border-subtle)' }} />
-                    </div>
-                    {result.stockPicks.map((pick, i) => {
-                      const ac = {
-                        '매수': { bg: 'rgba(0,200,83,0.1)', border: 'rgba(0,200,83,0.3)', color: '#00C853', icon: '▲', label: 'BUY' },
-                        '매도': { bg: 'rgba(255,23,68,0.1)', border: 'rgba(255,23,68,0.3)', color: '#FF1744', icon: '▼', label: 'SELL' },
-                        '관망': { bg: 'rgba(255,152,0,0.1)', border: 'rgba(255,152,0,0.3)', color: '#FF9800', icon: '■', label: 'HOLD' },
-                        '주목': { bg: 'rgba(66,165,245,0.1)', border: 'rgba(66,165,245,0.3)', color: '#42A5F5', icon: '★', label: 'WATCH' },
-                      }[pick.action] || { bg: 'rgba(66,165,245,0.1)', border: 'rgba(66,165,245,0.3)', color: '#42A5F5', icon: '★', label: 'WATCH' }
-                      return (
-                        <div key={pick.code} className="relative overflow-hidden rounded-xl animate-slide-up" style={{ backgroundColor: ac.bg, border: `1px solid ${ac.border}`, padding: '10px 12px 10px 16px', animationDelay: `${i * 0.06}s`, animationFillMode: 'backwards' }}>
-                          <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl" style={{ backgroundColor: ac.color }} />
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 font-black text-[11px]" style={{ backgroundColor: `${ac.color}20`, color: ac.color }}>{i + 1}</div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-black text-[14px] truncate" style={{ color: 'var(--text-primary)' }}>{pick.name}</span>
-                                <span className="flex-shrink-0 px-1.5 py-0.5 rounded font-mono text-[9px] font-bold" style={{ backgroundColor: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)' }}>{pick.code}</span>
-                              </div>
-                              <div className="flex items-center gap-2.5 mt-0.5">
-                                {pick.currentPrice && <span className="text-[11px] font-bold" style={{ color: 'var(--text-primary)' }}>{pick.currentPrice}원</span>}
-                                {pick.targetPrice && <span className="text-[9px]" style={{ color: '#00C853' }}>목표 {pick.targetPrice}원</span>}
-                                {pick.stopLoss && <span className="text-[9px]" style={{ color: '#FF1744' }}>손절 {pick.stopLoss}원</span>}
-                              </div>
-                              {pick.reason && <p className="text-[9px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>{pick.reason}</p>}
-                            </div>
-                            <div className="flex flex-col items-center gap-0.5 flex-shrink-0">
-                              <span className="text-base font-black" style={{ color: ac.color }}>{ac.icon}</span>
-                              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black" style={{ backgroundColor: ac.color, color: '#0D1117' }}>{ac.label}</span>
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
+                {result.stockPicks && result.stockPicks.length > 0 && <LiveStockPickCards picks={result.stockPicks} />}
 
                 {/* 구분선 */}
                 <div className="flex items-center gap-2.5 py-0.5">
@@ -445,5 +406,80 @@ export default function HomePage() {
         </div>
       )}
     </>
+  )
+}
+
+interface StockPickItem {
+  name: string
+  code: string
+  action: string
+  currentPrice?: string
+  targetPrice?: string
+  stopLoss?: string
+  reason?: string
+}
+
+function LiveStockPickCards({ picks }: { picks: StockPickItem[] }) {
+  const [livePrices, setLivePrices] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const codes = picks.map(p => p.code).filter(Boolean)
+    if (codes.length === 0) return
+    fetchStockPrices(codes).then(prices => {
+      if (Object.keys(prices).length > 0) setLivePrices(prices)
+    })
+  }, [picks])
+
+  const actionMap: Record<string, { bg: string; border: string; color: string; icon: string; label: string }> = {
+    '매수': { bg: 'rgba(0,200,83,0.1)', border: 'rgba(0,200,83,0.3)', color: '#00C853', icon: '▲', label: 'BUY' },
+    '매도': { bg: 'rgba(255,23,68,0.1)', border: 'rgba(255,23,68,0.3)', color: '#FF1744', icon: '▼', label: 'SELL' },
+    '관망': { bg: 'rgba(255,152,0,0.1)', border: 'rgba(255,152,0,0.3)', color: '#FF9800', icon: '■', label: 'HOLD' },
+    '주목': { bg: 'rgba(66,165,245,0.1)', border: 'rgba(66,165,245,0.3)', color: '#42A5F5', icon: '★', label: 'WATCH' },
+  }
+  const defaultAction = { bg: 'rgba(66,165,245,0.1)', border: 'rgba(66,165,245,0.3)', color: '#42A5F5', icon: '★', label: 'WATCH' }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+      <div className="flex items-center gap-2">
+        <span className="text-base">🎯</span>
+        <span className="text-[13px] font-black" style={{ color: 'var(--text-primary)' }}>추천 종목 TOP {picks.length}</span>
+        <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border-subtle)' }} />
+      </div>
+      {picks.map((pick, i) => {
+        const ac = actionMap[pick.action] || defaultAction
+        const livePrice = livePrices[pick.code]
+        const displayPrice = livePrice || pick.currentPrice
+        const isLive = !!livePrice
+        return (
+          <div key={pick.code} className="relative overflow-hidden rounded-xl animate-slide-up" style={{ backgroundColor: ac.bg, border: `1px solid ${ac.border}`, padding: '10px 12px 10px 16px', animationDelay: `${i * 0.06}s`, animationFillMode: 'backwards' }}>
+            <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl" style={{ backgroundColor: ac.color }} />
+            <div className="flex items-center gap-2.5">
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 font-black text-[11px]" style={{ backgroundColor: `${ac.color}20`, color: ac.color }}>{i + 1}</div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-black text-[14px]" style={{ color: 'var(--text-primary)' }}>{pick.name}</span>
+                  <span className="flex-shrink-0 px-1.5 py-0.5 rounded font-mono text-[9px] font-bold" style={{ backgroundColor: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)' }}>{pick.code}</span>
+                </div>
+                <div className="flex items-center gap-2.5 mt-0.5">
+                  {displayPrice && (
+                    <span className="text-[11px] font-bold" style={{ color: 'var(--text-primary)' }}>
+                      {displayPrice}원
+                      {isLive && <span className="ml-1 text-[8px] px-1 py-px rounded" style={{ backgroundColor: 'rgba(0,200,83,0.15)', color: '#00C853' }}>LIVE</span>}
+                    </span>
+                  )}
+                  {pick.targetPrice && <span className="text-[9px]" style={{ color: '#00C853' }}>목표 {pick.targetPrice}원</span>}
+                  {pick.stopLoss && <span className="text-[9px]" style={{ color: '#FF1744' }}>손절 {pick.stopLoss}원</span>}
+                </div>
+                {pick.reason && <p className="text-[9px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>{pick.reason}</p>}
+              </div>
+              <div className="flex flex-col items-center gap-0.5 flex-shrink-0">
+                <span className="text-base font-black" style={{ color: ac.color }}>{ac.icon}</span>
+                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black" style={{ backgroundColor: ac.color, color: '#0D1117' }}>{ac.label}</span>
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
   )
 }
