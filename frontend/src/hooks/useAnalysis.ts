@@ -23,33 +23,40 @@ export function useAnalysis() {
       const effectiveMode = mode || '분석해줘'
       const token = getStoredToken() || undefined
 
-      // 1) 24시간 캐시 확인 (성공한 결과만 — 에러 결과는 캐시에서 무시)
-      const cached = getCached(query, effectiveMode)
-      if (cached && cached.metadata.agentsSucceeded > 0) {
-        setResult({ ...cached, isPrecomputed: false })
-        return
-      }
-
-      // 2) 프리컴퓨트 결과 확인 (스케줄로 미리 분석된 결과)
+      // 프리컴퓨트 모드(오늘뭐사, 수급분석, 종가매매, 스윙매매)는 항상 서버 최신 데이터 확인
       if (mode && mode !== '분석해줘') {
+        const cached = getCached(query, effectiveMode)
         const precomputed = await fetchPrecomputed(mode, token)
-        if (precomputed && precomputed.metadata.agentsSucceeded > 0 && precomputed.isFresh) {
-          setResult({ ...precomputed, isPrecomputed: true })
-          setCache(query, effectiveMode, precomputed)
-          addHistory(query, mode, precomputed.content)
+
+        if (precomputed && precomputed.metadata.agentsSucceeded > 0) {
+          // 서버 데이터가 캐시보다 최신이면 갱신, 동일하면 캐시 사용
+          const serverTime = new Date(precomputed.updatedAt).getTime()
+          const cachedTime = cached ? new Date(cached.updatedAt).getTime() : 0
+          if (serverTime > cachedTime || !cached) {
+            setResult({ ...precomputed, isPrecomputed: true })
+            setCache(query, effectiveMode, precomputed)
+            addHistory(query, mode, precomputed.content)
+          } else {
+            setResult({ ...cached, isPrecomputed: true })
+          }
           return
         }
-        // 프리컴퓨트가 있지만 fresh가 아닌 경우 → 성공한 결과면 표시
-        if (precomputed && precomputed.metadata.agentsSucceeded > 0) {
-          setResult({ ...precomputed, isPrecomputed: true })
-          setCache(query, effectiveMode, precomputed)
-          addHistory(query, mode, precomputed.content)
+        // 서버 응답 실패 시 캐시 폴백
+        if (cached && cached.metadata.agentsSucceeded > 0) {
+          setResult({ ...cached, isPrecomputed: true })
           return
         }
         // 프리컴퓨트 없음 → 라이브 분석으로 폴스루
+      } else {
+        // 라이브 분석 모드: 캐시 우선
+        const cached = getCached(query, effectiveMode)
+        if (cached && cached.metadata.agentsSucceeded > 0) {
+          setResult({ ...cached, isPrecomputed: false })
+          return
+        }
       }
 
-      // 3) 라이브 멀티에이전트 분석
+      // 라이브 멀티에이전트 분석
       const res = await fetchLiveAnalysis(query, effectiveMode, token)
       setResult({ ...res, isPrecomputed: false })
       setCache(query, effectiveMode, res)
