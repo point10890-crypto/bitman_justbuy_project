@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import GlassCard from '../components/common/GlassCard'
 import GoldButton from '../components/common/GoldButton'
@@ -11,7 +11,7 @@ import {
   type UserDto,
 } from '../api/authApi'
 
-type Tab = 'dashboard' | 'subscriptions' | 'members' | 'system'
+type Tab = 'dashboard' | 'subscriptions' | 'members' | 'system' | 'monitor'
 
 export default function AdminPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -47,6 +47,11 @@ export default function AdminPage() {
   const [systemLoading, setSystemLoading] = useState(false)
   const [refreshLoading, setRefreshLoading] = useState(false)
   const [refreshResult, setRefreshResult] = useState<any>(null)
+
+  // 모니터링
+  const [monitorData, setMonitorData] = useState<any>(null)
+  const [monitorLoading, setMonitorLoading] = useState(false)
+  const [autoRefresh, setAutoRefresh] = useState(false)
 
   useEffect(() => { loadData() }, [])
 
@@ -213,9 +218,28 @@ export default function AdminPage() {
     }
   }
 
+  // 모니터링 데이터 로드
+  const loadMonitorData = useCallback(async () => {
+    setMonitorLoading(true)
+    try {
+      const API = import.meta.env.VITE_API_BASE_URL || ''
+      const res = await fetch(`${API}/api/monitor/health`)
+      if (res.ok) setMonitorData(await res.json())
+    } catch { /* ignore */ }
+    finally { setMonitorLoading(false) }
+  }, [])
+
   useEffect(() => {
     if (tab === 'system') loadSystemStatus()
-  }, [tab])
+    if (tab === 'monitor') loadMonitorData()
+  }, [tab, loadMonitorData])
+
+  // 자동 새로고침 (30초)
+  useEffect(() => {
+    if (!autoRefresh || tab !== 'monitor') return
+    const id = setInterval(loadMonitorData, 30000)
+    return () => clearInterval(id)
+  }, [autoRefresh, tab, loadMonitorData])
 
   const fmt = (iso: string) => {
     const d = new Date(iso)
@@ -256,6 +280,7 @@ export default function AdminPage() {
     { key: 'subscriptions', icon: '🛡️', label: '승인/해제' },
     { key: 'members', icon: '👥', label: '회원관리' },
     { key: 'system', icon: '🔧', label: '시스템' },
+    { key: 'monitor', icon: '🔍', label: '모니터링' },
   ]
 
   return (
@@ -891,6 +916,163 @@ export default function AdminPage() {
                       )}
                     </>
                   ) : null}
+                </div>
+              )}
+
+              {/* ═══ 모니터링 탭 ═══ */}
+              {tab === 'monitor' && (
+                <div className="flex flex-col gap-3 animate-slide-up" style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}>
+                  {/* 헤더 + 자동새로고침 */}
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-[15px] font-black" style={{ color: 'var(--text-primary)' }}>서비스 모니터링</h2>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setAutoRefresh(!autoRefresh)}
+                        className="text-[9px] font-bold px-2 py-1 rounded-lg"
+                        style={{
+                          backgroundColor: autoRefresh ? 'rgba(0,200,83,0.12)' : 'rgba(255,255,255,0.05)',
+                          color: autoRefresh ? '#00C853' : 'var(--text-muted)',
+                          border: `1px solid ${autoRefresh ? 'rgba(0,200,83,0.3)' : 'var(--border-subtle)'}`,
+                        }}>
+                        {autoRefresh ? '● LIVE' : '○ LIVE'}
+                      </button>
+                      <button onClick={loadMonitorData} disabled={monitorLoading}
+                        className="text-[9px] font-bold px-2 py-1 rounded-lg"
+                        style={{ backgroundColor: 'rgba(255,215,0,0.08)', color: '#FFD700', border: '1px solid rgba(255,215,0,0.2)' }}>
+                        {monitorLoading ? '로딩...' : '새로고침'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {monitorData ? (
+                    <>
+                      {/* 전체 상태 */}
+                      <GlassCard>
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-[12px] font-bold" style={{ color: 'var(--text-primary)' }}>시스템 상태</span>
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full" style={{
+                            backgroundColor: monitorData.status === 'healthy' ? 'rgba(0,200,83,0.12)' : monitorData.status === 'degraded' ? 'rgba(255,152,0,0.12)' : 'rgba(255,23,68,0.12)',
+                            color: monitorData.status === 'healthy' ? '#00C853' : monitorData.status === 'degraded' ? '#FF9800' : '#FF1744',
+                            border: `1px solid ${monitorData.status === 'healthy' ? 'rgba(0,200,83,0.3)' : monitorData.status === 'degraded' ? 'rgba(255,152,0,0.3)' : 'rgba(255,23,68,0.3)'}`,
+                          }}>
+                            {monitorData.status === 'healthy' ? '정상' : monitorData.status === 'degraded' ? '저하' : '장애'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="text-center p-2 rounded-lg" style={{ backgroundColor: 'rgba(255,255,255,0.03)' }}>
+                            <div className="text-[16px] font-black" style={{ color: '#FFD700' }}>{monitorData.agentsAvailable || '?'}</div>
+                            <div className="text-[8px]" style={{ color: 'var(--text-muted)' }}>AI 에이전트</div>
+                          </div>
+                          <div className="text-center p-2 rounded-lg" style={{ backgroundColor: 'rgba(255,255,255,0.03)' }}>
+                            <div className="text-[16px] font-black" style={{ color: '#00C853' }}>{monitorData.stats?.successRate ?? 0}%</div>
+                            <div className="text-[8px]" style={{ color: 'var(--text-muted)' }}>성공률</div>
+                          </div>
+                          <div className="text-center p-2 rounded-lg" style={{ backgroundColor: 'rgba(255,255,255,0.03)' }}>
+                            <div className="text-[16px] font-black" style={{ color: 'var(--text-primary)' }}>{Math.floor((monitorData.uptime || 0) / 3600)}h</div>
+                            <div className="text-[8px]" style={{ color: 'var(--text-muted)' }}>업타임</div>
+                          </div>
+                        </div>
+                        {monitorData.memory && (
+                          <div className="mt-2 flex items-center gap-2">
+                            <div className="flex-1 h-1.5 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }}>
+                              <div className="h-full rounded-full" style={{
+                                width: `${monitorData.memory.usagePercent}%`,
+                                backgroundColor: monitorData.memory.usagePercent > 80 ? '#FF1744' : '#00C853',
+                              }} />
+                            </div>
+                            <span className="text-[8px]" style={{ color: 'var(--text-muted)' }}>RAM {monitorData.memory.used}/{monitorData.memory.max}</span>
+                          </div>
+                        )}
+                      </GlassCard>
+
+                      {/* 외부 서비스 상태 */}
+                      <GlassCard>
+                        <p className="text-[12px] font-bold mb-2" style={{ color: 'var(--text-primary)' }}>외부 서비스</p>
+                        <div className="flex flex-col gap-1.5">
+                          {(monitorData.services || []).map((svc: any, i: number) => (
+                            <div key={i} className="flex items-center justify-between py-1.5 px-3 rounded-lg" style={{
+                              backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)',
+                            }}>
+                              <div className="flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full" style={{
+                                  backgroundColor: svc.status === 'healthy' ? '#00C853' : svc.status === 'degraded' ? '#FF9800' : '#FF1744',
+                                }} />
+                                <span className="text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>{svc.name}</span>
+                              </div>
+                              <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>
+                                {svc.latencyMs ? `${svc.latencyMs}ms` : svc.error || svc.status}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </GlassCard>
+
+                      {/* AI 에이전트 */}
+                      {monitorData.agents && (
+                        <GlassCard>
+                          <p className="text-[12px] font-bold mb-2" style={{ color: 'var(--text-primary)' }}>AI 에이전트</p>
+                          <div className="flex flex-col gap-1.5">
+                            {Object.entries(monitorData.agents).map(([name, info]: [string, any]) => (
+                              <div key={name} className="flex items-center justify-between py-1.5 px-3 rounded-lg" style={{
+                                backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)',
+                              }}>
+                                <div className="flex items-center gap-2">
+                                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: info.available ? '#00C853' : '#FF1744' }} />
+                                  <span className="text-[11px] font-bold capitalize" style={{
+                                    color: { claude: '#FF6B35', gemini: '#4285F4', chatgpt: '#10A37F', perplexity: '#20B2AA', grok: '#FF4500' }[name] || '#888',
+                                  }}>{name}</span>
+                                </div>
+                                <span className="text-[9px] font-bold" style={{ color: info.available ? '#00C853' : '#FF1744' }}>
+                                  {info.available ? 'ONLINE' : 'OFFLINE'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </GlassCard>
+                      )}
+
+                      {/* 최근 분석 로그 */}
+                      <GlassCard>
+                        <p className="text-[12px] font-bold mb-2" style={{ color: 'var(--text-primary)' }}>최근 분석 실행</p>
+                        {(monitorData.recentAnalyses || []).length === 0 ? (
+                          <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>아직 실행 기록이 없습니다</p>
+                        ) : (
+                          <div className="flex flex-col gap-1">
+                            {(monitorData.recentAnalyses || []).slice(0, 10).map((log: any, i: number) => (
+                              <div key={i} className="flex items-center justify-between py-1 px-2 rounded" style={{
+                                backgroundColor: 'rgba(255,255,255,0.02)',
+                              }}>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: log.success ? '#00C853' : '#FF1744' }} />
+                                  <span className="text-[10px] font-bold" style={{ color: 'var(--text-primary)' }}>{log.mode}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[8px]" style={{ color: 'var(--text-muted)' }}>
+                                    {log.agentsSucceeded}/{log.agentsUsed} AI · {(log.durationMs / 1000).toFixed(0)}s
+                                  </span>
+                                  <span className="text-[8px]" style={{ color: 'var(--text-muted)' }}>
+                                    {log.timestamp ? new Date(log.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : ''}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </GlassCard>
+
+                      {/* 마지막 체크 시간 */}
+                      <p className="text-[8px] text-center" style={{ color: 'var(--text-muted)' }}>
+                        마지막 체크: {new Date(monitorData.timestamp).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
+                      </p>
+                    </>
+                  ) : monitorLoading ? (
+                    <div className="text-center py-8">
+                      <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>모니터링 데이터 로딩 중...</p>
+                    </div>
+                  ) : (
+                    <GlassCard>
+                      <p className="text-[11px] text-center" style={{ color: 'var(--text-muted)' }}>모니터링 데이터를 불러오지 못했습니다</p>
+                    </GlassCard>
+                  )}
                 </div>
               )}
 

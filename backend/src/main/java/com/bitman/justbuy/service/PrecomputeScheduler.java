@@ -132,6 +132,7 @@ public class PrecomputeScheduler {
             .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
         log.info("[Scheduler] \u25B6 {} \uc2e4\ud589 \uc2dc\uc791 ({})", mode, now);
 
+        long startMs = System.currentTimeMillis();
         try {
             AnalysisResponse result = analysisService.runLiveAnalysis(query, mode);
             lastRunTimes.put(mode, result.updatedAt());
@@ -139,11 +140,22 @@ public class PrecomputeScheduler {
                 mode, result.metadata().totalDurationMs(),
                 result.metadata().agentsSucceeded(), result.metadata().agentsUsed());
 
+            // 모니터링 기록
+            com.bitman.justbuy.controller.MonitorController.recordAnalysis(
+                mode, true, result.metadata().totalDurationMs(),
+                result.metadata().agentsUsed(), result.metadata().agentsSucceeded(),
+                result.stockPicks() != null ? result.stockPicks().size() : 0, null);
+
             if (telegramNotifier != null) {
                 telegramNotifier.sendAnalysisResult(mode, result);
             }
         } catch (Exception e) {
             log.error("[Scheduler] \u274C {} \uc2e4\ud328: {}", mode, e.getMessage());
+
+            // 모니터링 기록
+            com.bitman.justbuy.controller.MonitorController.recordAnalysis(
+                mode, false, System.currentTimeMillis() - startMs, 0, 0, 0, e.getMessage());
+
             if (telegramNotifier != null) {
                 telegramNotifier.sendAnalysisFailed(mode, e.getMessage());
             }
