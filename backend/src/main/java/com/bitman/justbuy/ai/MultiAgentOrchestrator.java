@@ -3,9 +3,12 @@ package com.bitman.justbuy.ai;
 import com.bitman.justbuy.ai.agent.AiAgent;
 import com.bitman.justbuy.dto.AgentResult;
 import com.bitman.justbuy.dto.AnalysisResponse;
+import com.bitman.justbuy.dto.ConsensusResult;
 import com.bitman.justbuy.dto.StockPick;
 import com.bitman.justbuy.service.MarketDataService;
 import com.bitman.justbuy.util.StockParser;
+import com.bitman.justbuy.util.StructuredAnalysisParser;
+import com.bitman.justbuy.util.StructuredAnalysisParser.StructuredAnalysis;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -24,12 +27,14 @@ public class MultiAgentOrchestrator {
     private final List<AiAgent> agents;
     private final SynthesisEngine synthesisEngine;
     private final MarketDataService marketDataService;
+    private final ConsensusEngine consensusEngine;
 
     public MultiAgentOrchestrator(List<AiAgent> agents, SynthesisEngine synthesisEngine,
-                                   MarketDataService marketDataService) {
+                                   MarketDataService marketDataService, ConsensusEngine consensusEngine) {
         this.agents = agents;
         this.synthesisEngine = synthesisEngine;
         this.marketDataService = marketDataService;
+        this.consensusEngine = consensusEngine;
     }
 
     static final String SYSTEM_PROMPT = "[시스템] 실데이터 기반 주식 분석 머신 엔진\n"
@@ -140,12 +145,12 @@ public class MultiAgentOrchestrator {
             marketDataText = "\n[\uC8FC\uC758: \uC2E4\uC2DC\uAC04 \uC2DC\uC7A5 \uB370\uC774\uD130 \uC218\uC9D1\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4. \uD559\uC2B5 \uB370\uC774\uD130 \uAE30\uBC18\uC73C\uB85C \uBD84\uC11D\uD569\uB2C8\uB2E4.]\n";
         }
 
-        String systemWithDate = SYSTEM_PROMPT + "\n\n\uC624\uB298 \uB0A0\uC9DC: " + today + " (KST). \uBC18\uB4DC\uC2DC \uC774 \uB0A0\uC9DC \uAE30\uC900\uC73C\uB85C \uCD5C\uC2E0 \uC815\uBCF4\uB97C \uBD84\uC11D\uD560 \uAC83.";
+        String baseSystemPrompt = SYSTEM_PROMPT + "\n\n\uC624\uB298 \uB0A0\uC9DC: " + today + " (KST). \uBC18\uB4DC\uC2DC \uC774 \uB0A0\uC9DC \uAE30\uC900\uC73C\uB85C \uCD5C\uC2E0 \uC815\uBCF4\uB97C \uBD84\uC11D\uD560 \uAC83.";
         String userMessage = modeInstruction.isEmpty()
             ? "[\uC624\uB298: " + today + "] " + query + "\n\n" + marketDataText
             : "[\uC624\uB298: " + today + "] [\uBAA8\uB4DC: " + mode + "] " + modeInstruction + "\n\n" + marketDataText + "\n\n\uC0AC\uC6A9\uC790 \uC9C8\uBB38: " + query;
 
-        // Round 1: Parallel execution with Virtual Threads
+        // Round 1: Parallel execution with Virtual Threads — 에이전트별 전문화 프롬프트
         List<AiAgent> availableAgents = agents.stream().filter(AiAgent::isAvailable).toList();
         List<AgentResult> skippedResults = agents.stream()
             .filter(a -> !a.isAvailable())
@@ -158,8 +163,10 @@ public class MultiAgentOrchestrator {
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             List<Future<AgentResult>> futures = availableAgents.stream()
                 .map(agent -> executor.submit(() -> {
-                    log.info("[Orchestrator] {} starting...", agent.name());
-                    AgentResult result = agent.analyze(systemWithDate, userMessage);
+                    // ★ 에이전트별 전문화 프롬프트 + 구조화 출력 지시 적용
+                    String agentSystemPrompt = baseSystemPrompt + AgentRoles.getFullSuffix(agent.name());
+                    log.info("[Orchestrator] {} starting (specialized)...", agent.name());
+                    AgentResult result = agent.analyze(agentSystemPrompt, userMessage);
                     log.info("[Orchestrator] {} finished ({}ms, status={})",
                         agent.name(), result.durationMs(), result.status());
                     return result;
@@ -181,12 +188,33 @@ public class MultiAgentOrchestrator {
             .filter(r -> "success".equals(r.status()) && r.content() != null && !r.content().isBlank())
             .toList();
 
-        // Round 2: Claude synthesis
+        // ★ 구조화 출력 파싱 + 합의 엔진
+        Map<String, StructuredAnalysis> structuredResults = new LinkedHashMap<>();
+        for (AgentResult r : successResults) {
+            StructuredAnalysis parsed = StructuredAnalysisParser.parse(r.content());
+            if (parsed != null) {
+                structuredResults.put(r.agent(), parsed);
+                log.info("[Orchestrator] {}: 구조화 출력 파싱 성공 ({}개 종목)", r.agent(), parsed.stocks().size());
+            } else {
+                log.info("[Orchestrator] {}: 구조화 출력 없음 → 기존 파서 폴백", r.agent());
+            }
+        }
+
+        ConsensusResult consensus = null;
+        String consensusText = "";
+        if (structuredResults.size() >= 2) {
+            consensus = consensusEngine.calculateConsensus(structuredResults);
+            consensusText = consensusEngine.formatForSynthesis(consensus);
+            log.info("[Orchestrator] 합의 엔진: 전체 합의도 {}%, {}개 종목, {}개 이견",
+                consensus.agreementScore(), consensus.stocks().size(), consensus.divergences().size());
+        }
+
+        // Round 2: Claude synthesis — 합의 데이터 포함
         String finalContent;
         AgentResult synthesisResult = null;
         if (successResults.size() >= 2 && synthesisEngine.isAvailable()) {
             log.info("[Orchestrator] Starting Round 2: Synthesis ({} results)", successResults.size());
-            synthesisResult = synthesisEngine.synthesizeWithResult(successResults, query, mode, today);
+            synthesisResult = synthesisEngine.synthesizeWithResult(successResults, query, mode, today, consensusText);
             finalContent = (synthesisResult != null && "success".equals(synthesisResult.status())
                 && synthesisResult.content() != null && !synthesisResult.content().isBlank())
                 ? synthesisResult.content() : successResults.getFirst().content();
@@ -240,6 +268,7 @@ public class MultiAgentOrchestrator {
         return new AnalysisResponse(
             mode, query, round1Results, synthesisResult, finalContent,
             stockPicks.stream().limit(10).toList(),
+            consensus,
             Instant.now().toString(), true,
             new AnalysisResponse.Metadata(totalDuration, availableAgents.size(), successResults.size()));
     }

@@ -53,12 +53,17 @@ public class SynthesisEngine {
     }
 
     public AgentResult synthesizeWithResult(List<AgentResult> results, String query, String mode, String today) {
+        return synthesizeWithResult(results, query, mode, today, "");
+    }
+
+    public AgentResult synthesizeWithResult(List<AgentResult> results, String query, String mode, String today, String consensusText) {
         String synthesisInput = results.stream()
             .map(r -> "=== " + r.agent().toUpperCase() + " \uBD84\uC11D (" + r.model() + ") ===\n" + r.content())
             .collect(Collectors.joining("\n\n---\n\n"));
 
         String userMessage = "[\uC624\uB298: " + today + "] [\uBAA8\uB4DC: " + mode + "] [\uC0AC\uC6A9\uC790 \uC6D0\uB798 \uC9C8\uBB38: " + query + "]\n\n"
-            + "\uC544\uB798 " + results.size() + "\uAC1C AI \uBD84\uC11D \uACB0\uACFC\uB97C \uC885\uD569\uD558\uC138\uC694. \uBC18\uB4DC\uC2DC \uC0AC\uC6A9\uC790\uC758 \uC6D0\uB798 \uC9C8\uBB38\uC5D0 \uB9DE\uAC8C \uC885\uD569\uD558\uC138\uC694!\n\n"
+            + "\uC544\uB798 " + results.size() + "\uAC1C AI \uBD84\uC11D \uACB0\uACFC\uB97C \uC885\uD569\uD558\uC138\uC694. \uBC18\uB4DC\uC2DC \uC0AC\uC6A9\uC790\uC758 \uC6D0\uB798 \uC9C8\uBB38\uC5D0 \uB9DE\uAC8C \uC885\uD569\uD558\uC138\uC694!"
+            + consensusText + "\n\n"
             + synthesisInput;
 
         AgentResult synthesis = claudeAgent.analyze(SYNTHESIS_PROMPT, userMessage);

@@ -134,4 +134,92 @@ public class MarketDataService {
         }
         return prices;
     }
+
+    // ────────────────────────────────────────────────
+    // Phase 2: 강화 시장 데이터 (수급/ETF)
+    // ────────────────────────────────────────────────
+
+    /** 투자자별 수급 데이터 */
+    public record InvestorFlow(
+        long foreignNet, long institutionNet, long individualNet
+    ) {}
+
+    /** 종목의 투자자별 매매동향 조회 */
+    public InvestorFlow fetchInvestorData(String code) {
+        try {
+            JsonNode data = fetchJson("https://m.stock.naver.com/api/stock/" + code + "/investor");
+            if (data == null) return null;
+
+            JsonNode investors = data.has("investors") ? data.get("investors")
+                : data.has("data") ? data.get("data") : data;
+            if (!investors.isArray() || investors.isEmpty()) return null;
+
+            JsonNode latest = investors.get(0);
+            long foreignNet = latest.path("foreignNet").asLong(latest.path("frgn").path("net").asLong(0));
+            long institutionNet = latest.path("institutionNet").asLong(latest.path("organ").path("net").asLong(0));
+            long individualNet = latest.path("individualNet").asLong(latest.path("indv").path("net").asLong(0));
+
+            return new InvestorFlow(foreignNet, institutionNet, individualNet);
+        } catch (Exception e) {
+            log.debug("Investor data fetch failed for {}: {}", code, e.getMessage());
+            return null;
+        }
+    }
+
+    /** 주요 종목의 수급 데이터를 프롬프트 텍스트로 포맷 */
+    public String fetchInvestorDataText() {
+        NumberFormat fmt = NumberFormat.getInstance(Locale.KOREA);
+        StringBuilder text = new StringBuilder();
+        text.append("\n\uD83D\uDC65 \uD22C\uC790\uC790\uBCC4 \uB9E4\uB9E4\uB3D9\uD5A5 (\uC8FC\uC694 \uC885\uBAA9)\n");
+
+        int count = 0;
+        for (String code : TOP_STOCK_CODES.subList(0, Math.min(10, TOP_STOCK_CODES.size()))) {
+            InvestorFlow flow = fetchInvestorData(code);
+            if (flow == null) continue;
+
+            // 종목명 조회
+            JsonNode stock = fetchJson("https://m.stock.naver.com/api/stock/" + code + "/basic");
+            String name = stock != null ? stock.path("stockName").asText(code) : code;
+
+            String sign = flow.foreignNet >= 0 ? "+" : "";
+            String iSign = flow.institutionNet >= 0 ? "+" : "";
+            String pSign = flow.individualNet >= 0 ? "+" : "";
+
+            text.append("  ").append(name).append("(").append(code).append("): ")
+                .append("\uC678\uAD6D\uC778 ").append(sign).append(fmt.format(flow.foreignNet))
+                .append(" | \uAE30\uAD00 ").append(iSign).append(fmt.format(flow.institutionNet))
+                .append(" | \uAC1C\uC778 ").append(pSign).append(fmt.format(flow.individualNet))
+                .append("\n");
+            count++;
+        }
+
+        return count > 0 ? text.append("\n").toString() : "";
+    }
+
+    /** ETF 편입 정보 */
+    public record ETFInclusion(String etfName, String etfCode) {}
+
+    /** 종목의 ETF 편입 현황 조회 */
+    public List<ETFInclusion> fetchETFInclusion(String code) {
+        try {
+            JsonNode data = fetchJson("https://m.stock.naver.com/api/stock/" + code + "/etfItem");
+            if (data == null) return List.of();
+
+            JsonNode items = data.has("etfs") ? data.get("etfs")
+                : data.has("result") ? data.get("result") : data;
+            if (!items.isArray()) return List.of();
+
+            List<ETFInclusion> result = new ArrayList<>();
+            for (int i = 0; i < Math.min(5, items.size()); i++) {
+                JsonNode item = items.get(i);
+                String name = item.path("stockName").asText(item.path("name").asText(""));
+                String etfCode = item.path("stockCode").asText(item.path("code").asText(""));
+                if (!name.isEmpty()) result.add(new ETFInclusion(name, etfCode));
+            }
+            return result;
+        } catch (Exception e) {
+            log.debug("ETF inclusion fetch failed for {}: {}", code, e.getMessage());
+            return List.of();
+        }
+    }
 }

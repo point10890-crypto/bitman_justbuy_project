@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react' // v4
 import type { AnalysisResult } from '../../hooks/useAnalysis'
 import { fetchStockPrices } from '../../api/analysisApi'
 import { ReportRenderer } from './ReportRenderer'
+import ConsensusDisplay from './ConsensusDisplay'
+import FeedbackWidget from './FeedbackWidget'
 
 interface AnalysisOverlayProps {
   query: string
@@ -120,6 +122,9 @@ function AnalysisResultView({ result }: { result: AnalysisResult }) {
       {/* 종목 추천 카드 */}
       {result.stockPicks && result.stockPicks.length > 0 && <StockPickCards picks={result.stockPicks} />}
 
+      {/* AI 합의 분석 */}
+      {result.consensus && <ConsensusDisplay consensus={result.consensus} />}
+
       {/* 구분선 */}
       <div className="flex items-center gap-2.5 py-0.5">
         <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border-subtle)' }} />
@@ -129,9 +134,16 @@ function AnalysisResultView({ result }: { result: AnalysisResult }) {
 
       <ReportRenderer content={result.content} />
 
+      {/* 피드백 위젯 */}
+      <FeedbackWidget
+        mode={result.mode || '분석해줘'}
+        analysisId={result.updatedAt}
+        stockPicks={result.stockPicks?.map(p => ({ name: p.name, code: p.code }))}
+      />
+
       {/* 메타 정보 */}
       <div className="flex items-center gap-2.5" style={{ paddingTop: 'var(--space-md)', borderTop: '1px solid var(--border-subtle)' }}>
-        <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>Multi-Agent V3.0 · {result.metadata.agentsSucceeded}/{result.metadata.agentsUsed} AI</span>
+        <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>Multi-Agent V4.0 · {result.metadata.agentsSucceeded}/{result.metadata.agentsUsed} AI</span>
         {result.metadata.totalDurationMs > 0 && <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>{(result.metadata.totalDurationMs / 1000).toFixed(1)}s</span>}
         {result.isPrecomputed && <span className="text-[9px] ml-auto" style={{ color: '#FFD700' }}>⏰ 예약 분석</span>}
       </div>

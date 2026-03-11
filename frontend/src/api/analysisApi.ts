@@ -19,11 +19,44 @@ export interface StockPick {
   reason?: string
 }
 
+/** 에이전트 간 합의 결과 */
+export interface ConsensusStock {
+  name: string
+  code: string
+  consensusAction: string
+  consensusScore: number
+  mentionCount: number
+  agentVotes: Record<string, { action: string; confidence: number; targetPrice?: number; stopLoss?: number }>
+  averageConfidence: number
+  scenarioConsensus?: {
+    bull: { avgProbability: number; avgTarget?: number }
+    base: { avgProbability: number; avgTarget?: number }
+    bear: { avgProbability: number; avgTarget?: number }
+  }
+  avgTargetPrice?: number
+  avgStopLoss?: number
+}
+
+export interface ConsensusResult {
+  stocks: ConsensusStock[]
+  overallSentiment: 'bullish' | 'neutral' | 'bearish'
+  agreementScore: number
+  divergences: Array<{
+    stockCode: string
+    stockName: string
+    type: string
+    agents: string[]
+    details: string
+  }>
+  agentCount: number
+}
+
 export interface AnalysisResponse {
   content: string
   stockPicks: StockPick[]
   agents: AgentInfo[]
   hasSynthesis: boolean
+  consensus?: ConsensusResult
   updatedAt: string
   isFresh: boolean
   mode: string
@@ -47,6 +80,7 @@ function transformResponse(data: any): AnalysisResponse {
       error: r.error,
     })),
     hasSynthesis: !!data.synthesis && data.synthesis.status === 'success',
+    consensus: data.consensus || undefined,
     updatedAt: data.updatedAt || new Date().toISOString(),
     isFresh: data.isFresh ?? true,
     mode: data.mode || '',

@@ -9,6 +9,7 @@ public record AnalysisResponse(
         AgentResult synthesis,
         String finalContent,
         List<StockPick> stockPicks,
+        ConsensusResult consensus,
         String updatedAt,
         boolean isFresh,
         Metadata metadata
