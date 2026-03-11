@@ -49,6 +49,9 @@ public class SecurityConfig {
                 .requestMatchers(new AntPathRequestMatcher("/h2-console/**")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/error")).permitAll()
 
+                // Monitor (public health, admin for details)
+                .requestMatchers(new AntPathRequestMatcher("/api/monitor/**")).permitAll()
+
                 // Admin only
                 .requestMatchers(new AntPathRequestMatcher("/api/admin/**")).hasRole("ADMIN")
 
