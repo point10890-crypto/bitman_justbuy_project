@@ -223,7 +223,10 @@ export default function AdminPage() {
     setMonitorLoading(true)
     try {
       const API = import.meta.env.VITE_API_BASE_URL || ''
-      const res = await fetch(`${API}/api/monitor/health`)
+      const token = getStoredToken()
+      const headers: Record<string, string> = {}
+      if (token) headers['Authorization'] = `Bearer ${token}`
+      const res = await fetch(`${API}/api/monitor/health`, { headers })
       if (res.ok) setMonitorData(await res.json())
     } catch { /* ignore */ }
     finally { setMonitorLoading(false) }
