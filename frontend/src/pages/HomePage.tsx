@@ -416,6 +416,36 @@ function correctContentPrices(content: string, picks: StockPickItem[], livePrice
     result = result.replace(
       new RegExp(`(${nameEsc}[^\\n]{0,60}?)(현재가는?\\s*(?:약\\s*)?)[0-9,]+(?:~[0-9,]+)?\\s*원`, 'g'),
       `$1$2${realPrice}원`)
+
+    // ── 목표가/손절가 비례 보정 (콘텐츠 내부) ──
+    const parseN = (s: string) => Number(s.replace(/[^0-9]/g, ''))
+    const aiP = parseN(pick.currentPrice || '0')
+    const realP = parseN(realPrice)
+    if (aiP > 0 && realP > 0 && Math.abs(realP / aiP - 1) > 0.05) {
+      const r = realP / aiP
+      const scaleFmt = (match: string, prefix: string, numStr: string) => {
+        const n = parseN(numStr)
+        if (n <= 0) return match
+        const scaled = Math.round(n * r / 100) * 100
+        return prefix + scaled.toLocaleString('ko-KR') + '원'
+      }
+      // 목표가: XX,XXX원
+      result = result.replace(
+        new RegExp(`(${nameEsc}[^\\n]{0,120}?목표가\\s*(?::\\s*)?(?:약\\s*)?)([0-9,]+)\\s*원`, 'g'),
+        scaleFmt)
+      // 손절가: XX,XXX원
+      result = result.replace(
+        new RegExp(`(${nameEsc}[^\\n]{0,120}?손절(?:가)?\\s*(?::\\s*)?(?:약\\s*)?)([0-9,]+)\\s*원`, 'g'),
+        scaleFmt)
+      // 목표 XX,XXX원 (short form)
+      result = result.replace(
+        new RegExp(`(${nameEsc}[^\\n]{0,120}?목표\\s+)([0-9,]+)\\s*원`, 'g'),
+        scaleFmt)
+      // 손절 XX,XXX원 (short form)
+      result = result.replace(
+        new RegExp(`(${nameEsc}[^\\n]{0,120}?손절\\s+)([0-9,]+)\\s*원`, 'g'),
+        scaleFmt)
+    }
   }
   // 실시간 검증 현재가 푸터가 없으면 추가
   if (!result.includes('실시간 검증 현재가')) {
@@ -529,6 +559,25 @@ function LiveStockPickCards({ picks }: { picks: StockPickItem[] }) {
         const livePrice = livePrices[pick.code]
         const displayPrice = livePrice || pick.currentPrice
         const isLive = !!livePrice
+
+        // ── 목표가/손절가 비례 보정 ──
+        // AI가 잘못된 현재가 기준으로 목표가/손절가를 산출했을 수 있으므로
+        // 실시간 가격과 AI 현재가의 비율로 비례 보정
+        const parseNum = (s?: string) => s ? Number(s.replace(/[^0-9]/g, '')) : 0
+        const aiCurrent = parseNum(pick.currentPrice)
+        const realCurrent = parseNum(livePrice)
+        const ratio = (isLive && aiCurrent > 0 && realCurrent > 0 && Math.abs(realCurrent / aiCurrent - 1) > 0.05)
+          ? realCurrent / aiCurrent : 0
+        const scalePrice = (priceStr?: string) => {
+          if (!priceStr || ratio === 0) return priceStr
+          const n = parseNum(priceStr)
+          if (n <= 0) return priceStr
+          const scaled = Math.round(n * ratio / 100) * 100
+          return scaled.toLocaleString('ko-KR')
+        }
+        const displayTarget = ratio > 0 ? scalePrice(pick.targetPrice) : pick.targetPrice
+        const displayStopLoss = ratio > 0 ? scalePrice(pick.stopLoss) : pick.stopLoss
+
         return (
           <div key={pick.code} className="relative overflow-hidden rounded-xl animate-slide-up" style={{ backgroundColor: ac.bg, border: `1px solid ${ac.border}`, padding: '10px 12px 10px 16px', animationDelay: `${i * 0.06}s`, animationFillMode: 'backwards' }}>
             <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl" style={{ backgroundColor: ac.color }} />
@@ -546,8 +595,8 @@ function LiveStockPickCards({ picks }: { picks: StockPickItem[] }) {
                       {isLive && <span className="ml-1 text-[8px] px-1 py-px rounded" style={{ backgroundColor: 'rgba(0,200,83,0.15)', color: '#00C853' }}>LIVE</span>}
                     </span>
                   )}
-                  {pick.targetPrice && <span className="text-[9px]" style={{ color: '#00C853' }}>목표 {pick.targetPrice}원</span>}
-                  {pick.stopLoss && <span className="text-[9px]" style={{ color: '#FF1744' }}>손절 {pick.stopLoss}원</span>}
+                  {displayTarget && <span className="text-[9px]" style={{ color: '#00C853' }}>목표 {displayTarget}원</span>}
+                  {displayStopLoss && <span className="text-[9px]" style={{ color: '#FF1744' }}>손절 {displayStopLoss}원</span>}
                 </div>
                 {pick.reason && <p className="text-[9px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>{pick.reason}</p>}
               </div>

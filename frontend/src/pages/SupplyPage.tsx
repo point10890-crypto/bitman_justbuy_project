@@ -111,6 +111,23 @@ function LiveStockPickCards({ picks }: { picks: StockPickItem[] }) {
         const livePrice = livePrices[pick.code]
         const displayPrice = livePrice || pick.currentPrice
         const isLive = !!livePrice
+
+        // ── 목표가/손절가 비례 보정 ──
+        const parseNum = (s?: string) => s ? Number(s.replace(/[^0-9]/g, '')) : 0
+        const aiCurrent = parseNum(pick.currentPrice)
+        const realCurrent = parseNum(livePrice)
+        const ratio = (isLive && aiCurrent > 0 && realCurrent > 0 && Math.abs(realCurrent / aiCurrent - 1) > 0.05)
+          ? realCurrent / aiCurrent : 0
+        const scalePrice = (priceStr?: string) => {
+          if (!priceStr || ratio === 0) return priceStr
+          const n = parseNum(priceStr)
+          if (n <= 0) return priceStr
+          const scaled = Math.round(n * ratio / 100) * 100
+          return scaled.toLocaleString('ko-KR')
+        }
+        const displayTarget = ratio > 0 ? scalePrice(pick.targetPrice) : pick.targetPrice
+        const displayStopLoss = ratio > 0 ? scalePrice(pick.stopLoss) : pick.stopLoss
+
         return (
           <div key={pick.code} className="relative overflow-hidden rounded-xl animate-slide-up" style={{ backgroundColor: ac.bg, border: `1px solid ${ac.border}`, padding: '10px 12px 10px 16px', animationDelay: `${i * 0.06}s`, animationFillMode: 'backwards' }}>
             <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl" style={{ backgroundColor: ac.color }} />
@@ -128,8 +145,8 @@ function LiveStockPickCards({ picks }: { picks: StockPickItem[] }) {
                       {isLive && <span className="ml-1 text-[8px] px-1 py-px rounded" style={{ backgroundColor: 'rgba(0,200,83,0.15)', color: '#00C853' }}>LIVE</span>}
                     </span>
                   )}
-                  {pick.targetPrice && <span className="text-[9px]" style={{ color: '#00C853' }}>목표 {pick.targetPrice}원</span>}
-                  {pick.stopLoss && <span className="text-[9px]" style={{ color: '#FF1744' }}>손절 {pick.stopLoss}원</span>}
+                  {displayTarget && <span className="text-[9px]" style={{ color: '#00C853' }}>목표 {displayTarget}원</span>}
+                  {displayStopLoss && <span className="text-[9px]" style={{ color: '#FF1744' }}>손절 {displayStopLoss}원</span>}
                 </div>
                 {pick.reason && <p className="text-[9px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>{pick.reason}</p>}
               </div>
