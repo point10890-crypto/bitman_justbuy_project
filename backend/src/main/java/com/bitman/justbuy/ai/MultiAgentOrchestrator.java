@@ -51,7 +51,8 @@ public class MultiAgentOrchestrator {
         + "- 웹검색이 불가능한 환경이라면, 학습 데이터와 알고 있는 최신 정보를 최대한 활용하여 구체적인 종목명·가격대·근거를 반드시 제시한다. \"데이터에 접근할 수 없다\"라는 회피 답변은 절대 하지 않는다\n"
         + "- 가격/실적/정책/발언/지표/일정 등 핵심 사실은 반드시 출처를 남긴다(링크/인용). 출처 확인이 어려우면 \"학습 데이터 기반\"으로 명시\n"
         + "- 데이터 컷오프(조회 시각)를 KST(Asia/Seoul)로 명시한다\n"
-        + "- 반드시 구체적인 종목 코드(예: 삼성전자 005930)와 함께 매수/관망/매도 의견을 제시한다\n\n"
+        + "- 반드시 구체적인 종목 코드(예: 삼성전자 005930)와 함께 매수/관망/매도 의견을 제시한다. 종목코드 6자리 숫자가 없으면 분석 파싱이 불가능하므로 절대 생략하지 않는다\n"
+        + "- 현재가는 반드시 실시간 시장 데이터(아래 제공)에서 확인하여 기재한다. 시장 데이터에 없는 종목은 \"현재가 확인 필요\"로 표기하며 절대 추정 가격을 사용하지 않는다\n\n"
         + "출처 신뢰도 & 팩트체크\n"
         + "- 소스 등급: S(공식 공시·거래소·정부·중앙은행·원문) / A(1티어 언론·통신) / B(학술·리서치·업계 데이터) / C(유튜브·SNS·커뮤니티) / D(익명 루머)\n"
         + "- C/D는 단독 결론 금지. 최소 2개 독립 소스 교차검증 후에만 \"사실\"로 승격. 아니면 \"신호/주장\"으로 분류\n"
@@ -239,7 +240,7 @@ public class MultiAgentOrchestrator {
             }
         }
 
-        // Correct prices with real-time data
+        // Correct prices with real-time data (필수 — AI 추정가 대신 실시간 가격 사용)
         if (!stockPicks.isEmpty()) {
             try {
                 List<String> codes = stockPicks.stream()
@@ -250,14 +251,29 @@ public class MultiAgentOrchestrator {
                 List<StockPick> corrected = new ArrayList<>();
                 for (StockPick pick : stockPicks) {
                     String realPrice = realPrices.get(pick.code());
-                    corrected.add(realPrice != null
-                        ? new StockPick(pick.name(), pick.code(), realPrice,
-                            pick.targetPrice(), pick.stopLoss(), pick.action(), pick.reason())
-                        : pick);
+                    if (realPrice != null) {
+                        corrected.add(new StockPick(pick.name(), pick.code(), realPrice,
+                            pick.targetPrice(), pick.stopLoss(), pick.action(), pick.reason()));
+                        log.info("[Orchestrator] {}({}) 실시간 가격 보정: {}원", pick.name(), pick.code(), realPrice);
+                    } else {
+                        // 실시간 가격 조회 실패 시 AI 추정가에 경고 표시
+                        log.warn("[Orchestrator] {}({}) 실시간 가격 조회 실패 — AI 추정가 유지", pick.name(), pick.code());
+                        String markedPrice = pick.currentPrice() != null ? pick.currentPrice() + " (추정)" : null;
+                        corrected.add(new StockPick(pick.name(), pick.code(), markedPrice,
+                            pick.targetPrice(), pick.stopLoss(), pick.action(), pick.reason()));
+                    }
                 }
                 stockPicks = corrected;
             } catch (Exception e) {
                 log.warn("Price correction failed: {}", e.getMessage());
+                // 전체 실패 시 모든 가격에 경고 표시
+                List<StockPick> marked = new ArrayList<>();
+                for (StockPick pick : stockPicks) {
+                    String markedPrice = pick.currentPrice() != null ? pick.currentPrice() + " (추정)" : null;
+                    marked.add(new StockPick(pick.name(), pick.code(), markedPrice,
+                        pick.targetPrice(), pick.stopLoss(), pick.action(), pick.reason()));
+                }
+                stockPicks = marked;
             }
         }
 
