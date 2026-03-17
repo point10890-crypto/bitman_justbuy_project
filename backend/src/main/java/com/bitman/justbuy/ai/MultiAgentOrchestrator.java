@@ -246,7 +246,7 @@ public class MultiAgentOrchestrator {
             }
         }
 
-        // Correct stockPick prices with real-time Naver data (본문 가격은 프론트에서 제거)
+        // ── STEP: 실시간 가격 교정 + 본문 교정 + 검증 푸터 ──
         if (!stockPicks.isEmpty()) {
             try {
                 List<String> codes = stockPicks.stream()
@@ -256,6 +256,7 @@ public class MultiAgentOrchestrator {
                 Map<String, String> realPrices = marketDataService.fetchStockPrices(codes);
                 realPrices.putAll(queryStockPrices);
 
+                // 1) stockPick 현재가 교정
                 List<StockPick> corrected = new ArrayList<>();
                 for (StockPick pick : stockPicks) {
                     String realPrice = realPrices.get(pick.code());
@@ -265,6 +266,33 @@ public class MultiAgentOrchestrator {
                         : pick);
                 }
                 stockPicks = corrected;
+
+                // 2) finalContent 본문에서 잘못된 현재가 regex 교정
+                for (StockPick pick : stockPicks) {
+                    String realPrice = realPrices.get(pick.code());
+                    if (realPrice == null || pick.name() == null) continue;
+                    String nameEsc = java.util.regex.Pattern.quote(pick.name());
+                    // "종목명 (코드) — 현재가 약 XX,XXX원" → 실제 가격으로 교체
+                    finalContent = finalContent.replaceAll(
+                        "(" + nameEsc + "\\s*[\\(（]?" + java.util.regex.Pattern.quote(pick.code()) + "[\\)）]?[^\\n]{0,30}?)"
+                            + "(\ud604\uc7ac\uac00\\s*(?:\uc57d\\s*)?)[0-9,]+(?:~[0-9,]+)?\\s*\uc6d0",
+                        "$1$2" + realPrice + "\uc6d0");
+                }
+
+                // 3) 실시간 검증 현재가 푸터 추가
+                StringBuilder footer = new StringBuilder();
+                for (StockPick pick : stockPicks) {
+                    String realPrice = realPrices.get(pick.code());
+                    if (realPrice != null) {
+                        footer.append("  ").append(pick.name()).append("(").append(pick.code())
+                              .append("): ").append(realPrice).append("\uc6d0\n");
+                    }
+                }
+                if (!footer.isEmpty()) {
+                    finalContent += "\n\n---\n\uD83D\uDCE1 **\uc2e4\uc2dc\uac04 \uac80\uc99d \ud604\uc7ac\uac00** (\ub124\uc774\ubc84\uae08\uc735 \uae30\uc900)\n"
+                        + footer
+                        + "\u203b \uc704 \ud604\uc7ac\uac00\ub294 \ub124\uc774\ubc84\uae08\uc735 \uc2e4\uc2dc\uac04 \uc2dc\uc138\ub85c \uac80\uc99d\ub41c \uac00\uaca9\uc785\ub2c8\ub2e4.";
+                }
             } catch (Exception e) {
                 log.warn("Price correction failed: {}", e.getMessage());
             }
