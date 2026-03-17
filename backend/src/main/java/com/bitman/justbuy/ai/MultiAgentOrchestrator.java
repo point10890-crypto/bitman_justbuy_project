@@ -210,37 +210,19 @@ public class MultiAgentOrchestrator {
                 consensus.agreementScore(), consensus.stocks().size(), consensus.divergences().size());
         }
 
-        // Round 2: Claude synthesis — 합의 데이터 포함
-        String finalContent;
-        AgentResult synthesisResult = null;
-        if (successResults.size() >= 2 && synthesisEngine.isAvailable()) {
-            log.info("[Orchestrator] Starting Round 2: Synthesis ({} results)", successResults.size());
-            synthesisResult = synthesisEngine.synthesizeWithResult(successResults, query, mode, today, consensusText);
-            finalContent = (synthesisResult != null && "success".equals(synthesisResult.status())
-                && synthesisResult.content() != null && !synthesisResult.content().isBlank())
-                ? synthesisResult.content() : successResults.getFirst().content();
-        } else if (successResults.size() == 1) {
-            finalContent = successResults.getFirst().content();
-        } else if (successResults.isEmpty()) {
-            finalContent = "\uBAA8\uB4E0 AI \uC5D4\uC9C4\uC774 \uC751\uB2F5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. API \uD0A4\uB97C \uD655\uC778\uD558\uACE0 \uC7A0\uC2DC \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
-        } else {
-            finalContent = successResults.getFirst().content();
-        }
-
-        // Extract stock picks
-        List<StockPick> stockPicks = new ArrayList<>(StockParser.parseStockPicks(finalContent));
-        if (stockPicks.size() < 2) {
-            for (AgentResult r : successResults) {
-                List<StockPick> morePicks = StockParser.parseStockPicks(r.content());
-                for (StockPick p : morePicks) {
-                    if (stockPicks.stream().noneMatch(sp -> sp.code().equals(p.code()))) {
-                        stockPicks.add(p);
-                    }
+        // ── STEP 2: Extract stock picks from ALL Round 1 results FIRST ──
+        List<StockPick> stockPicks = new ArrayList<>();
+        for (AgentResult r : successResults) {
+            List<StockPick> picks = StockParser.parseStockPicks(r.content());
+            for (StockPick p : picks) {
+                if (stockPicks.stream().noneMatch(sp -> sp.code().equals(p.code()))) {
+                    stockPicks.add(p);
                 }
             }
         }
 
-        // Correct prices with real-time data (필수 — AI 추정가 대신 실시간 가격 사용)
+        // ── STEP 3: Fetch real-time prices BEFORE synthesis ──
+        String verifiedPriceBlock = "";
         if (!stockPicks.isEmpty()) {
             try {
                 List<String> codes = stockPicks.stream()
@@ -249,32 +231,91 @@ public class MultiAgentOrchestrator {
                     .toList();
                 Map<String, String> realPrices = marketDataService.fetchStockPrices(codes);
                 List<StockPick> corrected = new ArrayList<>();
+                StringBuilder priceLines = new StringBuilder();
                 for (StockPick pick : stockPicks) {
                     String realPrice = realPrices.get(pick.code());
                     if (realPrice != null) {
                         corrected.add(new StockPick(pick.name(), pick.code(), realPrice,
                             pick.targetPrice(), pick.stopLoss(), pick.action(), pick.reason()));
-                        log.info("[Orchestrator] {}({}) 실시간 가격 보정: {}원", pick.name(), pick.code(), realPrice);
+                        priceLines.append("  ").append(pick.name()).append("(").append(pick.code()).append("): ").append(realPrice).append("원\n");
+                        log.info("[Orchestrator] {}({}) 실시간 가격 검증: {}원", pick.name(), pick.code(), realPrice);
                     } else {
-                        // 실시간 가격 조회 실패 시 AI 추정가에 경고 표시
-                        log.warn("[Orchestrator] {}({}) 실시간 가격 조회 실패 — AI 추정가 유지", pick.name(), pick.code());
+                        log.warn("[Orchestrator] {}({}) 실시간 가격 조회 실패", pick.name(), pick.code());
                         String markedPrice = pick.currentPrice() != null ? pick.currentPrice() + " (추정)" : null;
                         corrected.add(new StockPick(pick.name(), pick.code(), markedPrice,
                             pick.targetPrice(), pick.stopLoss(), pick.action(), pick.reason()));
                     }
                 }
                 stockPicks = corrected;
-            } catch (Exception e) {
-                log.warn("Price correction failed: {}", e.getMessage());
-                // 전체 실패 시 모든 가격에 경고 표시
-                List<StockPick> marked = new ArrayList<>();
-                for (StockPick pick : stockPicks) {
-                    String markedPrice = pick.currentPrice() != null ? pick.currentPrice() + " (추정)" : null;
-                    marked.add(new StockPick(pick.name(), pick.code(), markedPrice,
-                        pick.targetPrice(), pick.stopLoss(), pick.action(), pick.reason()));
+                if (!priceLines.isEmpty()) {
+                    verifiedPriceBlock = "\n\n━━━ [실시간 검증 현재가 — 네이버금융 실시간 시세] ━━━\n"
+                        + priceLines
+                        + "⚠️ 위 가격만이 정확한 현재가입니다. AI가 제시한 다른 가격은 모두 무시하고 위 가격으로 교체하세요!";
                 }
-                stockPicks = marked;
+            } catch (Exception e) {
+                log.warn("Price fetch failed before synthesis: {}", e.getMessage());
             }
+        }
+
+        // ── STEP 4: Claude synthesis WITH verified prices ──
+        String finalContent;
+        AgentResult synthesisResult = null;
+        if (successResults.size() >= 2 && synthesisEngine.isAvailable()) {
+            log.info("[Orchestrator] Starting Round 2: Synthesis ({} results) with verified prices", successResults.size());
+            String priceRef = verifiedPriceBlock.isEmpty() ? "" : verifiedPriceBlock;
+            synthesisResult = synthesisEngine.synthesizeWithResult(successResults, query, mode, today, consensusText + priceRef);
+            finalContent = (synthesisResult != null && "success".equals(synthesisResult.status())
+                && synthesisResult.content() != null && !synthesisResult.content().isBlank())
+                ? synthesisResult.content() : successResults.getFirst().content();
+        } else if (successResults.size() == 1) {
+            finalContent = successResults.getFirst().content();
+        } else if (successResults.isEmpty()) {
+            finalContent = "모든 AI 엔진이 응답하지 못했습니다. API 키를 확인하고 잠시 후 다시 시도해 주세요.";
+        } else {
+            finalContent = successResults.getFirst().content();
+        }
+
+        // ── STEP 5: Post-synthesis price correction in text (safety net) ──
+        for (StockPick pick : stockPicks) {
+            if (pick.currentPrice() == null || pick.currentPrice().contains("추정")) continue;
+            String realPrice = pick.currentPrice();
+            String name = pick.name().replaceAll("[.*+?^${}()|\\[\\]\\\\]", "\\\\$0");
+            String code = pick.code();
+            // Fix "현재가 약 XX,XXX원" patterns
+            finalContent = finalContent.replaceAll(
+                "(" + name + "\\s*[\\(（]" + code + "[\\)）][^\\n]*?현재가\\s*약?\\s*)[0-9,]+(?=\\s*원)",
+                "$1" + realPrice);
+            finalContent = finalContent.replaceAll(
+                "(" + code + "[^\\n]*?현재가[:\\s]*약?\\s*)[0-9,]+(?=\\s*원)",
+                "$1" + realPrice);
+        }
+
+        // ── STEP 6: Re-extract picks from synthesis and merge prices ──
+        List<StockPick> synthPicks = StockParser.parseStockPicks(finalContent);
+        if (synthPicks.size() >= stockPicks.size()) {
+            List<StockPick> merged = new ArrayList<>();
+            for (StockPick sp : synthPicks) {
+                StockPick existing = stockPicks.stream()
+                    .filter(p -> p.code().equals(sp.code())).findFirst().orElse(null);
+                if (existing != null && existing.currentPrice() != null && !existing.currentPrice().contains("추정")) {
+                    merged.add(new StockPick(sp.name(), sp.code(), existing.currentPrice(),
+                        sp.targetPrice(), sp.stopLoss(), sp.action(), sp.reason()));
+                } else {
+                    merged.add(sp);
+                }
+            }
+            stockPicks = merged;
+        }
+
+        // ── STEP 7: Append verified price footer ──
+        StringBuilder verifiedFooter = new StringBuilder();
+        for (StockPick pick : stockPicks) {
+            if (pick.currentPrice() != null && !pick.currentPrice().contains("추정")) {
+                verifiedFooter.append("  ").append(pick.name()).append("(").append(pick.code()).append("): ").append(pick.currentPrice()).append("원\n");
+            }
+        }
+        if (!verifiedFooter.isEmpty()) {
+            finalContent += "\n\n---\n📡 **실시간 검증 현재가** (네이버금융 기준)\n" + verifiedFooter + "※ 위 현재가는 네이버금융 실시간 시세로 검증된 가격입니다.";
         }
 
         long totalDuration = System.currentTimeMillis() - totalStart;

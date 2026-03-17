@@ -42,7 +42,13 @@ public class SynthesisEngine {
         + "  - \uBAA9\uD45C\uAC00: XX,XXX\uC6D0 / \uC190\uC808\uAC00: XX,XXX\uC6D0\n"
         + "(\uAC01 AI\uAC00 \uCD94\uCC9C\uD55C \uC885\uBAA9\uC744 \uC885\uD569\uD558\uC5EC \uD569\uC758\uB3C4\uAC00 \uB192\uC740 \uC21C\uC73C\uB85C 3~5\uAC1C \uC815\uB9AC. \uBC18\uB4DC\uC2DC \uC885\uBAA9\uCF54\uB4DC 6\uC790\uB9AC \uC22B\uC790 \uD3EC\uD568!)\n\n"
         + "\uD83E\uDD1D **\uD569\uC758 \uC0AC\uD56D** / \u2694\uFE0F **\uC758\uACAC \uCC28\uC774** / \uD83D\uDCCA **\uC885\uD569 \uC2DC\uB098\uB9AC\uC624** / \uD83D\uDCA1 **\uCD5C\uC885 \uD1B5\uD569 \uD310\uB2E8** / \u26A0\uFE0F \uB9AC\uC2A4\uD06C & \uCCB4\uD06C\uB9AC\uC2A4\uD2B8\n\n"
-        + "\uBA74\uCC45: \uC815\uBCF4 \uC81C\uACF5 \uBAA9\uC801\uC774\uBA70 \uD22C\uC790\uC790\uBB38\uC774 \uC544\uB2D9\uB2C8\uB2E4.";
+        + "\uBA74\uCC45: \uC815\uBCF4 \uC81C\uACF5 \uBAA9\uC801\uC774\uBA70 \uD22C\uC790\uC790\uBB38\uC774 \uC544\uB2D9\uB2C8\uB2E4.\n\n"
+        + "**⚠️ 가격 규칙 (최우선, 위반 시 분석 무효)**:\n"
+        + "1. 입력에 \"실시간 검증 현재가\" 블록이 있으면, 해당 가격이 유일한 정확한 현재가입니다.\n"
+        + "2. 개별 AI가 제시한 가격이 실시간 데이터와 다르면 무조건 실시간 데이터의 가격으로 교체하세요.\n"
+        + "3. AI가 추정/학습한 과거 가격을 현재가로 사용하면 안 됩니다. 이는 거짓 정보입니다.\n"
+        + "4. 실시간 데이터에 없는 종목은 \"현재가: 실시간 데이터 미제공\"으로 표시하세요.\n"
+        + "5. \"📌 종목명 (종목코드) — 현재가 약 XX,XXX원\" 형식에서 XX,XXX는 반드시 실시간 데이터의 가격이어야 합니다.";
 
     public SynthesisEngine(ClaudeAgent claudeAgent) {
         this.claudeAgent = claudeAgent;
