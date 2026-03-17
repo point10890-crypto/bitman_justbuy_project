@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react' // v4
+import { useState, useEffect, useMemo } from 'react' // v4
 import type { AnalysisResult } from '../../hooks/useAnalysis'
 import { fetchStockPrices } from '../../api/analysisApi'
 import { ReportRenderer } from './ReportRenderer'
@@ -98,6 +98,58 @@ function LoadingIndicator() {
 }
 
 function AnalysisResultView({ result }: { result: AnalysisResult }) {
+  // ★ 실시간 가격을 가져와서 본문 텍스트의 잘못된 가격도 교정
+  const [livePrices, setLivePrices] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const codes = result.stockPicks?.map(p => p.code).filter(Boolean) || []
+    if (codes.length === 0) return
+    fetchStockPrices(codes).then(prices => {
+      if (Object.keys(prices).length > 0) setLivePrices(prices)
+    })
+  }, [result.stockPicks])
+
+  // 본문 텍스트에서 AI 할루시네이션 가격을 실시간 가격으로 교정
+  const correctedContent = useMemo(() => {
+    if (!result.content || Object.keys(livePrices).length === 0 || !result.stockPicks) return result.content
+    let content = result.content
+    for (const pick of result.stockPicks) {
+      const realPrice = livePrices[pick.code]
+      if (!realPrice || !pick.name) continue
+      const nameEsc = pick.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const codeEsc = pick.code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      // 패턴1: "종목명 (코드) — 현재가 약 XX,XXX원"
+      content = content.replace(
+        new RegExp(`(${nameEsc}\\s*[\\(（]?${codeEsc}[\\)）]?[^\\n]{0,50}?)(현재가\\s*(?::\\s*)?(?:약\\s*)?)[0-9,]+(?:~[0-9,]+)?\\s*원`, 'g'),
+        `$1$2${realPrice}원`)
+      // 패턴2: "약 XX,XXX원" (코드 뒤)
+      content = content.replace(
+        new RegExp(`(${nameEsc}\\s*[\\(（]${codeEsc}[\\)）][^\\n]{0,20}?)(약\\s*)[0-9,]+(?:~[0-9,]+)?\\s*원`, 'g'),
+        `$1$2${realPrice}원`)
+      // 패턴3: "현재 주가" 패턴
+      content = content.replace(
+        new RegExp(`(${nameEsc}[^\\n]{0,60}?)(현재\\s*주가\\s*(?::\\s*)?(?:약\\s*)?)[0-9,]+(?:~[0-9,]+)?\\s*원`, 'g'),
+        `$1$2${realPrice}원`)
+      // 패턴4: "현재가는 약 XX원"
+      content = content.replace(
+        new RegExp(`(${nameEsc}[^\\n]{0,60}?)(현재가는?\\s*(?:약\\s*)?)[0-9,]+(?:~[0-9,]+)?\\s*원`, 'g'),
+        `$1$2${realPrice}원`)
+    }
+    // 실시간 검증 현재가 푸터가 없으면 추가
+    if (!content.includes('실시간 검증 현재가')) {
+      const lines = Object.entries(livePrices)
+        .map(([code, price]) => {
+          const pick = result.stockPicks?.find(p => p.code === code)
+          return pick ? `  ${pick.name}(${code}): ${price}원` : null
+        })
+        .filter(Boolean)
+      if (lines.length > 0) {
+        content += `\n\n---\n📡 **실시간 검증 현재가** (네이버금융 기준)\n${lines.join('\n')}\n※ 위 현재가는 네이버금융 실시간 시세로 검증된 가격입니다.`
+      }
+    }
+    return content
+  }, [result.content, result.stockPicks, livePrices])
+
   return (
     <div className="animate-slide-up" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
       {/* AI 상태 바 */}
@@ -132,7 +184,7 @@ function AnalysisResultView({ result }: { result: AnalysisResult }) {
         <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border-subtle)' }} />
       </div>
 
-      <ReportRenderer content={result.content} />
+      <ReportRenderer content={correctedContent} />
 
       {/* 피드백 위젯 */}
       <FeedbackWidget

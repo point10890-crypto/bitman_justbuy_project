@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent } from 'react'
+import { useState, useEffect, useRef, useMemo, type FormEvent } from 'react'
 import { useAnalysis } from '../hooks/useAnalysis'
 import { getRecentHistory, formatTimeAgo, type HistoryEntry } from '../lib/analysisHistory'
 import { fetchStockPrices } from '../api/analysisApi'
@@ -355,54 +355,8 @@ export default function HomePage() {
               </div>
             )}
 
-            {result && (
-              <div className="animate-slide-up" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
-                {/* AI 상태 바 */}
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {result.isPrecomputed && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-bold" style={{ backgroundColor: 'rgba(255,215,0,0.08)', border: '1px solid rgba(255,215,0,0.2)', color: '#FFD700' }}>
-                      ⏰ 예약분석 · {new Date(result.updatedAt).toLocaleString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  )}
-                  {result.hasSynthesis && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-bold" style={{ backgroundColor: 'rgba(124,77,255,0.08)', border: '1px solid rgba(124,77,255,0.2)', color: 'var(--color-grade-s)' }}>
-                      🤝 {result.metadata.agentsSucceeded} AI 종합
-                    </span>
-                  )}
-                  {result.agents?.filter(a => a.status === 'success').map(a => {
-                    const colors: Record<string, string> = { claude: '#FF6B35', gemini: '#4285F4', chatgpt: '#10A37F', perplexity: '#20B2AA', grok: '#FF4500' }
-                    const c = colors[a.agent] || '#888'
-                    return <span key={a.agent} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[8px] font-bold" style={{ backgroundColor: `${c}12`, color: c }}>✓ {a.agent} {(a.durationMs / 1000).toFixed(0)}s</span>
-                  })}
-                </div>
+            {result && <AnalysisResultSection result={result} />}
 
-                {/* 종목 추천 카드 */}
-                {result.stockPicks && result.stockPicks.length > 0 && <LiveStockPickCards picks={result.stockPicks} />}
-
-                {/* 구분선 */}
-                <div className="flex items-center gap-2.5 py-0.5">
-                  <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border-subtle)' }} />
-                  <span className="text-[9px] font-bold" style={{ color: 'var(--text-muted)' }}>상세 분석 리포트</span>
-                  <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border-subtle)' }} />
-                </div>
-
-                <ReportRenderer content={result.content} />
-
-                {/* 피드백 위젯 */}
-                <FeedbackWidget
-                  mode={result.mode || '분석해줘'}
-                  analysisId={result.updatedAt}
-                  stockPicks={result.stockPicks?.map((p: StockPickItem) => ({ name: p.name, code: p.code }))}
-                />
-
-                {/* 메타 정보 */}
-                <div className="flex items-center gap-2.5" style={{ paddingTop: 'var(--space-md)', borderTop: '1px solid var(--border-subtle)' }}>
-                  <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>Multi-Agent V4.0 · {result.metadata.agentsSucceeded}/{result.metadata.agentsUsed} AI</span>
-                  {result.metadata.totalDurationMs > 0 && <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>{(result.metadata.totalDurationMs / 1000).toFixed(1)}s</span>}
-                  {result.isPrecomputed && <span className="text-[9px] ml-auto" style={{ color: '#FFD700' }}>⏰ 예약 분석</span>}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* 하단 투자 경고 */}
@@ -435,6 +389,113 @@ function cleanPickName(name: string): string {
   // 후행 조사 제거
   cleaned = cleaned.replace(/\s+(?:등|의|은|는|이|가|을|를|에|도|로|과|와)$/, '').trim()
   return cleaned || name
+}
+
+/** ★ 프론트엔드 실시간 가격 교정 — 백엔드 배포 여부와 무관하게 정확한 가격 표시 */
+function correctContentPrices(content: string, picks: StockPickItem[], livePrices: Record<string, string>): string {
+  if (!content || Object.keys(livePrices).length === 0) return content
+  let result = content
+  for (const pick of picks) {
+    const realPrice = livePrices[pick.code]
+    if (!realPrice || !pick.name) continue
+    const nameEsc = pick.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const codeEsc = pick.code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    // 패턴1: "종목명 (코드) — 현재가 약 XX,XXX원"
+    result = result.replace(
+      new RegExp(`(${nameEsc}\\s*[\\(（]?${codeEsc}[\\)）]?[^\\n]{0,50}?)(현재가\\s*(?::\\s*)?(?:약\\s*)?)[0-9,]+(?:~[0-9,]+)?\\s*원`, 'g'),
+      `$1$2${realPrice}원`)
+    // 패턴2: "종목명(코드)...약 XX원"
+    result = result.replace(
+      new RegExp(`(${nameEsc}\\s*[\\(（]${codeEsc}[\\)）][^\\n]{0,20}?)(약\\s*)[0-9,]+(?:~[0-9,]+)?\\s*원`, 'g'),
+      `$1$2${realPrice}원`)
+    // 패턴3: "현재 주가"
+    result = result.replace(
+      new RegExp(`(${nameEsc}[^\\n]{0,60}?)(현재\\s*주가\\s*(?::\\s*)?(?:약\\s*)?)[0-9,]+(?:~[0-9,]+)?\\s*원`, 'g'),
+      `$1$2${realPrice}원`)
+    // 패턴4: "현재가는 약 XX원"
+    result = result.replace(
+      new RegExp(`(${nameEsc}[^\\n]{0,60}?)(현재가는?\\s*(?:약\\s*)?)[0-9,]+(?:~[0-9,]+)?\\s*원`, 'g'),
+      `$1$2${realPrice}원`)
+  }
+  // 실시간 검증 현재가 푸터가 없으면 추가
+  if (!result.includes('실시간 검증 현재가')) {
+    const lines = Object.entries(livePrices)
+      .map(([code, price]) => {
+        const p = picks.find(pk => pk.code === code)
+        return p ? `  ${p.name}(${code}): ${price}원` : null
+      })
+      .filter(Boolean)
+    if (lines.length > 0) {
+      result += `\n\n---\n📡 **실시간 검증 현재가** (네이버금융 기준)\n${lines.join('\n')}\n※ 위 현재가는 네이버금융 실시간 시세로 검증된 가격입니다.`
+    }
+  }
+  return result
+}
+
+function AnalysisResultSection({ result }: { result: import('../hooks/useAnalysis').AnalysisResult }) {
+  const [livePrices, setLivePrices] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const codes = result.stockPicks?.map(p => p.code).filter(Boolean) || []
+    if (codes.length === 0) return
+    fetchStockPrices(codes).then(prices => {
+      if (Object.keys(prices).length > 0) setLivePrices(prices)
+    })
+  }, [result.stockPicks])
+
+  const correctedContent = useMemo(
+    () => correctContentPrices(result.content, result.stockPicks || [], livePrices),
+    [result.content, result.stockPicks, livePrices]
+  )
+
+  return (
+    <div className="animate-slide-up" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+      {/* AI 상태 바 */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {result.isPrecomputed && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-bold" style={{ backgroundColor: 'rgba(255,215,0,0.08)', border: '1px solid rgba(255,215,0,0.2)', color: '#FFD700' }}>
+            ⏰ 예약분석 · {new Date(result.updatedAt).toLocaleString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        )}
+        {result.hasSynthesis && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-bold" style={{ backgroundColor: 'rgba(124,77,255,0.08)', border: '1px solid rgba(124,77,255,0.2)', color: 'var(--color-grade-s)' }}>
+            🤝 {result.metadata.agentsSucceeded} AI 종합
+          </span>
+        )}
+        {result.agents?.filter(a => a.status === 'success').map(a => {
+          const colors: Record<string, string> = { claude: '#FF6B35', gemini: '#4285F4', chatgpt: '#10A37F', perplexity: '#20B2AA', grok: '#FF4500' }
+          const c = colors[a.agent] || '#888'
+          return <span key={a.agent} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[8px] font-bold" style={{ backgroundColor: `${c}12`, color: c }}>✓ {a.agent} {(a.durationMs / 1000).toFixed(0)}s</span>
+        })}
+      </div>
+
+      {/* 종목 추천 카드 */}
+      {result.stockPicks && result.stockPicks.length > 0 && <LiveStockPickCards picks={result.stockPicks} />}
+
+      {/* 구분선 */}
+      <div className="flex items-center gap-2.5 py-0.5">
+        <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border-subtle)' }} />
+        <span className="text-[9px] font-bold" style={{ color: 'var(--text-muted)' }}>상세 분석 리포트</span>
+        <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border-subtle)' }} />
+      </div>
+
+      <ReportRenderer content={correctedContent} />
+
+      {/* 피드백 위젯 */}
+      <FeedbackWidget
+        mode={result.mode || '분석해줘'}
+        analysisId={result.updatedAt}
+        stockPicks={result.stockPicks?.map((p: StockPickItem) => ({ name: p.name, code: p.code }))}
+      />
+
+      {/* 메타 정보 */}
+      <div className="flex items-center gap-2.5" style={{ paddingTop: 'var(--space-md)', borderTop: '1px solid var(--border-subtle)' }}>
+        <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>Multi-Agent V4.0 · {result.metadata.agentsSucceeded}/{result.metadata.agentsUsed} AI</span>
+        {result.metadata.totalDurationMs > 0 && <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>{(result.metadata.totalDurationMs / 1000).toFixed(1)}s</span>}
+        {result.isPrecomputed && <span className="text-[9px] ml-auto" style={{ color: '#FFD700' }}>⏰ 예약 분석</span>}
+      </div>
+    </div>
+  )
 }
 
 function LiveStockPickCards({ picks }: { picks: StockPickItem[] }) {
