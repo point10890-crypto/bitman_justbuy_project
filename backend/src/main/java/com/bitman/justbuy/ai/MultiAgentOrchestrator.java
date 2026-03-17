@@ -145,6 +145,13 @@ public class MultiAgentOrchestrator {
             marketDataText = "\n[\uC8FC\uC758: \uC2E4\uC2DC\uAC04 \uC2DC\uC7A5 \uB370\uC774\uD130 \uC218\uC9D1\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4. \uD559\uC2B5 \uB370\uC774\uD130 \uAE30\uBC18\uC73C\uB85C \uBD84\uC11D\uD569\uB2C8\uB2E4.]\n";
         }
 
+        // ★ 쿼리에 포함된 종목의 실시간 가격을 추가 수집하여 프롬프트에 포함
+        Map<String, String> queryStockPrices = new HashMap<>();
+        String queryStockPriceText = fetchQueryStockPrices(query, queryStockPrices);
+        if (!queryStockPriceText.isEmpty()) {
+            marketDataText += queryStockPriceText;
+        }
+
         String baseSystemPrompt = SYSTEM_PROMPT + "\n\n\uC624\uB298 \uB0A0\uC9DC: " + today + " (KST). \uBC18\uB4DC\uC2DC \uC774 \uB0A0\uC9DC \uAE30\uC900\uC73C\uB85C \uCD5C\uC2E0 \uC815\uBCF4\uB97C \uBD84\uC11D\uD560 \uAC83.";
         String userMessage = modeInstruction.isEmpty()
             ? "[\uC624\uB298: " + today + "] " + query + "\n\n" + marketDataText
@@ -239,7 +246,7 @@ public class MultiAgentOrchestrator {
             }
         }
 
-        // Correct prices with real-time data
+        // Correct stockPick prices with real-time Naver data (본문 가격은 프론트에서 제거)
         if (!stockPicks.isEmpty()) {
             try {
                 List<String> codes = stockPicks.stream()
@@ -247,6 +254,8 @@ public class MultiAgentOrchestrator {
                     .filter(c -> c.length() == 6)
                     .toList();
                 Map<String, String> realPrices = marketDataService.fetchStockPrices(codes);
+                realPrices.putAll(queryStockPrices);
+
                 List<StockPick> corrected = new ArrayList<>();
                 for (StockPick pick : stockPicks) {
                     String realPrice = realPrices.get(pick.code());
@@ -272,4 +281,48 @@ public class MultiAgentOrchestrator {
             Instant.now().toString(), true,
             new AnalysisResponse.Metadata(totalDuration, availableAgents.size(), successResults.size()));
     }
+
+    /**
+     * 쿼리에서 종목명을 찾아 실시간 가격을 가져온다.
+     * 반환: 프롬프트에 추가할 텍스트 (비어있으면 해당 종목 없음)
+     */
+    private String fetchQueryStockPrices(String query, Map<String, String> outPrices) {
+        if (query == null || query.isBlank()) return "";
+
+        // KNOWN_STOCKS에서 쿼리에 포함된 종목명 찾기
+        Set<String> foundCodes = new LinkedHashSet<>();
+        Map<String, String> codeToName = new LinkedHashMap<>();
+
+        for (var entry : StockParser.KNOWN_STOCKS.entrySet()) {
+            if (query.contains(entry.getKey())) {
+                String code = entry.getValue();
+                if (foundCodes.add(code)) {
+                    codeToName.put(code, entry.getKey());
+                }
+            }
+        }
+
+        if (foundCodes.isEmpty()) return "";
+
+        // 실시간 가격 조회
+        Map<String, String> prices = marketDataService.fetchStockPrices(new ArrayList<>(foundCodes));
+        outPrices.putAll(prices);
+
+        if (prices.isEmpty()) return "";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n\u2501\u2501\u2501 \ubd84\uc11d \ub300\uc0c1 \uc885\ubaa9 \uc2e4\uc2dc\uac04 \uac00\uaca9 \u2501\u2501\u2501\n");
+        sb.append("\u26a0\ufe0f \uc544\ub798\ub294 \ub124\uc774\ubc84\uae08\uc735 \uc2e4\uc2dc\uac04 \uc2dc\uc138\uc785\ub2c8\ub2e4. \ubd84\uc11d \uc2dc \ubc18\ub4dc\uc2dc \uc774 \uac00\uaca9\uc744 \ud604\uc7ac\uac00\ub85c \uc0ac\uc6a9\ud558\uc138\uc694!\n");
+        for (var entry : prices.entrySet()) {
+            String code = entry.getKey();
+            String price = entry.getValue();
+            String name = codeToName.getOrDefault(code, code);
+            sb.append("  \u2605 ").append(name).append("(").append(code).append("): \ud604\uc7ac\uac00 ")
+              .append(price).append("\uc6d0 (\ub124\uc774\ubc84 \uc2e4\uc2dc\uac04)\n");
+        }
+        sb.append("\u2501\u2501\u2501 \uc704 \uac00\uaca9\uc744 \ubc18\ub4dc\uc2dc \ud604\uc7ac\uac00\ub85c \uc0ac\uc6a9\ud558\uc138\uc694! \u2501\u2501\u2501\n");
+        log.info("[Orchestrator] 쿼리 종목 가격 주입: {}", prices);
+        return sb.toString();
+    }
+
 }

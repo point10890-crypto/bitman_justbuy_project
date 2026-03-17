@@ -10,7 +10,7 @@ public final class StockParser {
 
     private StockParser() {}
 
-    static final Map<String, String> KNOWN_STOCKS;
+    public static final Map<String, String> KNOWN_STOCKS;
     static {
         var m = new LinkedHashMap<String, String>();
         m.put("\uc0bc\uc131\uc804\uc790", "005930"); m.put("\uc0bc\uc131\uc804\uc790\uc6b0", "005935");
@@ -54,6 +54,22 @@ public final class StockParser {
         m.put("\ud14c\ud06c\uc719", "089030");
         m.put("\uc0bc\uc131\uc804\uae30", "009150");
         m.put("\ub354\uc874\ubc84\uc988", "199820"); m.put("\ub354\uc874", "199820");
+        // 제약/바이오
+        m.put("\uc720\ud55c\uc591\ud589", "000100");
+        m.put("\uc140\ud2b8\ub9ac\uc628", "068270");
+        m.put("\uc0bc\uc131\ubc14\uc774\uc624\ub85c\uc9c1\uc2a4", "207940"); m.put("\uc0bc\uc131\ubc14\uc774\uc624", "207940");
+        m.put("\uc5d0\uc2a4\ud2f0\ud314", "009170");
+        m.put("\ub179\uc2ed\uc790\uc2a4", "006120");
+        m.put("\uc720\ud55c\ud0a4\ubc84\ub9ac", "000220");
+        // 기타 주요 종목
+        m.put("\uc5d4\uc528\uc18c\ud504\ud2b8", "036570");
+        m.put("\ubc30\ud130\ub9ac\uc194\ub8e8\uc158\uc988", "299660");
+        m.put("\uc5d0\ucf54\ud504\ub85c\ube44\uc5e0", "247540");
+        m.put("LS\uc5d0\ub808\ud2b8\ub9ad", "010120");
+        m.put("LS", "006260");
+        m.put("\ud55c\ubbf8\ubc18\ub3c4\uccb4", "042700");
+        m.put("\ub9ac\ub178\uacf5\uc5c5", "058470");
+        m.put("HD\ud604\ub300\uc804\uae30", "267260");
         KNOWN_STOCKS = Collections.unmodifiableMap(m);
     }
 

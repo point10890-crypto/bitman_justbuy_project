@@ -115,10 +115,50 @@ export async function fetchStockPrices(codes: string[]): Promise<Record<string, 
   }
 }
 
-/** 실시간 멀티에이전트 분석 트리거 */
+/** 비동기 작업 상태 폴링 */
+async function pollJob(jobId: string, token?: string, maxWaitMs = 180_000): Promise<AnalysisResponse> {
+  const headers: HeadersInit = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  const start = Date.now()
+  const interval = 3000 // 3초마다 폴링
+
+  while (Date.now() - start < maxWaitMs) {
+    await new Promise(r => setTimeout(r, interval))
+
+    const res = await fetch(`${API_BASE}/api/analysis/job/${jobId}`, { headers })
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('분석 작업을 찾을 수 없습니다.')
+      const errData = await res.json().catch(() => ({ error: `Server error ${res.status}` }))
+      if (errData.status === 'error') throw new Error(errData.error || '분석 중 오류 발생')
+      throw new Error(errData.error || `API error ${res.status}`)
+    }
+
+    const data = await res.json()
+
+    // status가 pending/running이면 계속 폴링
+    if (data.status === 'pending' || data.status === 'running') continue
+
+    // 완료된 경우 (finalContent가 있으면 완료)
+    if (data.finalContent !== undefined) {
+      return transformResponse(data)
+    }
+
+    // status가 error면 에러 throw
+    if (data.status === 'error') {
+      throw new Error(data.error || '분석 중 오류 발생')
+    }
+  }
+
+  throw new Error('분석 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.')
+}
+
+/** 실시간 멀티에이전트 분석 트리거 (비동기 폴링) */
 export async function fetchLiveAnalysis(query: string, mode: string, token?: string): Promise<AnalysisResponse> {
   const headers: HeadersInit = { 'Content-Type': 'application/json' }
   if (token) headers['Authorization'] = `Bearer ${token}`
+
+  // 1단계: 작업 시작 → jobId 받기
   const res = await fetch(`${API_BASE}/api/analysis/live`, {
     method: 'POST',
     headers,
@@ -137,6 +177,9 @@ export async function fetchLiveAnalysis(query: string, mode: string, token?: str
     throw new Error(parsed)
   }
 
-  const data = await res.json()
-  return transformResponse(data)
+  const { jobId } = await res.json()
+  if (!jobId) throw new Error('서버에서 작업 ID를 받지 못했습니다.')
+
+  // 2단계: 결과 폴링 (최대 3분)
+  return pollJob(jobId, token)
 }
