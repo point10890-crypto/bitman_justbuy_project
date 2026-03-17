@@ -54,39 +54,6 @@ public final class StockParser {
         m.put("\ud14c\ud06c\uc719", "089030");
         m.put("\uc0bc\uc131\uc804\uae30", "009150");
         m.put("\ub354\uc874\ubc84\uc988", "199820"); m.put("\ub354\uc874", "199820");
-        // 제약/바이오
-        m.put("\uc720\ud55c\uc591\ud589", "000100");
-        m.put("\ub179\uc2ed\uc790", "006280"); m.put("GC\ub179\uc2ed\uc790", "006280");
-        m.put("\uc885\uadfc\ub2f9", "185750");
-        m.put("\ud55c\ubbf8\uc57d\ud488", "128940");
-        m.put("\ub300\uc6c5\uc81c\uc57d", "069620"); m.put("\ub300\uc6c5", "003090");
-        m.put("JW\uc911\uc678\uc81c\uc57d", "001060");
-        m.put("\ub3d9\uc544\uc5d0\uc2a4\ud2f0", "170900"); m.put("\ub3d9\uc544ST", "170900");
-        m.put("\ubcf4\ub839", "003850"); m.put("\ubcf4\ub839\uc81c\uc57d", "003850");
-        m.put("\uc140\ud2b8\ub9ac\uc628\uc81c\uc57d", "068760");
-        m.put("\ud734\uc824", "145020");
-        m.put("\uc2e0\ud48d\uc81c\uc57d", "019170");
-        // 소비재/유통
-        m.put("LG\uc0dd\ud65c\uac74\uac15", "051900");
-        m.put("\ub86f\ub370\ucf00\ubbf8\uce7c", "011170");
-        m.put("\ud604\ub300\ubc31\ud654\uc810", "069960");
-        m.put("\uc2e0\uc138\uacc4", "004170"); m.put("\uc774\ub9c8\ud2b8", "139480");
-        m.put("GS\uac74\uc124", "006360"); m.put("GS", "078930");
-        m.put("CJ ENM", "035760");
-        // 2차전지/소재
-        m.put("\uc5d8\uc559\uc5d0\ud504", "066970");
-        m.put("\uc5d0\ucf54\ud504\ub85c\uc5d0\uc774\uce58\uc5d4", "383310");
-        m.put("\ud3ec\uc2a4\ucf54DX", "022100");
-        m.put("\ub098\ub178\uc2e0\uc18c\uc7ac", "121600");
-        m.put("\ub3d9\uc9c4\uc40e\ubbf8\ucf00", "005290");
-        m.put("\uc6d0\uc775IPS", "240810");
-        m.put("\ud55c\uc194\ucf00\ubbf8\uce7c", "014680");
-        // 기타
-        m.put("\ucf54\uc6e8\uc774", "021240");
-        m.put("F&F", "383220");
-        m.put("\ub9cc\ub3c4", "204320");
-        m.put("\ud604\ub300\uc624\ud1a0\uc5d0\ubc84", "307950");
-        m.put("OCI", "010060");
         KNOWN_STOCKS = Collections.unmodifiableMap(m);
     }
 
