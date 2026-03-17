@@ -187,9 +187,22 @@ export async function fetchLiveAnalysis(query: string, mode: string, token?: str
     throw new Error(parsed)
   }
 
-  const { jobId } = await res.json()
-  if (!jobId) throw new Error('서버에서 작업 ID를 받지 못했습니다.')
+  const data = await res.json()
 
-  // 2단계: 결과 폴링 (최대 3분)
-  return pollJob(jobId, token)
+  // 비동기 패턴: jobId가 있으면 폴링
+  if (data.jobId) {
+    return pollJob(data.jobId, token)
+  }
+
+  // 동기 패턴 폴백: 서버가 직접 결과를 반환한 경우 (구 버전 호환)
+  if (data.finalContent !== undefined || data.mode !== undefined) {
+    return transformResponse(data)
+  }
+
+  // status가 있는 래핑 응답
+  if (data.status === 'complete' && data.result) {
+    return transformResponse(data.result)
+  }
+
+  throw new Error('서버에서 작업 ID를 받지 못했습니다. 서버 상태를 확인해 주세요.')
 }
