@@ -139,8 +139,18 @@ async function pollJob(jobId: string, token?: string, maxWaitMs = 180_000): Prom
     // status가 pending/running이면 계속 폴링
     if (data.status === 'pending' || data.status === 'running') continue
 
-    // 완료된 경우 (finalContent가 있으면 완료)
+    // 완료된 경우: finalContent가 직접 있거나 result 안에 있는 경우 모두 처리
     if (data.finalContent !== undefined) {
+      return transformResponse(data)
+    }
+
+    // 래핑된 응답 처리: { status: "complete", result: AnalysisResponse }
+    if (data.status === 'complete' && data.result?.finalContent !== undefined) {
+      return transformResponse(data.result)
+    }
+
+    // mode 필드가 있으면 AnalysisResponse 직접 반환된 것 (status 필드 없이)
+    if (data.mode !== undefined && data.stockPicks !== undefined) {
       return transformResponse(data)
     }
 

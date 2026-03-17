@@ -50,7 +50,7 @@ public class MarketDataService {
                 return mapper.readTree(resp.getBody());
             }
         } catch (Exception e) {
-            log.debug("Fetch failed for {}: {}", url, e.getMessage());
+            log.warn("Fetch failed for {}: {}", url, e.getMessage());
         }
         return null;
     }

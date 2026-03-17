@@ -216,12 +216,39 @@ public class MultiAgentOrchestrator {
                 consensus.agreementScore(), consensus.stocks().size(), consensus.divergences().size());
         }
 
-        // Round 2: Claude synthesis — 합의 데이터 포함
+        // ★ Synthesis 전에 1차 종목 추출 + 실시간 가격 수집 (stock project 패턴)
+        List<StockPick> preSynthesisPicks = new ArrayList<>();
+        for (AgentResult r : successResults) {
+            List<StockPick> morePicks = StockParser.parseStockPicks(r.content());
+            for (StockPick p : morePicks) {
+                if (preSynthesisPicks.stream().noneMatch(sp -> sp.code().equals(p.code()))) {
+                    preSynthesisPicks.add(p);
+                }
+            }
+        }
+
+        // 실시간 가격 미리 수집 → Synthesis prompt에 주입
+        Map<String, String> preSynthesisPrices = new HashMap<>(queryStockPrices);
+        if (!preSynthesisPicks.isEmpty()) {
+            try {
+                List<String> preCodes = preSynthesisPicks.stream()
+                    .map(StockPick::code).filter(c -> c.length() == 6).toList();
+                Map<String, String> fetched = marketDataService.fetchStockPrices(preCodes);
+                preSynthesisPrices.putAll(fetched);
+                log.info("[Orchestrator] Pre-synthesis 가격 수집: {}개 종목", fetched.size());
+            } catch (Exception e) {
+                log.warn("[Orchestrator] Pre-synthesis 가격 수집 실패: {}", e.getMessage());
+            }
+        }
+
+        // Round 2: Claude synthesis — 합의 데이터 + 실시간 가격 포함
         String finalContent;
         AgentResult synthesisResult = null;
         if (successResults.size() >= 2 && synthesisEngine.isAvailable()) {
-            log.info("[Orchestrator] Starting Round 2: Synthesis ({} results)", successResults.size());
-            synthesisResult = synthesisEngine.synthesizeWithResult(successResults, query, mode, today, consensusText);
+            log.info("[Orchestrator] Starting Round 2: Synthesis ({} results, {} verified prices)",
+                successResults.size(), preSynthesisPrices.size());
+            synthesisResult = synthesisEngine.synthesizeWithResult(
+                successResults, query, mode, today, consensusText, preSynthesisPicks, preSynthesisPrices);
             finalContent = (synthesisResult != null && "success".equals(synthesisResult.status())
                 && synthesisResult.content() != null && !synthesisResult.content().isBlank())
                 ? synthesisResult.content() : successResults.getFirst().content();
@@ -247,14 +274,15 @@ public class MultiAgentOrchestrator {
         }
 
         // ── STEP: 실시간 가격 교정 + 본문 교정 + 검증 푸터 ──
+        Map<String, String> realPrices = new HashMap<>(queryStockPrices);
         if (!stockPicks.isEmpty()) {
             try {
                 List<String> codes = stockPicks.stream()
                     .map(StockPick::code)
                     .filter(c -> c.length() == 6)
                     .toList();
-                Map<String, String> realPrices = marketDataService.fetchStockPrices(codes);
-                realPrices.putAll(queryStockPrices);
+                Map<String, String> fetchedPrices = marketDataService.fetchStockPrices(codes);
+                realPrices.putAll(fetchedPrices);
 
                 // 1) stockPick 현재가 교정
                 List<StockPick> corrected = new ArrayList<>();

@@ -62,7 +62,7 @@ export function useAnalysis() {
       setCache(query, effectiveMode, res)
       addHistory(query, mode, res.content)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '분석 중 오류 발생'
+      const msg = (err instanceof Error ? err.message : '분석 중 오류 발생') || '분석 중 오류 발생'
       if (msg.includes('403') || msg.includes('PRO') || msg.includes('구독자만')) {
         setError('PRO 구독자만 사용 가능한 기능입니다.')
       } else if (msg.includes('credit balance') || msg.includes('크레딧')) {

@@ -85,8 +85,9 @@ public class AnalysisController {
                 AnalysisResponse result = analysisService.runLiveAnalysis(request.query(), request.mode());
                 jobManager.markComplete(jobId, result);
             } catch (Exception e) {
-                log.error("[API] Live analysis failed for job {}: {}", jobId, e.getMessage());
-                jobManager.markError(jobId, e.getMessage());
+                String errMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                log.error("[API] Live analysis failed for job {}: {}", jobId, errMsg, e);
+                jobManager.markError(jobId, errMsg);
             }
         });
 
@@ -107,7 +108,16 @@ public class AnalysisController {
         }
 
         return switch (job.status()) {
-            case COMPLETE -> ResponseEntity.ok(job.result());
+            case COMPLETE -> {
+                // AnalysisResponse를 직접 반환 — finalContent 필드로 프론트엔드가 완료 감지
+                var result = job.result();
+                if (result != null) {
+                    yield ResponseEntity.ok(result);
+                } else {
+                    yield ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body(Map.of("status", "error", "error", "분석 결과가 비어 있습니다."));
+                }
+            }
             case ERROR -> ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("status", "error", "error", job.error() != null ? job.error() : "Unknown error"));
             default -> ResponseEntity.ok(Map.of("status", job.status().name().toLowerCase()));

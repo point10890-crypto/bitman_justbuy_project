@@ -2,11 +2,13 @@ package com.bitman.justbuy.ai;
 
 import com.bitman.justbuy.ai.agent.ClaudeAgent;
 import com.bitman.justbuy.dto.AgentResult;
+import com.bitman.justbuy.dto.StockPick;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Component
@@ -42,7 +44,13 @@ public class SynthesisEngine {
         + "  - \uBAA9\uD45C\uAC00: XX,XXX\uC6D0 / \uC190\uC808\uAC00: XX,XXX\uC6D0\n"
         + "(\uAC01 AI\uAC00 \uCD94\uCC9C\uD55C \uC885\uBAA9\uC744 \uC885\uD569\uD558\uC5EC \uD569\uC758\uB3C4\uAC00 \uB192\uC740 \uC21C\uC73C\uB85C 3~5\uAC1C \uC815\uB9AC. \uBC18\uB4DC\uC2DC \uC885\uBAA9\uCF54\uB4DC 6\uC790\uB9AC \uC22B\uC790 \uD3EC\uD568!)\n\n"
         + "\uD83E\uDD1D **\uD569\uC758 \uC0AC\uD56D** / \u2694\uFE0F **\uC758\uACAC \uCC28\uC774** / \uD83D\uDCCA **\uC885\uD569 \uC2DC\uB098\uB9AC\uC624** / \uD83D\uDCA1 **\uCD5C\uC885 \uD1B5\uD569 \uD310\uB2E8** / \u26A0\uFE0F \uB9AC\uC2A4\uD06C & \uCCB4\uD06C\uB9AC\uC2A4\uD2B8\n\n"
-        + "\uBA74\uCC45: \uC815\uBCF4 \uC81C\uACF5 \uBAA9\uC801\uC774\uBA70 \uD22C\uC790\uC790\uBB38\uC774 \uC544\uB2D9\uB2C8\uB2E4.";
+        + "\uBA74\uCC45: \uC815\uBCF4 \uC81C\uACF5 \uBAA9\uC801\uC774\uBA70 \uD22C\uC790\uC790\uBB38\uC774 \uC544\uB2D9\uB2C8\uB2E4.\n\n"
+        + "**\u26A0\uFE0F \uAC00\uACA9 \uADDC\uCE59 (\uCD5C\uC6B0\uC120, \uC704\uBC18 \uC2DC \uBD84\uC11D \uBB34\uD6A8)**:\n"
+        + "1. \uC785\uB825\uC5D0 \"\uC2E4\uC2DC\uAC04 \uC2DC\uC138 \uCC38\uC870\" \uB610\uB294 \"\uC2E4\uC2DC\uAC04 \uC2DC\uC7A5 \uB370\uC774\uD130\"\uAC00 \uD3EC\uD568\uB418\uC5B4 \uC788\uC73C\uBA74, \uD574\uB2F9 \uAC00\uACA9\uC774 \uC720\uC77C\uD55C \uC815\uD655\uD55C \uD604\uC7AC\uAC00\uC785\uB2C8\uB2E4.\n"
+        + "2. \uAC1C\uBCC4 AI\uAC00 \uC81C\uC2DC\uD55C \uAC00\uACA9\uC774 \uC2E4\uC2DC\uAC04 \uB370\uC774\uD130\uC640 \uB2E4\uB974\uBA74 \uBB34\uC870\uAC74 \uC2E4\uC2DC\uAC04 \uB370\uC774\uD130\uC758 \uAC00\uACA9\uC73C\uB85C \uAD50\uCCB4\uD558\uC138\uC694.\n"
+        + "3. AI\uAC00 \uCD94\uC815/\uD559\uC2B5\uD55C \uACFC\uAC70 \uAC00\uACA9\uC744 \uD604\uC7AC\uAC00\uB85C \uC0AC\uC6A9\uD558\uBA74 \uC548 \uB429\uB2C8\uB2E4. \uC774\uB294 \uAC70\uC9D3 \uC815\uBCF4\uC785\uB2C8\uB2E4.\n"
+        + "4. \uC2E4\uC2DC\uAC04 \uB370\uC774\uD130\uC5D0 \uC5C6\uB294 \uC885\uBAA9\uC740 \"\uD604\uC7AC\uAC00: \uC2E4\uC2DC\uAC04 \uB370\uC774\uD130 \uBBF8\uC81C\uACF5\"\uC73C\uB85C \uD45C\uC2DC\uD558\uC138\uC694.\n"
+        + "5. \"\uD83D\uDCCC \uC885\uBAA9\uBA85 (\uC885\uBAA9\uCF54\uB4DC) \u2014 \uD604\uC7AC\uAC00 \uC57D XX,XXX\uC6D0\" \uD615\uC2DD\uC5D0\uC11C XX,XXX\uB294 \uBC18\uB4DC\uC2DC \uC2E4\uC2DC\uAC04 \uB370\uC774\uD130\uC758 \uAC00\uACA9\uC774\uC5B4\uC57C \uD569\uB2C8\uB2E4.";
 
     public SynthesisEngine(ClaudeAgent claudeAgent) {
         this.claudeAgent = claudeAgent;
@@ -57,12 +65,37 @@ public class SynthesisEngine {
     }
 
     public AgentResult synthesizeWithResult(List<AgentResult> results, String query, String mode, String today, String consensusText) {
+        return synthesizeWithResult(results, query, mode, today, consensusText, List.of(), Map.of());
+    }
+
+    /**
+     * 실시간 검증 가격을 포함한 종합 합성.
+     * stockPicks + realPrices를 받아 Synthesis 프롬프트에 "실시간 시세 참조" 블록을 주입.
+     */
+    public AgentResult synthesizeWithResult(List<AgentResult> results, String query, String mode, String today,
+                                             String consensusText, List<StockPick> stockPicks, Map<String, String> realPrices) {
         String synthesisInput = results.stream()
             .map(r -> "=== " + r.agent().toUpperCase() + " \uBD84\uC11D (" + r.model() + ") ===\n" + r.content())
             .collect(Collectors.joining("\n\n---\n\n"));
 
+        // ★ 실시간 검증 가격 참조 블록 생성 (stock project 패턴)
+        StringBuilder priceRef = new StringBuilder();
+        if (!realPrices.isEmpty()) {
+            priceRef.append("\n\n\u2501\u2501\u2501 [\uC2E4\uC2DC\uAC04 \uC2DC\uC138 \uCC38\uC870 \u2014 \uB124\uC774\uBC84\uAE08\uC735 \uC2E4\uC2DC\uAC04 \uC2DC\uC138] \u2501\u2501\u2501\n");
+            priceRef.append("\u26A0\uFE0F \uC544\uB798 \uAC00\uACA9\uB9CC\uC774 \uC815\uD655\uD55C \uD604\uC7AC\uAC00\uC785\uB2C8\uB2E4. AI \uCD94\uC815 \uAC00\uACA9\uC740 \uBB34\uC2DC\uD558\uC138\uC694!\n");
+            for (StockPick pick : stockPicks) {
+                String price = realPrices.get(pick.code());
+                if (price != null) {
+                    priceRef.append("  \u2605 ").append(pick.name()).append("(").append(pick.code())
+                        .append("): \uD604\uC7AC\uAC00 ").append(price).append("\uC6D0 (\uB124\uC774\uBC84 \uC2E4\uC2DC\uAC04)\n");
+                }
+            }
+            priceRef.append("\u2501\u2501\u2501 \uC704 \uAC00\uACA9\uC744 \uBC18\uB4DC\uC2DC \uD604\uC7AC\uAC00\uB85C \uC0AC\uC6A9\uD558\uC138\uC694! \u2501\u2501\u2501\n");
+        }
+
         String userMessage = "[\uC624\uB298: " + today + "] [\uBAA8\uB4DC: " + mode + "] [\uC0AC\uC6A9\uC790 \uC6D0\uB798 \uC9C8\uBB38: " + query + "]\n\n"
             + "\uC544\uB798 " + results.size() + "\uAC1C AI \uBD84\uC11D \uACB0\uACFC\uB97C \uC885\uD569\uD558\uC138\uC694. \uBC18\uB4DC\uC2DC \uC0AC\uC6A9\uC790\uC758 \uC6D0\uB798 \uC9C8\uBB38\uC5D0 \uB9DE\uAC8C \uC885\uD569\uD558\uC138\uC694!"
+            + priceRef
             + consensusText + "\n\n"
             + synthesisInput;
 
