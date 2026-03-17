@@ -152,7 +152,11 @@ public class MultiAgentOrchestrator {
             marketDataText += queryStockPriceText;
         }
 
-        String baseSystemPrompt = SYSTEM_PROMPT + "\n\n\uC624\uB298 \uB0A0\uC9DC: " + today + " (KST). \uBC18\uB4DC\uC2DC \uC774 \uB0A0\uC9DC \uAE30\uC900\uC73C\uB85C \uCD5C\uC2E0 \uC815\uBCF4\uB97C \uBD84\uC11D\uD560 \uAC83.";
+        String baseSystemPrompt = SYSTEM_PROMPT + "\n\n\uC624\uB298 \uB0A0\uC9DC: " + today + " (KST). \uBC18\uB4DC\uC2DC \uC774 \uB0A0\uC9DC \uAE30\uC900\uC73C\uB85C \uCD5C\uC2E0 \uC815\uBCF4\uB97C \uBD84\uC11D\uD560 \uAC83.\n\n"
+            + "**\u26A0\uFE0F \uAC00\uACA9 \uADDC\uCE59 (\uCD5C\uC6B0\uC120)**:\n"
+            + "- \uC785\uB825\uC5D0 \"\uC2E4\uC2DC\uAC04 \uC2DC\uC7A5 \uB370\uC774\uD130\" \uB610\uB294 \"\uC2E4\uC2DC\uAC04 \uAC00\uACA9\"\uC774 \uD3EC\uD568\uB418\uC5B4 \uC788\uC73C\uBA74, \uD574\uB2F9 \uAC00\uACA9\uC774 \uC720\uC77C\uD55C \uC815\uD655\uD55C \uD604\uC7AC\uAC00\uC785\uB2C8\uB2E4.\n"
+            + "- \uD559\uC2B5 \uB370\uC774\uD130\uC758 \uACFC\uAC70 \uAC00\uACA9\uC744 \uD604\uC7AC\uAC00\uB85C \uC0AC\uC6A9\uD558\uC9C0 \uB9C8\uC138\uC694. \uBC18\uB4DC\uC2DC \uC81C\uACF5\uB41C \uC2E4\uC2DC\uAC04 \uB370\uC774\uD130\uC758 \uAC00\uACA9\uC744 \uC0AC\uC6A9\uD558\uC138\uC694.\n"
+            + "- \uD604\uC7AC\uAC00\uB97C \uBAA8\uB974\uBA74 \"\uD604\uC7AC\uAC00 \uBBF8\uD655\uC778\"\uC73C\uB85C \uD45C\uC2DC\uD558\uC138\uC694.";
         String userMessage = modeInstruction.isEmpty()
             ? "[\uC624\uB298: " + today + "] " + query + "\n\n" + marketDataText
             : "[\uC624\uB298: " + today + "] [\uBAA8\uB4DC: " + mode + "] " + modeInstruction + "\n\n" + marketDataText + "\n\n\uC0AC\uC6A9\uC790 \uC9C8\uBB38: " + query;
@@ -295,15 +299,41 @@ public class MultiAgentOrchestrator {
                 }
                 stockPicks = corrected;
 
-                // 2) finalContent 본문에서 잘못된 현재가 regex 교정
+                // 2) finalContent 본문에서 잘못된 가격 aggressive regex 교정
                 for (StockPick pick : stockPicks) {
                     String realPrice = realPrices.get(pick.code());
                     if (realPrice == null || pick.name() == null) continue;
                     String nameEsc = java.util.regex.Pattern.quote(pick.name());
-                    // "종목명 (코드) — 현재가 약 XX,XXX원" → 실제 가격으로 교체
+                    String codeEsc = java.util.regex.Pattern.quote(pick.code());
+
+                    // 패턴1: "종목명 (코드) — 현재가 약 XX,XXX원"
                     finalContent = finalContent.replaceAll(
-                        "(" + nameEsc + "\\s*[\\(（]?" + java.util.regex.Pattern.quote(pick.code()) + "[\\)）]?[^\\n]{0,30}?)"
-                            + "(\ud604\uc7ac\uac00\\s*(?:\uc57d\\s*)?)[0-9,]+(?:~[0-9,]+)?\\s*\uc6d0",
+                        "(" + nameEsc + "\\s*[\\(（]?" + codeEsc + "[\\)）]?[^\\n]{0,50}?)"
+                            + "(\ud604\uc7ac\uac00\\s*(?::\\s*)?(?:\uc57d\\s*)?)[0-9,]+(?:~[0-9,]+)?\\s*\uc6d0",
+                        "$1$2" + realPrice + "\uc6d0");
+
+                    // 패턴2: "종목명(코드)...약 XX,XXX원" (현재가 없이 "약" 으로 시작하는 가격)
+                    finalContent = finalContent.replaceAll(
+                        "(" + nameEsc + "\\s*[\\(（]" + codeEsc + "[\\)）][^\\n]{0,20}?)"
+                            + "(\uc57d\\s*)[0-9,]+(?:~[0-9,]+)?\\s*\uc6d0",
+                        "$1$2" + realPrice + "\uc6d0");
+
+                    // 패턴3: "📌 종목명 (코드) — 현재가 약 XX원" (📌로 시작하는 라인)
+                    finalContent = finalContent.replaceAll(
+                        "(\uD83D\uDCCC\\s*" + nameEsc + "\\s*[\\(（]" + codeEsc + "[\\)）][^\\n]*?)"
+                            + "(\ud604\uc7ac\uac00\\s*(?::\\s*)?(?:\uc57d\\s*)?)[0-9,]+(?:~[0-9,]+)?(?:\\s*\uc6d0)?",
+                        "$1$2" + realPrice + "\uc6d0");
+
+                    // 패턴4: "현재 주가: 약 XX,XXX원" (종목명 이후 같은 라인)
+                    finalContent = finalContent.replaceAll(
+                        "(" + nameEsc + "[^\\n]{0,60}?)"
+                            + "(\ud604\uc7ac\\s*\uc8fc\uac00\\s*(?::\\s*)?(?:\uc57d\\s*)?)[0-9,]+(?:~[0-9,]+)?\\s*\uc6d0",
+                        "$1$2" + realPrice + "\uc6d0");
+
+                    // 패턴5: "현재가는 약 XX,XXX원" (종목명 이후 같은 라인)
+                    finalContent = finalContent.replaceAll(
+                        "(" + nameEsc + "[^\\n]{0,60}?)"
+                            + "(\ud604\uc7ac\uac00\ub294?\\s*(?:\uc57d\\s*)?)[0-9,]+(?:~[0-9,]+)?\\s*\uc6d0",
                         "$1$2" + realPrice + "\uc6d0");
                 }
 
