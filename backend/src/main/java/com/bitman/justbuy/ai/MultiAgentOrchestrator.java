@@ -176,6 +176,16 @@ public class MultiAgentOrchestrator {
                 .map(agent -> executor.submit(() -> {
                     // ★ 에이전트별 전문화 프롬프트 + 구조화 출력 지시 적용
                     String agentSystemPrompt = baseSystemPrompt + AgentRoles.getFullSuffix(agent.name());
+
+                    // ★ 수급분석 모드: Perplexity에 실시간 수급 웹 검색 강화 지시
+                    if ("perplexity".equals(agent.name()) && "\uC218\uAE09\uBD84\uC11D".equals(mode)) {
+                        agentSystemPrompt += "\n\n⚠️ [수급분석 모드 특별 지시]\n"
+                            + "이 분석의 핵심은 '실시간 수급 데이터'입니다. 다른 어떤 분석보다 수급 데이터 수집이 최우선!\n"
+                            + "반드시 검색하세요: '오늘 외국인 순매수 상위', '오늘 기관 순매수', '코스피 수급 동향', '프로그램 매매'\n"
+                            + "당신이 검색한 실시간 수급 데이터가 다른 4개 AI의 추정보다 정확합니다.\n"
+                            + "수급 데이터 기준 시각을 반드시 명시하세요.";
+                    }
+
                     log.info("[Orchestrator] {} starting (specialized)...", agent.name());
                     AgentResult result = agent.analyze(agentSystemPrompt, userMessage);
                     log.info("[Orchestrator] {} finished ({}ms, status={})",

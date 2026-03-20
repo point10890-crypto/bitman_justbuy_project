@@ -93,8 +93,19 @@ public class SynthesisEngine {
             priceRef.append("\u2501\u2501\u2501 \uC704 \uAC00\uACA9\uC744 \uBC18\uB4DC\uC2DC \uD604\uC7AC\uAC00\uB85C \uC0AC\uC6A9\uD558\uC138\uC694! \u2501\u2501\u2501\n");
         }
 
+        // ★ Perplexity 웹 검색 데이터 우선 지시 (수급분석 등 실시간 데이터 중요 모드)
+        String perplexityPriority = "";
+        boolean hasPerplexity = results.stream().anyMatch(r -> "perplexity".equals(r.agent()) && "success".equals(r.status()));
+        if (hasPerplexity) {
+            perplexityPriority = "\n\n**⚠️ 데이터 우선순위 규칙**:\n"
+                + "- Perplexity는 실시간 웹 검색으로 데이터를 수집합니다. 수급 데이터·뉴스·공시 등 시점이 중요한 정보는 Perplexity의 데이터를 최우선으로 채택하세요.\n"
+                + "- 다른 AI(Claude, Gemini, ChatGPT, Grok)의 수급/뉴스 데이터가 Perplexity와 충돌하면 Perplexity를 우선합니다.\n"
+                + "- 기술적 분석, 펀더멘탈 분석 등 시점과 무관한 분석은 모든 AI를 동등하게 참고하세요.\n";
+        }
+
         String userMessage = "[\uC624\uB298: " + today + "] [\uBAA8\uB4DC: " + mode + "] [\uC0AC\uC6A9\uC790 \uC6D0\uB798 \uC9C8\uBB38: " + query + "]\n\n"
             + "\uC544\uB798 " + results.size() + "\uAC1C AI \uBD84\uC11D \uACB0\uACFC\uB97C \uC885\uD569\uD558\uC138\uC694. \uBC18\uB4DC\uC2DC \uC0AC\uC6A9\uC790\uC758 \uC6D0\uB798 \uC9C8\uBB38\uC5D0 \uB9DE\uAC8C \uC885\uD569\uD558\uC138\uC694!"
+            + perplexityPriority
             + priceRef
             + consensusText + "\n\n"
             + synthesisInput;
