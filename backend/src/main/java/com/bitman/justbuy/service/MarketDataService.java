@@ -20,10 +20,26 @@ public class MarketDataService {
     private static final Logger log = LoggerFactory.getLogger(MarketDataService.class);
     private static final String NAVER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
     private static final List<String> TOP_STOCK_CODES = List.of(
+        // 1-10: 삼성전자, SK하이닉스, LG에너지솔루션, 삼성바이오로직스, 현대차
         "005930", "000660", "373220", "207940", "005380",
+        // 기아, 셀트리온, POSCO홀딩스, KB금융, 신한지주
         "000270", "068270", "005490", "105560", "055550",
+        // 11-20: NAVER, 카카오, LG화학, 삼성SDI, 현대모비스
         "035420", "035720", "051910", "006400", "012330",
-        "329180", "012450", "096770", "028260", "259960"
+        // HD현대중공업, 한화에어로스페이스, SK이노베이션, 삼성물산, 한국전력
+        "329180", "012450", "096770", "028260", "015760",
+        // 21-30: 크래프톤, 하이브, SK텔레콤, 삼성생명, 삼성화재
+        "259960", "352820", "017670", "032830", "000810",
+        // 카카오뱅크, 두산에너빌리티, 메리츠금융지주, SK스퀘어, LG전자
+        "323410", "034020", "138040", "402340", "066570",
+        // 31-40: KT, HD한국조선해양, 한화오션, 우리금융지주, 하나금융지주
+        "030200", "009540", "042660", "316140", "086790",
+        // 대한항공, 한미반도체, 삼성SDS, LG이노텍, 포스코퓨처엠
+        "003490", "042700", "018260", "011070", "003670",
+        // 41-50: SK, 에코프로비엠, HLB, 고려아연, 한미약품
+        "034730", "247540", "028300", "010130", "128940",
+        // 현대건설, 기업은행, 한국타이어앤테크놀로지, 엔씨소프트, LG
+        "000720", "024110", "161390", "036570", "003550"
     );
 
     private final RestTemplate restTemplate;
@@ -88,7 +104,7 @@ public class MarketDataService {
         text.append("\n");
 
         // Top stocks
-        text.append("\uD83C\uDFE2 \uc2dc\ucd1d \uc0c1\uc704 \uc8fc\uc694 \uc885\ubaa9 \ud604\uc7ac\uac00\n");
+        text.append("\uD83C\uDFE2 \uc2dc\ucd1d \uc0c1\uc704 50 \uc8fc\uc694 \uc885\ubaa9 \ud604\uc7ac\uac00\n");
         for (String code : TOP_STOCK_CODES) {
             JsonNode stock = fetchJson("https://m.stock.naver.com/api/stock/" + code + "/basic");
             if (stock != null) {

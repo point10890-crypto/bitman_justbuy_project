@@ -5,6 +5,7 @@ import com.bitman.justbuy.dto.AgentResult;
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.ConsensusResult;
 import com.bitman.justbuy.dto.StockPick;
+import com.bitman.justbuy.service.DartApiService;
 import com.bitman.justbuy.service.MarketDataService;
 import com.bitman.justbuy.util.StockParser;
 import com.bitman.justbuy.util.StructuredAnalysisParser;
@@ -28,13 +29,16 @@ public class MultiAgentOrchestrator {
     private final SynthesisEngine synthesisEngine;
     private final MarketDataService marketDataService;
     private final ConsensusEngine consensusEngine;
+    private final DartApiService dartApiService;
 
     public MultiAgentOrchestrator(List<AiAgent> agents, SynthesisEngine synthesisEngine,
-                                   MarketDataService marketDataService, ConsensusEngine consensusEngine) {
+                                   MarketDataService marketDataService, ConsensusEngine consensusEngine,
+                                   DartApiService dartApiService) {
         this.agents = agents;
         this.synthesisEngine = synthesisEngine;
         this.marketDataService = marketDataService;
         this.consensusEngine = consensusEngine;
+        this.dartApiService = dartApiService;
     }
 
     static final String SYSTEM_PROMPT = "[시스템] 실데이터 기반 주식 분석 머신 엔진\n"
@@ -66,6 +70,12 @@ public class MultiAgentOrchestrator {
         + "2) \uD83C\uDFAF 결론 요약(5~10줄): 지금 무엇이 가장 중요한가/왜인가\n"
         + "3) \uD83C\uDF10 시장 레짐 체크: 미국(금리·달러·유동성·리스크온오프) → 한국 파급(USD/KRW·외국인 수급·업종 멀티플)\n"
         + "4) \uD83D\uDD11 핵심 드라이버 Top 3(각각 근거 인용 포함)\n"
+        + "4.5) \uD83D\uDCF0 뉴스·재료·테마 분석\n"
+        + "  - 최근 1주일 핵심 뉴스/공시/이벤트와 주가 영향 평가\n"
+        + "  - 테마/섹터 모멘텀: 현재 시장 주도 테마와 관련 종목\n"
+        + "  - 재료 강도 평가: 1회성 vs 구조적 변화 (단기 이슈/중장기 성장동력 구분)\n"
+        + "  - 정책·규제 변화: 정부 정책, 법안, 규제가 해당 종목/섹터에 미치는 영향\n"
+        + "  - 실적 시즌 이벤트: 어닝 서프라이즈/쇼크 가능성, 가이던스 변화\n"
         + "5) \uD83D\uDCCA 시나리오(확률/트리거/무효화/기대 영향): \uD83D\uDFE2강세 · \uD83D\uDFE1기준 · \uD83D\uDD34약세\n"
         + "6) \u26A0\uFE0F 리스크 매트릭스(발생확률\u00D7영향도) + 대응 옵션(헤지/관망/분할 접근 아이디어)\n"
         + "7) \u2705 체크리스트: 다음 확인할 데이터/발표 일정/공시/가격 레벨(데이터가 있을 때만)\n"
@@ -87,7 +97,10 @@ public class MultiAgentOrchestrator {
             + "  - 매수 근거: (차트/수급/재료 등)\n"
             + "  - 목표가: XX,XXX원 / 손절가: XX,XXX원\n"
             + "  - 매매 전략: (시초가 매수, 장중 눌림목, 종가 베팅 등)\n"
-            + "종가/시초가 매매 후보와 근거를 제시해. \"데이터 접근 불가\" 같은 회피 답변 금지.",
+            + "종가/시초가 매매 후보와 근거를 제시해.\n"
+            + "  - 오늘의 핵심 뉴스/재료: (어떤 뉴스·이벤트가 이 종목을 움직이는지)\n"
+            + "  - 테마 관련성: (현재 시장 주도 테마와의 연관도)\n"
+            + "\"데이터 접근 불가\" 같은 회피 답변 금지.",
 
         "\uC2A4\uC719\uB9E4\uB9E4", "3일~3주 스윙 매매 관점에서 분석해줘.\n"
             + "반드시 아래 형식으로 구체적인 종목을 3~5개 추천해:\n"
@@ -96,7 +109,9 @@ public class MultiAgentOrchestrator {
             + "  - 1차 목표: XX,XXX원 / 2차 목표: XX,XXX원\n"
             + "  - 손절: XX,XXX원\n"
             + "  - 근거: (업종 모멘텀, 실적, 수급, 차트 패턴 등)\n"
-            + "진입/청산 타이밍과 근거를 제시해.",
+            + "진입/청산 타이밍과 근거를 제시해.\n"
+            + "  - 스윙 촉매: (향후 1~3주 내 예정된 이벤트/실적/공시)\n"
+            + "  - 테마 지속성: (현재 테마가 스윙 기간 동안 유효한지)",
 
         "\uC885\uAC00\uB9E4\uB9E4", "종가/시초가 단타 매매 관점에서 분석해줘.\n"
             + "반드시 아래 형식으로 오늘 종가 매수 후보 3~5개 제시:\n"
@@ -104,7 +119,9 @@ public class MultiAgentOrchestrator {
             + "  - 종가 매수 근거: (일봉 패턴, 수급 전환, 갭 예상 등)\n"
             + "  - 내일 시초가 예상: XX,XXX원 (수익률 약 X%)\n"
             + "  - 손절 기준: XX,XXX원\n"
-            + "내일 시초가 매도 전략까지 포함해.",
+            + "내일 시초가 매도 전략까지 포함해.\n"
+            + "  - 장 마감 전 뉴스/재료: (내일 시초가에 영향 줄 수 있는 이벤트)\n"
+            + "  - 야간 이벤트 리스크: (미국 시장, 실적 발표, 정책 발표 등)",
 
         "\uC218\uAE09\uBD84\uC11D", "외국인·기관 수급 교차 분석 관점에서 분석해줘.\n"
             + "반드시 아래 형식으로 수급 주목 종목 3~5개 제시:\n"
@@ -113,7 +130,9 @@ public class MultiAgentOrchestrator {
             + "  - 기관 동향: 순매수/순매도 X일 연속, 약 X억원\n"
             + "  - 수급 판단: (쌍끌이 매수/외국인 단독/기관 유입 등)\n"
             + "  - 주가 전망: 수급 지속 시 목표가 XX,XXX원\n"
-            + "쌍끌이 종목과 수급 변화 추이를 분석해.",
+            + "쌍끌이 종목과 수급 변화 추이를 분석해.\n"
+            + "  - 수급 변화의 재료적 배경: (왜 외국인/기관이 매수/매도하는지 뉴스 연결)\n"
+            + "  - 수급+재료 시너지: (뉴스 재료와 수급 방향이 일치하는 종목 우선)",
 
         "\uBD84\uC11D\uD574\uC918", "사용자가 요청한 특정 종목(또는 주제)에 집중하여 심층 분석해줘.\n"
             + "사용자 질문에 포함된 종목명이 있으면, 그 종목만 깊이 있게 파고들어 분석할 것! 다른 종목을 추천하지 말고 해당 종목의:\n"
@@ -150,6 +169,13 @@ public class MultiAgentOrchestrator {
         String queryStockPriceText = fetchQueryStockPrices(query, queryStockPrices);
         if (!queryStockPriceText.isEmpty()) {
             marketDataText += queryStockPriceText;
+        }
+
+        // ★ DART 재무/공시 데이터 추가 (쿼리에 포함된 종목)
+        Set<String> queryCodes = new LinkedHashSet<>(queryStockPrices.keySet());
+        String dartText = fetchDartDataForStocks(queryCodes);
+        if (!dartText.isEmpty()) {
+            marketDataText += dartText;
         }
 
         String baseSystemPrompt = SYSTEM_PROMPT + "\n\n\uC624\uB298 \uB0A0\uC9DC: " + today + " (KST). \uBC18\uB4DC\uC2DC \uC774 \uB0A0\uC9DC \uAE30\uC900\uC73C\uB85C \uCD5C\uC2E0 \uC815\uBCF4\uB97C \uBD84\uC11D\uD560 \uAC83.\n\n"
@@ -419,6 +445,34 @@ public class MultiAgentOrchestrator {
         sb.append("\u2501\u2501\u2501 \uc704 \uac00\uaca9\uc744 \ubc18\ub4dc\uc2dc \ud604\uc7ac\uac00\ub85c \uc0ac\uc6a9\ud558\uc138\uc694! \u2501\u2501\u2501\n");
         log.info("[Orchestrator] 쿼리 종목 가격 주입: {}", prices);
         return sb.toString();
+    }
+
+    /**
+     * DART 재무/공시 데이터를 종목코드 세트에 대해 수집.
+     * 최대 5종목, 실패 시 빈 문자열 (분석 중단 없음).
+     */
+    private String fetchDartDataForStocks(Set<String> stockCodes) {
+        if (stockCodes.isEmpty() || dartApiService == null || !dartApiService.isAvailable()) return "";
+
+        try {
+            StringBuilder sb = new StringBuilder();
+            int count = 0;
+            for (String code : stockCodes) {
+                if (count >= 5) break;
+                String dartData = dartApiService.fetchFormattedDartData(code);
+                if (!dartData.isEmpty()) {
+                    sb.append(dartData);
+                    count++;
+                }
+            }
+            if (count > 0) {
+                log.info("[Orchestrator] DART 재무 데이터 주입: {}개 종목", count);
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("[Orchestrator] DART 데이터 수집 실패: {}", e.getMessage());
+            return "";
+        }
     }
 
 }

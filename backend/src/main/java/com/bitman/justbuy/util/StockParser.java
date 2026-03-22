@@ -70,6 +70,23 @@ public final class StockParser {
         m.put("\ud55c\ubbf8\ubc18\ub3c4\uccb4", "042700");
         m.put("\ub9ac\ub178\uacf5\uc5c5", "058470");
         m.put("HD\ud604\ub300\uc804\uae30", "267260");
+        // 추가 시총 상위 종목
+        m.put("\ud558\uc774\ube0c", "352820");
+        m.put("\uc0bc\uc131\uc0dd\uba85", "032830");
+        m.put("\uc0bc\uc131\ud654\uc7ac", "000810");
+        m.put("\uba54\ub9ac\uce20\uae08\uc735\uc9c0\uc8fc", "138040"); m.put("\uba54\ub9ac\uce20\uae08\uc735", "138040");
+        m.put("\ud55c\ud654\uc624\uc158", "042660");
+        m.put("\uc6b0\ub9ac\uae08\uc735\uc9c0\uc8fc", "316140"); m.put("\uc6b0\ub9ac\uae08\uc735", "316140");
+        m.put("\ud558\ub098\uae08\uc735\uc9c0\uc8fc", "086790"); m.put("\ud558\ub098\uae08\uc735", "086790");
+        m.put("\uc0bc\uc131SDS", "018260");
+        m.put("LG\uc774\ub178\ud14d", "011070");
+        m.put("SK", "034730");
+        m.put("\uace0\ub824\uc544\uc5f0", "010130");
+        m.put("\ud55c\ubbf8\uc57d\ud488", "128940");
+        m.put("\ud604\ub300\uac74\uc124", "000720");
+        m.put("\uae30\uc5c5\uc740\ud589", "024110"); m.put("IBK\uae30\uc5c5\uc740\ud589", "024110");
+        m.put("\ud55c\uad6d\ud0c0\uc774\uc5b4", "161390"); m.put("\ud55c\uad6d\ud0c0\uc774\uc5b4\uc55e\ud14c\ud06c\ub180\ub85c\uc9c0", "161390");
+        m.put("LG", "003550");
         KNOWN_STOCKS = Collections.unmodifiableMap(m);
     }
 
