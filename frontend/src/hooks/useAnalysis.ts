@@ -46,7 +46,8 @@ export function useAnalysis() {
           setResult({ ...cached, isPrecomputed: true })
           return
         }
-        // 프리컴퓨트 없음 → 라이브 분석으로 폴스루
+        // 프리컴퓨트 없음 → 스케줄 분석 대기 안내 (라이브 분석 차단)
+        throw new Error('예약 분석 준비 중입니다. 잠시 후 다시 시도해 주세요.')
       } else {
         // 라이브 분석 모드: 캐시 우선
         const cached = getCached(query, effectiveMode)

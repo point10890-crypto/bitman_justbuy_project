@@ -66,6 +66,11 @@ public class AnalysisController {
      * 비동기 라이브 분석 시작 — 즉시 jobId 반환.
      * Render 30초 HTTP 타임아웃 회피.
      */
+    // 스케줄 전용 모드 — 사용자 라이브 분석 차단
+    private static final java.util.Set<String> SCHEDULED_ONLY_MODES = java.util.Set.of(
+        "오늘뭐사", "스윙매매", "종가매매", "수급분석"
+    );
+
     @PostMapping("/live")
     public ResponseEntity<Map<String, String>> liveAnalysis(@AuthenticationPrincipal UUID userId,
                                                               @Valid @RequestBody AnalysisRequest request) {
@@ -73,6 +78,12 @@ public class AnalysisController {
 
         if (!analysisService.isValidMode(request.mode())) {
             throw new IllegalArgumentException("Invalid mode: " + request.mode());
+        }
+
+        // 스케줄 전용 모드는 라이브 분석 차단 (스케줄러/어드민만 실행 가능)
+        if (SCHEDULED_ONLY_MODES.contains(request.mode())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                "'" + request.mode() + "'는 예약 분석 전용입니다. 스케줄 실행 결과를 확인해 주세요.");
         }
 
         log.info("[API] Live analysis started: mode={}, query={}", request.mode(), request.query());
