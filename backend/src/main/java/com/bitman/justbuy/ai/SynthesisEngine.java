@@ -107,6 +107,18 @@ public class SynthesisEngine {
                 + "- 기술적 분석, 펀더멘탈 분석 등 시점과 무관한 분석은 모든 AI를 동등하게 참고하세요.\n";
         }
 
+        // ★ 수급분석 모드: 환각 수급 데이터 필터링 강화
+        String supplyDataRule = "";
+        if ("\uC218\uAE09\uBD84\uC11D".equals(mode)) {
+            supplyDataRule = "\n\n**🚨 수급분석 종합 시 필수 규칙**:\n"
+                + "1. 외국인/기관 순매수·순매도 구체적 금액(억원)은 PERPLEXITY 검색 결과에서만 채택하세요.\n"
+                + "2. 다른 AI(Claude, Gemini, ChatGPT, Grok)가 제시한 수급 금액 수치는 검증 불가이므로 무시하세요.\n"
+                + "3. PERPLEXITY 데이터가 없거나 실패한 경우, '실시간 수급 데이터 미수집'으로 명시하세요.\n"
+                + "4. 종목 추천 시 수급 근거는 PERPLEXITY만, 기술적 근거는 GEMINI, 펀더멘탈은 CHATGPT에서 가져오세요.\n"
+                + "5. 시장이 -3% 이상 급락 중이면: 매수 추천보다 '관망' 또는 '매도/헤지'를 기본으로 하고, 매수는 매우 강한 근거가 있을 때만 조건부로 제시하세요.\n"
+                + "6. 각 추천 종목의 수급 데이터 출처를 반드시 표기: [PERPLEXITY 검색] 또는 [데이터 미확인]\n";
+        }
+
         String agentRoleGuide = "\n\n**🤖 각 AI 에이전트 전문 역할 (종합 시 반드시 반영)**:\n"
             + "- **CLAUDE**: 수석 분석관 — 베이지안 추론, Bull/Base/Bear 시나리오 확률, 리스크 매트릭스\n"
             + "- **GEMINI**: 기술적 분석 전문가 — 차트 패턴(이평선/RSI/MACD/볼린저), 지지·저항선, 매매 타이밍\n"
@@ -124,6 +136,7 @@ public class SynthesisEngine {
             + "\uC544\uB798 " + results.size() + "\uAC1C AI \uBD84\uC11D \uACB0\uACFC\uB97C \uC885\uD569\uD558\uC138\uC694. \uBC18\uB4DC\uC2DC \uC0AC\uC6A9\uC790\uC758 \uC6D0\uB798 \uC9C8\uBB38\uC5D0 \uB9DE\uAC8C \uC885\uD569\uD558\uC138\uC694!"
             + agentRoleGuide
             + perplexityPriority
+            + supplyDataRule
             + priceRef
             + consensusText + "\n\n"
             + synthesisInput;
