@@ -8,7 +8,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLStreamConstants;
+import javax.xml.stream.XMLStreamReader;
 import java.io.*;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -117,15 +119,15 @@ public class DartCorpCodeMapper {
                 .uri(URI.create(url))
                 .GET()
                 .build();
-            HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
 
             if (response.statusCode() != 200) {
                 log.error("[DartCorpCode] DART 응답 오류: {}", response.statusCode());
                 return;
             }
 
-            // ZIP 해제 → XML 파싱
-            Map<String, String> mapping = parseZipXml(response.body());
+            // ZIP 스트리밍 → XML StAX 파싱 (메모리 최소화)
+            Map<String, String> mapping = parseZipXmlStream(response.body());
             if (mapping.isEmpty()) {
                 log.error("[DartCorpCode] XML 파싱 결과 비어있음");
                 return;
@@ -144,38 +146,62 @@ public class DartCorpCodeMapper {
         }
     }
 
-    private Map<String, String> parseZipXml(byte[] zipData) {
+    /**
+     * StAX 스트리밍 파서로 ZIP InputStream 내 XML을 파싱.
+     * DOM 파서 대비 메모리 사용량 극소 (Render Free 512MB 대응).
+     */
+    private Map<String, String> parseZipXmlStream(InputStream inputStream) {
         Map<String, String> mapping = new HashMap<>();
-        try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(zipData))) {
+        try (ZipInputStream zis = new ZipInputStream(inputStream)) {
             var entry = zis.getNextEntry();
             if (entry == null) return mapping;
 
-            byte[] xmlBytes = zis.readAllBytes();
-            var factory = DocumentBuilderFactory.newInstance();
-            var builder = factory.newDocumentBuilder();
-            var doc = builder.parse(new ByteArrayInputStream(xmlBytes));
-            var lists = doc.getElementsByTagName("list");
+            XMLInputFactory xmlFactory = XMLInputFactory.newInstance();
+            xmlFactory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
+            xmlFactory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
+            XMLStreamReader reader = xmlFactory.createXMLStreamReader(zis, "UTF-8");
 
-            for (int i = 0; i < lists.getLength(); i++) {
-                var node = lists.item(i);
-                String corpCode = "";
-                String stockCode = "";
+            String corpCode = "";
+            String stockCode = "";
+            String currentElement = "";
+            boolean inList = false;
 
-                var children = node.getChildNodes();
-                for (int j = 0; j < children.getLength(); j++) {
-                    var child = children.item(j);
-                    if ("corp_code".equals(child.getNodeName())) {
-                        corpCode = child.getTextContent().trim();
-                    } else if ("stock_code".equals(child.getNodeName())) {
-                        stockCode = child.getTextContent().trim();
-                    }
-                }
+            while (reader.hasNext()) {
+                int event = reader.next();
+                switch (event) {
+                    case XMLStreamConstants.START_ELEMENT:
+                        String name = reader.getLocalName();
+                        if ("list".equals(name)) {
+                            inList = true;
+                            corpCode = "";
+                            stockCode = "";
+                        }
+                        currentElement = name;
+                        break;
 
-                // 상장 기업만 (stock_code가 비어있지 않은 것)
-                if (!stockCode.isBlank() && stockCode.length() == 6 && !corpCode.isBlank()) {
-                    mapping.put(stockCode, corpCode);
+                    case XMLStreamConstants.CHARACTERS:
+                        if (inList) {
+                            String text = reader.getText().trim();
+                            if ("corp_code".equals(currentElement)) {
+                                corpCode = text;
+                            } else if ("stock_code".equals(currentElement)) {
+                                stockCode = text;
+                            }
+                        }
+                        break;
+
+                    case XMLStreamConstants.END_ELEMENT:
+                        if ("list".equals(reader.getLocalName())) {
+                            if (!stockCode.isBlank() && stockCode.length() == 6 && !corpCode.isBlank()) {
+                                mapping.put(stockCode, corpCode);
+                            }
+                            inList = false;
+                        }
+                        currentElement = "";
+                        break;
                 }
             }
+            reader.close();
         } catch (Exception e) {
             log.error("[DartCorpCode] ZIP/XML 파싱 실패: {}", e.getMessage());
         }
