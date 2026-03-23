@@ -107,8 +107,22 @@ public class SynthesisEngine {
                 + "- 기술적 분석, 펀더멘탈 분석 등 시점과 무관한 분석은 모든 AI를 동등하게 참고하세요.\n";
         }
 
+        String agentRoleGuide = "\n\n**🤖 각 AI 에이전트 전문 역할 (종합 시 반드시 반영)**:\n"
+            + "- **CLAUDE**: 수석 분석관 — 베이지안 추론, Bull/Base/Bear 시나리오 확률, 리스크 매트릭스\n"
+            + "- **GEMINI**: 기술적 분석 전문가 — 차트 패턴(이평선/RSI/MACD/볼린저), 지지·저항선, 매매 타이밍\n"
+            + "- **CHATGPT**: 펀더멘탈 & 매크로 전문가 — PER/PBR/ROE 재무분석, 미국금리→환율→수급 파급경로, DART 공시 데이터\n"
+            + "- **PERPLEXITY**: 실시간 웹 검색 전문가 — 오늘의 외국인/기관 수급, 공매도, 최신 뉴스/공시 (유일한 실시간 데이터)\n"
+            + "- **GROK**: 센티먼트 & 역발상 전문가 — SNS 감성, 개인 신용잔고, 군중 심리 역발상, 테마 수명주기\n\n"
+            + "**⚠️ 종합 규칙**:\n"
+            + "1. 각 AI의 전문 영역 분석을 구별하여 최종 결과에 반영할 것 (기술적 분석은 GEMINI, 수급은 PERPLEXITY 우선)\n"
+            + "2. 목표가/손절가는 GEMINI의 기술적 레벨 + CHATGPT의 적정가치를 교차 검증하여 산출\n"
+            + "3. 리스크 평가는 CLAUDE의 시나리오 분석 + GROK의 역발상 관점 병합\n"
+            + "4. 뉴스/재료 분석은 PERPLEXITY의 실시간 검색 결과를 최우선 채택\n"
+            + "5. 최종 투자판단 근거에 '어느 AI가 어떤 전문 분석으로 이 결론을 뒷받침하는지' 명시\n";
+
         String userMessage = "[\uC624\uB298: " + today + "] [\uBAA8\uB4DC: " + mode + "] [\uC0AC\uC6A9\uC790 \uC6D0\uB798 \uC9C8\uBB38: " + query + "]\n\n"
             + "\uC544\uB798 " + results.size() + "\uAC1C AI \uBD84\uC11D \uACB0\uACFC\uB97C \uC885\uD569\uD558\uC138\uC694. \uBC18\uB4DC\uC2DC \uC0AC\uC6A9\uC790\uC758 \uC6D0\uB798 \uC9C8\uBB38\uC5D0 \uB9DE\uAC8C \uC885\uD569\uD558\uC138\uC694!"
+            + agentRoleGuide
             + perplexityPriority
             + priceRef
             + consensusText + "\n\n"
