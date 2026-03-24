@@ -13,9 +13,17 @@ import {
 
 type Tab = 'dashboard' | 'subscriptions' | 'members' | 'system' | 'monitor'
 
+const VALID_TABS: Tab[] = ['dashboard', 'subscriptions', 'members', 'system', 'monitor']
+
 export default function AdminPage() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const initialTab = (searchParams.get('tab') as Tab) || 'dashboard'
+  const rawTab = searchParams.get('tab')
+  const initialTab = (VALID_TABS.includes(rawTab as Tab) ? rawTab as Tab : 'dashboard')
+  const [toast, setToast] = useState<{ msg: string; type: 'error' | 'success' } | null>(null)
+  const showToast = (msg: string, type: 'error' | 'success' = 'error') => {
+    setToast({ msg, type })
+    setTimeout(() => setToast(null), 4000)
+  }
   const [tab, setTab] = useState<Tab>(initialTab)
   const [pendingUsers, setPendingUsers] = useState<UserDto[]>([])
   const [allUsers, setAllUsers] = useState<UserDto[]>([])
@@ -66,7 +74,7 @@ export default function AdminPage() {
       ])
       setPendingUsers(pending)
       setAllUsers(users)
-    } catch { /* ignore */ }
+    } catch (e) { showToast('데이터 로드 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류')) }
     finally { setLoading(false) }
   }
 
@@ -86,7 +94,7 @@ export default function AdminPage() {
       const updated = await approveSubscription(token, userId)
       setPendingUsers(prev => prev.filter(u => u.id !== userId))
       setAllUsers(prev => prev.map(u => u.id === userId ? updated : u))
-    } catch { /* ignore */ }
+    } catch (e) { showToast('처리 실패: ' + (e instanceof Error ? e.message : '오류')) }
     finally { setActionId(null) }
   }
 
@@ -98,7 +106,7 @@ export default function AdminPage() {
       const updated = await rejectSubscription(token, userId)
       setPendingUsers(prev => prev.filter(u => u.id !== userId))
       setAllUsers(prev => prev.map(u => u.id === userId ? updated : u))
-    } catch { /* ignore */ }
+    } catch (e) { showToast('처리 실패: ' + (e instanceof Error ? e.message : '오류')) }
     finally { setActionId(null) }
   }
 
@@ -109,7 +117,7 @@ export default function AdminPage() {
     try {
       const updated = await revokeSubscription(token, userId)
       setAllUsers(prev => prev.map(u => u.id === userId ? updated : u))
-    } catch { /* ignore */ }
+    } catch (e) { showToast('처리 실패: ' + (e instanceof Error ? e.message : '오류')) }
     finally { setActionId(null) }
   }
 
@@ -228,7 +236,7 @@ export default function AdminPage() {
       if (token) headers['Authorization'] = `Bearer ${token}`
       const res = await fetch(`${API}/api/monitor/health`, { headers })
       if (res.ok) setMonitorData(await res.json())
-    } catch { /* ignore */ }
+    } catch (e) { showToast('모니터 로드 실패: ' + (e instanceof Error ? e.message : '오류')) }
     finally { setMonitorLoading(false) }
   }, [])
 
@@ -288,6 +296,12 @@ export default function AdminPage() {
 
   return (
     <main className="flex-1 overflow-y-auto" style={{ padding: '14px var(--page-px) 10px' }}>
+      {/* 토스트 알림 */}
+      {toast && (
+        <div style={{ position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 9999, padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#fff', backgroundColor: toast.type === 'error' ? '#D32F2F' : '#00C853', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+          {toast.msg}
+        </div>
+      )}
       <div className="flex flex-col gap-4" style={{ maxWidth: '480px', margin: '0 auto', width: '100%' }}>
 
           {/* 타이틀 */}

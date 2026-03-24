@@ -5,6 +5,9 @@ import { fetchStockPrices } from '../api/analysisApi'
 import FeedbackWidget from '../components/app/FeedbackWidget'
 import { buildShareText } from '../utils/shareUtils'
 
+/** 가격 문자열 → 숫자 변환 (쉼표/원/공백 제거) */
+const parsePrice = (s?: string) => s ? Number(s.replace(/[^0-9]/g, '')) : 0
+
 function EngineBadge({ name, role, color }: { name: string; role: string; color: string }) {
   return (
     <div className="engine-badge" style={{ backgroundColor: `${color}10`, border: `1px solid ${color}20` }}>
@@ -66,11 +69,13 @@ function renderInline(text: string): React.ReactNode {
     if (stockIdx <= boldIdx && stockMatch) {
       if (stockMatch.index! > 0) parts.push(<span key={i++}>{remaining.slice(0, stockMatch.index!)}</span>)
       parts.push(<span key={i++} className="stock-inline">{stockMatch[1]}<span className="stock-code-inline">{stockMatch[2]}</span></span>)
-      remaining = remaining.slice(stockMatch.index! + stockMatch[0].length)
+      const advance = stockMatch.index! + stockMatch[0].length
+      remaining = advance > 0 ? remaining.slice(advance) : remaining.slice(1)
     } else if (boldMatch) {
       if (boldMatch.index! > 0) parts.push(<span key={i++}>{remaining.slice(0, boldMatch.index!)}</span>)
       parts.push(<strong key={i++}>{boldMatch[1]}</strong>)
-      remaining = remaining.slice(boldMatch.index! + boldMatch[0].length)
+      const advance = boldMatch.index! + boldMatch[0].length
+      remaining = advance > 0 ? remaining.slice(advance) : remaining.slice(1)
     }
   }
   return parts.length === 1 ? parts[0] : <>{parts}</>
@@ -420,7 +425,7 @@ function correctContentPrices(content: string, picks: StockPickItem[], livePrice
       `$1$2${realPrice}원`)
 
     // ── 목표가/손절가 비례 보정 (콘텐츠 내부) ──
-    const parseN = (s: string) => Number(s.replace(/[^0-9]/g, ''))
+    const parseN = parsePrice
     const aiP = parseN(pick.currentPrice || '0')
     const realP = parseN(realPrice)
     if (aiP > 0 && realP > 0 && Math.abs(realP / aiP - 1) > 0.05) {
@@ -502,7 +507,7 @@ function AnalysisResultSection({ result }: { result: import('../hooks/useAnalysi
       </div>
 
       {/* 종목 추천 카드 */}
-      {result.stockPicks && result.stockPicks.length > 0 && <LiveStockPickCards picks={result.stockPicks} />}
+      {result.stockPicks && result.stockPicks.length > 0 && <LiveStockPickCards picks={result.stockPicks} livePrices={livePrices} />}
 
       {/* 구분선 */}
       <div className="flex items-center gap-2.5 py-0.5">
@@ -530,16 +535,7 @@ function AnalysisResultSection({ result }: { result: import('../hooks/useAnalysi
   )
 }
 
-function LiveStockPickCards({ picks }: { picks: StockPickItem[] }) {
-  const [livePrices, setLivePrices] = useState<Record<string, string>>({})
-
-  useEffect(() => {
-    const codes = picks.map(p => p.code).filter(Boolean)
-    if (codes.length === 0) return
-    fetchStockPrices(codes).then(prices => {
-      if (Object.keys(prices).length > 0) setLivePrices(prices)
-    })
-  }, [picks])
+function LiveStockPickCards({ picks, livePrices }: { picks: StockPickItem[]; livePrices: Record<string, string> }) {
 
   const actionMap: Record<string, { bg: string; border: string; color: string; icon: string; label: string }> = {
     '매수': { bg: 'rgba(0,200,83,0.1)', border: 'rgba(0,200,83,0.3)', color: '#00C853', icon: '▲', label: 'BUY' },
@@ -565,14 +561,13 @@ function LiveStockPickCards({ picks }: { picks: StockPickItem[] }) {
         // ── 목표가/손절가 비례 보정 ──
         // AI가 잘못된 현재가 기준으로 목표가/손절가를 산출했을 수 있으므로
         // 실시간 가격과 AI 현재가의 비율로 비례 보정
-        const parseNum = (s?: string) => s ? Number(s.replace(/[^0-9]/g, '')) : 0
-        const aiCurrent = parseNum(pick.currentPrice)
-        const realCurrent = parseNum(livePrice)
+        const aiCurrent = parsePrice(pick.currentPrice)
+        const realCurrent = parsePrice(livePrice)
         const ratio = (isLive && aiCurrent > 0 && realCurrent > 0 && Math.abs(realCurrent / aiCurrent - 1) > 0.05)
           ? realCurrent / aiCurrent : 0
         const scalePrice = (priceStr?: string) => {
           if (!priceStr || ratio === 0) return priceStr
-          const n = parseNum(priceStr)
+          const n = parsePrice(priceStr)
           if (n <= 0) return priceStr
           const scaled = Math.round(n * ratio / 100) * 100
           return scaled.toLocaleString('ko-KR')

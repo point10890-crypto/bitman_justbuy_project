@@ -175,6 +175,15 @@ public class MultiAgentOrchestrator {
     );
 
     public AnalysisResponse runAnalysis(String query, String mode) {
+        // 입력 검증
+        if (query == null || query.isBlank()) {
+            throw new IllegalArgumentException("분석 쿼리가 비어있습니다.");
+        }
+        if (query.length() > 2000) {
+            query = query.substring(0, 2000);
+            log.warn("[Orchestrator] Query truncated to 2000 chars");
+        }
+
         long totalStart = System.currentTimeMillis();
         String today = DateTimeFormatter.ofPattern("yyyy-MM-dd")
             .withZone(ZoneId.of("Asia/Seoul")).format(Instant.now());
@@ -271,8 +280,12 @@ public class MultiAgentOrchestrator {
             for (Future<AgentResult> future : futures) {
                 try {
                     round1Results.add(future.get(180, TimeUnit.SECONDS));
+                } catch (java.util.concurrent.TimeoutException e) {
+                    future.cancel(true);
+                    log.error("[Orchestrator] Agent timeout (180s), cancelled");
                 } catch (Exception e) {
-                    log.error("[Orchestrator] Agent failed: {}", e.getMessage());
+                    future.cancel(true);
+                    log.error("[Orchestrator] Agent failed: {}", e.getMessage(), e);
                 }
             }
         }

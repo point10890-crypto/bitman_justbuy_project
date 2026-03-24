@@ -60,6 +60,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // 앱 시작 시 저장된 토큰으로 사용자 정보 복원
   useEffect(() => {
+    // ─── 레거시 키 마이그레이션 (justbuy_* → bitman_*) ───
+    const legacyToken = localStorage.getItem('justbuy_token')
+    if (legacyToken && !localStorage.getItem(TOKEN_KEY)) {
+      localStorage.setItem(TOKEN_KEY, legacyToken)
+      localStorage.removeItem('justbuy_token')
+      const legacyUser = localStorage.getItem('justbuy_user')
+      if (legacyUser) {
+        localStorage.setItem(USER_KEY, legacyUser)
+        localStorage.removeItem('justbuy_user')
+      }
+    }
+
     const token = localStorage.getItem(TOKEN_KEY)
     if (!token) {
       setIsLoading(false)

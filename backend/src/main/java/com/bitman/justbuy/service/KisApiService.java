@@ -9,6 +9,8 @@ import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import org.springframework.scheduling.annotation.Scheduled;
+
 import java.text.NumberFormat;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -36,6 +38,7 @@ public class KisApiService {
     // 토큰 캐시
     private volatile String accessToken;
     private volatile Instant tokenExpiry = Instant.EPOCH;
+    private volatile Instant tokenErrorCooldown = Instant.EPOCH; // 토큰 실패 시 2분 쿨다운
 
     // 데이터 캐시 (10분 TTL)
     private record CachedEntry(String data, Instant expiry) {
@@ -54,6 +57,17 @@ public class KisApiService {
             && kisProperties.appSecret() != null && !kisProperties.appSecret().isBlank();
     }
 
+    /** 만료된 캐시 엔트리 정리 (5분마다) */
+    @Scheduled(fixedDelay = 300_000)
+    public void cleanExpiredCache() {
+        int before = cache.size();
+        cache.entrySet().removeIf(e -> !e.getValue().isValid());
+        int removed = before - cache.size();
+        if (removed > 0) {
+            log.debug("[KIS] Cache cleanup: removed {} expired entries ({} remaining)", removed, cache.size());
+        }
+    }
+
     // ══════════════════════════════════════════════════
     // 토큰 관리
     // ══════════════════════════════════════════════════
@@ -61,6 +75,10 @@ public class KisApiService {
     private synchronized String getAccessToken() {
         if (accessToken != null && Instant.now().isBefore(tokenExpiry)) {
             return accessToken;
+        }
+        // 토큰 발급 실패 후 쿨다운 (2분) — 연속 호출 방지
+        if (Instant.now().isBefore(tokenErrorCooldown)) {
+            return null;
         }
 
         try {
@@ -90,7 +108,8 @@ public class KisApiService {
             log.info("[KIS] 토큰 발급 성공 (만료: {})", tokenExpiry);
             return accessToken;
         } catch (Exception e) {
-            log.error("[KIS] 토큰 발급 오류: {}", e.getMessage());
+            log.error("[KIS] 토큰 발급 오류 (2분 쿨다운): {}", e.getMessage());
+            tokenErrorCooldown = Instant.now().plus(2, ChronoUnit.MINUTES);
             return null;
         }
     }
@@ -133,6 +152,10 @@ public class KisApiService {
 
             HttpHeaders headers = buildHeaders("FHKST01010100");
             ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
+                log.warn("[KIS] 현재가 HTTP 에러: {} ({})", resp.getStatusCode(), stockCode);
+                return Map.of();
+            }
             JsonNode output = objectMapper.readTree(resp.getBody()).path("output");
 
             Map<String, String> result = new LinkedHashMap<>();
@@ -184,6 +207,7 @@ public class KisApiService {
 
             HttpHeaders headers = buildHeaders("FHKST01010900");
             ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return "";
             JsonNode outputArr = objectMapper.readTree(resp.getBody()).path("output");
 
             if (!outputArr.isArray() || outputArr.isEmpty()) return "";
@@ -288,6 +312,7 @@ public class KisApiService {
 
             HttpHeaders headers = buildHeaders("FHPUP02100000");
             ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return Map.of();
             JsonNode output = objectMapper.readTree(resp.getBody()).path("output");
 
             Map<String, String> result = new LinkedHashMap<>();

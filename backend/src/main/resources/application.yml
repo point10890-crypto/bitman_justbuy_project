@@ -28,9 +28,12 @@ bitman:
     perplexity-api-key: ${PERPLEXITY_API_KEY:}
     grok-api-key: ${XAI_API_KEY:}
   dart:
-    api-key: ${DART_API_KEY:2cde8f3d38d55ba037c389d0d6bdbb530766f472}
+    api-key: ${DART_API_KEY:}
+  kis:
+    app-key: ${BITMAN_KIS_APP_KEY:}
+    app-secret: ${BITMAN_KIS_APP_SECRET:}
   cors:
-    allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://localhost:5173,https://bitman-justbuy.pages.dev}
+    allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://localhost:5173,https://bitman-justbuy.pages.dev,https://crop-mens-street-kai.trycloudflare.com}
   storage:
     data-dir: ${STORAGE_DIR:./data}
   scheduler:
