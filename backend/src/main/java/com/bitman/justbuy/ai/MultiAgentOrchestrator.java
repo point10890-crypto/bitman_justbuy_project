@@ -543,9 +543,12 @@ public class MultiAgentOrchestrator {
         try {
             StringBuilder sb = new StringBuilder();
 
-            // 1) 시장 지수 (항상)
-            String indices = kisApiService.fetchMarketIndices();
-            if (!indices.isEmpty()) sb.append(indices);
+            // ★ 1) 전체 시장 순위 데이터 (모든 모드에 주입)
+            //    - 시장 지수 (코스피/코스닥)
+            //    - 거래량 순위 TOP 20
+            //    - 외국인 순매수 순위 TOP 15
+            String allRankings = kisApiService.fetchAllRankings();
+            if (!allRankings.isEmpty()) sb.append(allRankings);
 
             // 2) 쿼리 종목 개별 시세 + 수급
             int count = 0;
@@ -559,21 +562,19 @@ public class MultiAgentOrchestrator {
             }
 
             // 3) 수급분석 모드: 시총 상위 종목 수급 요약 추가
-            if ("수급분석".equals(mode)) {
+            if ("\uC218\uAE09\uBD84\uC11D".equals(mode)) {
                 List<String> topCodes = List.of(
-                    "005930", "000660", "373220", "207940", "005380",  // 삼성전자, SK하이닉스, LG에너지솔루션, 삼성바이오, 현대차
-                    "006400", "051910", "035420", "000270", "068270",  // 삼성SDI, LG화학, NAVER, 기아, 셀트리온
-                    "105560", "055550", "035720", "003670", "028260",  // KB금융, 신한지주, 카카오, 포스코홀딩스, 삼성물산
-                    "096770", "034730", "066570", "032830", "003550"   // SK이노베이션, SK, LG전자, 삼성생명, LG
+                    "005930", "000660", "373220", "207940", "005380",
+                    "006400", "051910", "035420", "000270", "068270",
+                    "105560", "055550", "035720", "003670", "028260",
+                    "096770", "034730", "066570", "032830", "003550"
                 );
                 String supply = kisApiService.fetchTopStocksSupplySummary(topCodes);
                 if (!supply.isEmpty()) sb.append(supply);
             }
 
-            if (count > 0 || !indices.isEmpty()) {
-                log.info("[Orchestrator] KIS 실시간 데이터 주입: 지수={}, 종목={}개, mode={}",
-                    !indices.isEmpty(), count, mode);
-            }
+            log.info("[Orchestrator] KIS 데이터 주입: rankings={}, 종목={}개, mode={}",
+                !allRankings.isEmpty(), count, mode);
             return sb.toString();
         } catch (Exception e) {
             log.warn("[Orchestrator] KIS 데이터 수집 실패: {}", e.getMessage());

@@ -439,6 +439,186 @@ public class KisApiService {
     }
 
     // ══════════════════════════════════════════════════
+    // 🔥 실시간 순위 조회 (거래량/등락률/외국인)
+    // ══════════════════════════════════════════════════
+
+    /**
+     * 거래량 순위 TOP 20 (FHPST01710000)
+     */
+    public String fetchVolumeRanking() {
+        return fetchRanking("kis_rank_volume", "FHPST01710000",
+            "/uapi/domestic-stock/v1/quotations/volume-rank",
+            "0", // 전체 (코스피+코스닥)
+            "📊 거래량 순위 TOP 20", false);
+    }
+
+    /**
+     * 등락률 순위 TOP 20 (FHPST01710000 — 상승률 기준)
+     */
+    public String fetchGainersRanking() {
+        return fetchRanking("kis_rank_gainers", "FHPST01710000",
+            "/uapi/domestic-stock/v1/quotations/volume-rank",
+            "0",
+            "🚀 등락률 상위 TOP 20", true);
+    }
+
+    /**
+     * 외국인 순매수 상위 (기간별 매매동향 — 당일)
+     */
+    public String fetchForeignNetBuyRanking() {
+        if (!isAvailable()) return "";
+
+        String cacheKey = "kis_rank_foreign";
+        CachedEntry cached = cache.get(cacheKey);
+        if (cached != null && cached.isValid()) return cached.data();
+
+        try {
+            String today = LocalDate.now(KST).format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+            String url = KIS_BASE + "/uapi/domestic-stock/v1/quotations/inquire-investor-daily-by-stock"
+                + "?FID_COND_MRKT_DIV_CODE=J"
+                + "&FID_COND_SCR_DIV_CODE=16551"
+                + "&FID_INPUT_ISCD=0000"   // 전종목
+                + "&FID_DIV_CLS_CODE=1"     // 외국인
+                + "&FID_INPUT_DATE_1=" + today
+                + "&FID_INPUT_DATE_2=" + today
+                + "&FID_TRGT_CLS_CODE=111111111"
+                + "&FID_TRGT_EXLS_CLS_CODE=000000000"
+                + "&FID_INPUT_PRICE_1=0"
+                + "&FID_INPUT_PRICE_2=0"
+                + "&FID_VOL_CNT=0";
+
+            HttpHeaders headers = buildHeaders("FHKST01010800");
+            ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return "";
+
+            JsonNode root = objectMapper.readTree(resp.getBody());
+            JsonNode output = root.path("output");
+            if (!output.isArray()) return "";
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("\n🌍 외국인 순매수 상위 (").append(today).append(" KST 기준)\n");
+            sb.append("⚠️ 출처: 한국투자증권 OpenAPI (거래소 공식 데이터)\n");
+
+            int count = 0;
+            for (JsonNode item : output) {
+                if (count >= 15) break;
+                String name = item.path("hts_kor_isnm").asText("");
+                String code = item.path("mksc_shrn_iscd").asText("");
+                String price = item.path("stck_prpr").asText("");
+                String change = item.path("prdy_ctrt").asText("");
+                long netBuy = parseLong(item.path("frgn_ntby_qty").asText("0"));
+
+                if (name.isEmpty() || netBuy == 0) continue;
+                sb.append(String.format("  %2d. %s(%s) %s원 (%s%%) 외국인 %+,d주\n",
+                    count + 1, name, code, formatPrice(price), change, netBuy));
+                count++;
+            }
+
+            String result = sb.toString();
+            cache.put(cacheKey, new CachedEntry(result, Instant.now().plus(10, ChronoUnit.MINUTES)));
+            return result;
+        } catch (Exception e) {
+            log.warn("[KIS] 외국인 순매수 순위 조회 실패: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 공통 순위 조회 (거래량/등락률 — volume-rank API 사용)
+     */
+    private String fetchRanking(String cacheKey, String trId, String path, String marketDiv, String title, boolean sortByChange) {
+        if (!isAvailable()) return "";
+
+        CachedEntry cached = cache.get(cacheKey);
+        if (cached != null && cached.isValid()) return cached.data();
+
+        try {
+            String url = KIS_BASE + path
+                + "?FID_COND_MRKT_DIV_CODE=" + marketDiv
+                + "&FID_COND_SCR_DIV_CODE=20171"
+                + "&FID_INPUT_ISCD=0000"
+                + "&FID_DIV_CLS_CODE=0"
+                + "&FID_BLNG_CLS_CODE=0"
+                + "&FID_TRGT_CLS_CODE=111111111"
+                + "&FID_TRGT_EXLS_CLS_CODE=000000000"
+                + "&FID_INPUT_PRICE_1=0"
+                + "&FID_INPUT_PRICE_2=0"
+                + "&FID_VOL_CNT=0"
+                + "&FID_INPUT_DATE_1=";
+
+            HttpHeaders headers = buildHeaders(trId);
+            ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return "";
+
+            JsonNode root = objectMapper.readTree(resp.getBody());
+            JsonNode output = root.path("output");
+            if (!output.isArray()) return "";
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("\n").append(title).append("\n");
+            sb.append("⚠️ 출처: 한국투자증권 OpenAPI (거래소 공식 데이터)\n");
+
+            int count = 0;
+            for (JsonNode item : output) {
+                if (count >= 20) break;
+                String name = item.path("hts_kor_isnm").asText("");
+                String code = item.path("mksc_shrn_iscd").asText("");
+                String price = item.path("stck_prpr").asText("");
+                String change = item.path("prdy_ctrt").asText("");
+                String volume = item.path("acml_vol").asText("");
+
+                if (name.isEmpty()) continue;
+                sb.append(String.format("  %2d. %s(%s) %s원 (%s%%) 거래량: %s\n",
+                    count + 1, name, code, formatPrice(price), change, formatVolume(volume)));
+                count++;
+            }
+
+            String result = sb.toString();
+            cache.put(cacheKey, new CachedEntry(result, Instant.now().plus(10, ChronoUnit.MINUTES)));
+            return result;
+        } catch (Exception e) {
+            log.warn("[KIS] {} 순위 조회 실패: {}", title, e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 🔥 전체 시장 순위 데이터 통합 — 모든 분석 모드에 주입
+     */
+    public String fetchAllRankings() {
+        if (!isAvailable()) return "";
+
+        String cacheKey = "kis_all_rankings";
+        CachedEntry cached = cache.get(cacheKey);
+        if (cached != null && cached.isValid()) return cached.data();
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n\n══════════════════════════════════════════\n");
+        sb.append("📡 KIS 실시간 시장 데이터 (한국투자증권 OpenAPI)\n");
+        sb.append("══════════════════════════════════════════\n");
+
+        // 시장 지수
+        String indices = fetchMarketIndices();
+        if (!indices.isEmpty()) sb.append(indices);
+
+        // 거래량 순위
+        String volumeRank = fetchVolumeRanking();
+        if (!volumeRank.isEmpty()) sb.append(volumeRank);
+
+        // 외국인 순매수
+        String foreignRank = fetchForeignNetBuyRanking();
+        if (!foreignRank.isEmpty()) sb.append(foreignRank);
+
+        sb.append("══════════════════════════════════════════\n");
+
+        String result = sb.toString();
+        if (result.length() > 100) { // 실제 데이터가 있는 경우만 캐시
+            cache.put(cacheKey, new CachedEntry(result, Instant.now().plus(10, ChronoUnit.MINUTES)));
+        }
+        return result;
+    }
+
+    // ══════════════════════════════════════════════════
     // 유틸리티
     // ══════════════════════════════════════════════════
 
