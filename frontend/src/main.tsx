@@ -13,6 +13,7 @@ import ProtectedRoute from './components/guards/ProtectedRoute'
 import SubscribedRoute from './components/guards/SubscribedRoute'
 import AdminRoute from './components/guards/AdminRoute'
 import AdminPage from './pages/AdminPage'
+import LandingPage from './pages/LandingPage'
 import './index.css'
 
 // ─── 에러 캐시 자동 정리 ───
@@ -44,6 +45,7 @@ createRoot(document.getElementById('root')!).render(
       <BrowserRouter>
         <Routes>
           {/* 공개 라우트 (독립 전체화면) */}
+          <Route path="/landing" element={<LandingPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/login" element={<LoginPage />} />
 

@@ -62,7 +62,7 @@ function formatChange(percent: number): string {
 
 export default function AppLayout() {
   const { data: marketData } = useMarketData()
-  const { canInstall, install, dismiss } = usePWAInstall()
+  const { canInstall, install, dismiss, isiOS, showIOSGuide, closeIOSGuide, showDesktopGuide, closeDesktopGuide, triggerNativeInstall, hasNativePrompt } = usePWAInstall()
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
@@ -219,6 +219,13 @@ export default function AppLayout() {
 
               <div className="h-px mx-5 my-1" style={{ backgroundColor: 'var(--border-subtle)' }} />
 
+              <a className="menu-item" href="https://open.kakao.com/o/sJVLbWUe" target="_blank" rel="noopener noreferrer" onClick={closeMenu} style={{ textDecoration: 'none', color: 'inherit' }}>
+                <div className="menu-item-icon" style={{ background: 'rgba(254,229,0,0.15)' }}>💬</div>
+                <div><div>AI 단톡방 입장문의</div><div className="menu-item-desc">카카오톡 오픈채팅</div></div>
+              </a>
+
+              <div className="h-px mx-5 my-1" style={{ backgroundColor: 'var(--border-subtle)' }} />
+
               <button className="menu-item" onClick={() => { closeMenu(); logout(); navigate('/login', { replace: true }) }}>
                 <div className="menu-item-icon" style={{ background: 'rgba(255,23,68,0.1)' }}>🚪</div>
                 <div><div>로그아웃</div><div className="menu-item-desc">계정에서 로그아웃</div></div>
@@ -239,27 +246,110 @@ export default function AppLayout() {
 
       {/* ===== PWA 설치 배너 ===== */}
       {canInstall && (
-        <div className="animate-slide-up" style={{
-          position: 'sticky', bottom: 56, zIndex: 50,
-          margin: '0 8px 4px', padding: '10px 14px',
-          borderRadius: '14px',
-          background: 'linear-gradient(135deg, rgba(255,215,0,0.12) 0%, rgba(0,200,83,0.08) 100%)',
-          border: '1px solid rgba(255,215,0,0.25)',
-          backdropFilter: 'blur(12px)',
-          display: 'flex', alignItems: 'center', gap: '10px',
-        }}>
+        <div className="pwa-install-banner animate-slide-up">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 logo-gold">
             <span className="font-black text-sm logo-gold-text">B</span>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[12px] font-bold" style={{ color: 'var(--text-primary)' }}>앱으로 설치하기</p>
-            <p className="text-[9.5px]" style={{ color: 'var(--text-muted)' }}>홈 화면에 추가하여 빠르게 접근</p>
+            <p className="text-[12px] font-bold" style={{ color: 'var(--text-primary)' }}>
+              {isiOS ? '홈 화면에 추가' : '앱으로 설치하기'}
+            </p>
+            <p className="text-[9.5px]" style={{ color: 'var(--text-muted)' }}>
+              {isiOS ? '아래 공유 버튼 → 홈 화면에 추가' : '홈 화면에 추가하여 빠르게 접근'}
+            </p>
           </div>
-          <button onClick={install} className="flex-shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-bold" style={{ background: 'linear-gradient(135deg, #FFD700, #FF9800)', color: '#0D1117' }}>설치</button>
+          <button onClick={install} className="flex-shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-bold" style={{ background: 'linear-gradient(135deg, #FFD700, #FF9800)', color: '#0D1117' }}>
+            {isiOS ? '방법 보기' : '설치'}
+          </button>
           <button onClick={dismiss} className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-lg" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)' }}><path d="M18 6L6 18" /><path d="M6 6l12 12" /></svg>
           </button>
         </div>
+      )}
+
+      {/* ===== iOS 설치 가이드 모달 ===== */}
+      {showIOSGuide && (
+        <>
+          <div className="ios-guide-overlay" onClick={closeIOSGuide} />
+          <div className="ios-guide-modal">
+            <button className="ios-guide-close" onClick={closeIOSGuide}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18" /><path d="M6 6l12 12" /></svg>
+            </button>
+            <div className="ios-guide-icon logo-gold">
+              <span className="font-black text-lg logo-gold-text">B</span>
+            </div>
+            <h3 className="ios-guide-title">BitMan 앱 설치하기</h3>
+            <p className="ios-guide-subtitle">iPhone 홈 화면에 추가하세요</p>
+            <div className="ios-guide-steps">
+              <div className="ios-guide-step">
+                <div className="ios-guide-step-num">1</div>
+                <div>
+                  <p className="ios-guide-step-title">하단 공유 버튼 탭</p>
+                  <p className="ios-guide-step-desc">Safari 하단의 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFD700" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:'inline',verticalAlign:'middle'}}><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> 버튼을 누르세요</p>
+                </div>
+              </div>
+              <div className="ios-guide-step">
+                <div className="ios-guide-step-num">2</div>
+                <div>
+                  <p className="ios-guide-step-title">"홈 화면에 추가" 선택</p>
+                  <p className="ios-guide-step-desc">메뉴를 아래로 스크롤하면 찾을 수 있습니다</p>
+                </div>
+              </div>
+              <div className="ios-guide-step">
+                <div className="ios-guide-step-num">3</div>
+                <div>
+                  <p className="ios-guide-step-title">"추가" 탭</p>
+                  <p className="ios-guide-step-desc">홈 화면에 BitMan 앱 아이콘이 생성됩니다</p>
+                </div>
+              </div>
+            </div>
+            <button onClick={closeIOSGuide} className="ios-guide-done">확인</button>
+          </div>
+        </>
+      )}
+
+      {/* ===== 데스크탑 설치 가이드 모달 ===== */}
+      {showDesktopGuide && (
+        <>
+          <div className="ios-guide-overlay" onClick={closeDesktopGuide} />
+          <div className="ios-guide-modal">
+            <button className="ios-guide-close" onClick={closeDesktopGuide}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18" /><path d="M6 6l12 12" /></svg>
+            </button>
+            <div className="ios-guide-icon logo-gold">
+              <span className="font-black text-lg logo-gold-text">B</span>
+            </div>
+            <h3 className="ios-guide-title">BitMan 앱 설치하기</h3>
+            <p className="ios-guide-subtitle">홈 화면에 추가하여 앱처럼 사용하세요</p>
+            {hasNativePrompt ? (
+              <div className="ios-guide-steps" style={{ marginBottom: 16 }}>
+                <p className="ios-guide-step-desc" style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: 13 }}>아래 버튼을 눌러 바로 설치할 수 있습니다</p>
+              </div>
+            ) : (
+            <div className="ios-guide-steps">
+              <div className="ios-guide-step">
+                <div className="ios-guide-step-num">1</div>
+                <div>
+                  <p className="ios-guide-step-title">주소창 오른쪽 설치 아이콘 클릭</p>
+                  <p className="ios-guide-step-desc">Chrome: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFD700" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:'inline',verticalAlign:'middle'}}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8"/><path d="M8 12h8"/></svg> 아이콘 또는 메뉴(⋮) → "앱 설치"</p>
+                </div>
+              </div>
+              <div className="ios-guide-step">
+                <div className="ios-guide-step-num">2</div>
+                <div>
+                  <p className="ios-guide-step-title">"설치" 버튼 클릭</p>
+                  <p className="ios-guide-step-desc">팝업에서 "설치"를 눌러 완료합니다</p>
+                </div>
+              </div>
+            </div>
+            )}
+            {hasNativePrompt ? (
+              <button onClick={() => { triggerNativeInstall(); closeDesktopGuide(); }} className="ios-guide-done">지금 설치하기</button>
+            ) : (
+              <button onClick={closeDesktopGuide} className="ios-guide-done">확인</button>
+            )}
+          </div>
+        </>
       )}
 
       {/* ===== 하단 네비게이션 ===== */}

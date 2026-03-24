@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react' // v4
 import type { AnalysisResult } from '../../hooks/useAnalysis'
 import { fetchStockPrices } from '../../api/analysisApi'
+import { buildShareText } from '../../utils/shareUtils'
 import { ReportRenderer } from './ReportRenderer'
 import ConsensusDisplay from './ConsensusDisplay'
 import FeedbackWidget from './FeedbackWidget'
@@ -64,7 +65,8 @@ export function AnalysisOverlay({ query, loading, error, result, onClose }: Anal
         {result && <AnalysisResultView result={result} />}
       </div>
 
-      {/* 하단 투자 경고 */}
+      {/* 하단 고정 공유 + 경고 */}
+      {result && !loading && <ShareBar result={result} query={query} />}
       <div className="w-full text-center text-[9px] font-medium" style={{ padding: '6px var(--page-px)', backgroundColor: 'rgba(13,17,23,0.95)', backdropFilter: 'blur(10px)', borderTop: '1px solid var(--border-subtle)', color: 'var(--color-warning)' }}>
         ⚠️ 본 정보는 투자자문이 아니며, 투자 판단의 책임은 본인에게 있습니다.
       </div>
@@ -282,6 +284,64 @@ function StockPickCards({ picks }: { picks: StockPick[] }) {
           </div>
         )
       })}
+    </div>
+  )
+}
+
+function ShareBar({ result, query }: { result: AnalysisResult; query: string }) {
+  const [status, setStatus] = useState<'idle' | 'shared' | 'copied' | 'failed'>('idle')
+
+  const handleShare = async () => {
+    const text = buildShareText(result, query)
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'BitMan AI 분석 결과', text })
+        setStatus('shared')
+      } else {
+        await navigator.clipboard.writeText(text)
+        setStatus('copied')
+      }
+    } catch {
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.style.cssText = 'position:fixed;opacity:0;left:-9999px'
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        document.body.removeChild(ta)
+        setStatus('copied')
+      } catch {
+        setStatus('failed')
+      }
+    }
+    setTimeout(() => setStatus('idle'), 2000)
+  }
+
+  return (
+    <div style={{ padding: '6px var(--page-px)', backgroundColor: 'rgba(13,17,23,0.95)', backdropFilter: 'blur(10px)', borderTop: '1px solid var(--border-subtle)' }}>
+      <button
+        type="button"
+        onClick={handleShare}
+        className="w-full flex items-center justify-center gap-2 rounded-xl active:scale-95 transition-all"
+        style={{
+          padding: '9px 16px',
+          background: status === 'copied' || status === 'shared'
+            ? 'rgba(0,200,83,0.15)'
+            : 'linear-gradient(135deg, rgba(0,200,83,0.12) 0%, rgba(66,165,245,0.12) 100%)',
+          border: `1px solid ${status === 'copied' || status === 'shared' ? 'rgba(0,200,83,0.4)' : 'rgba(0,200,83,0.25)'}`,
+          WebkitTapHighlightColor: 'transparent',
+        }}
+      >
+        {status === 'copied' || status === 'shared' ? (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00C853" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+        ) : (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00C853" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" /></svg>
+        )}
+        <span className="text-[12px] font-bold" style={{ color: status === 'copied' ? '#00C853' : status === 'shared' ? '#00C853' : '#E8E0D0' }}>
+          {status === 'copied' ? '클립보드에 복사됨!' : status === 'shared' ? '공유 완료!' : status === 'failed' ? '다시 시도해주세요' : '카카오톡 공유하기'}
+        </span>
+      </button>
     </div>
   )
 }

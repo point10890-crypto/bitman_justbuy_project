@@ -114,3 +114,4 @@ schtask_result.txt
 
 .vercel
 backend/start.bat
+.wrangler/

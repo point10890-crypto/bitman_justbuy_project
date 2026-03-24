@@ -9,6 +9,7 @@ import AdminPage from './pages/AdminPage'
 import SupplyPage from './pages/SupplyPage'
 import SubscribedRoute from './components/guards/SubscribedRoute'
 import AdminRoute from './components/guards/AdminRoute'
+import LandingPage from './pages/LandingPage'
 
 export const router = createBrowserRouter([
   {
@@ -21,6 +22,7 @@ export const router = createBrowserRouter([
       { path: '/admin', element: <AdminRoute><AdminPage /></AdminRoute> },
     ],
   },
+  { path: '/landing', element: <LandingPage /> },
   { path: '/login', element: <LoginPage /> },
   { path: '/register', element: <RegisterPage /> },
 ])

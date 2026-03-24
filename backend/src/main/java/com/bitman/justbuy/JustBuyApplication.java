@@ -3,6 +3,7 @@ package com.bitman.justbuy;
 import com.bitman.justbuy.config.AiProperties;
 import com.bitman.justbuy.config.DartProperties;
 import com.bitman.justbuy.config.JwtProperties;
+import com.bitman.justbuy.config.KisProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -12,7 +13,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication
 @EnableCaching
 @EnableScheduling
-@EnableConfigurationProperties({AiProperties.class, JwtProperties.class, DartProperties.class})
+@EnableConfigurationProperties({AiProperties.class, JwtProperties.class, DartProperties.class, KisProperties.class})
 public class JustBuyApplication {
     public static void main(String[] args) {
         SpringApplication.run(JustBuyApplication.class, args);
