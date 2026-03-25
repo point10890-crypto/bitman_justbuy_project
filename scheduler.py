@@ -86,82 +86,7 @@ except ImportError:
     sys.exit(1)
 
 
-# ============================================================
-# Git 자동 커밋 + 푸시 (→ Vercel 자동 배포)
-# ============================================================
 
-def auto_git_push(scope: str = 'all') -> bool:
-    """데이터 업데이트 후 자동 git commit + push → Vercel 자동 빌드 트리거
-
-    Args:
-        scope: 'kr', 'us', 'crypto', 'all'
-    Returns:
-        True if push succeeded
-    """
-    import subprocess
-    from datetime import datetime
-
-    project_dir = os.path.dirname(os.path.abspath(__file__))
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
-
-    try:
-        # git 저장소 확인
-        result = subprocess.run(
-            ['git', 'status', '--porcelain'],
-            capture_output=True, text=True, cwd=project_dir, timeout=30
-        )
-        if result.returncode != 0:
-            logger.warning("⚠️ Git 저장소가 아닙니다. auto_git_push 스킵.")
-            return False
-
-        changes = result.stdout.strip()
-        if not changes:
-            logger.info("📦 변경사항 없음, git push 스킵")
-            return True
-
-        # Stage all changes
-        subprocess.run(['git', 'add', '-A'], cwd=project_dir, timeout=30, check=True)
-
-        # Commit
-        msg = f"auto: {scope} data update ({now_str})"
-        subprocess.run(
-            ['git', 'commit', '-m', msg],
-            cwd=project_dir, timeout=30, check=True,
-            capture_output=True, text=True
-        )
-
-        # Push to origin (bitman_marketflow_project)
-        push_result = subprocess.run(
-            ['git', 'push', 'origin', 'main'],
-            cwd=project_dir, timeout=120,
-            capture_output=True, text=True
-        )
-
-        if push_result.returncode == 0:
-            logger.info(f"✅ Git push (origin) 완료 ({scope})")
-        else:
-            logger.error(f"❌ Git push (origin) 실패: {push_result.stderr[:200]}")
-
-        # Push to vercel-deploy (closing_bet) → Vercel 자동 빌드 트리거
-        vercel_result = subprocess.run(
-            ['git', 'push', 'vercel-deploy', 'main'],
-            cwd=project_dir, timeout=120,
-            capture_output=True, text=True
-        )
-
-        if vercel_result.returncode == 0:
-            logger.info(f"✅ Git push (vercel-deploy) 완료 → Vercel 자동 배포 ({scope})")
-        else:
-            logger.warning(f"⚠️ Git push (vercel-deploy) 실패: {vercel_result.stderr[:200]}")
-
-        return push_result.returncode == 0
-
-    except subprocess.TimeoutExpired:
-        logger.error("❌ Git 명령 타임아웃")
-        return False
-    except Exception as e:
-        logger.error(f"❌ auto_git_push 오류: {e}")
-        return False
 
 
 # ============================================================
@@ -814,14 +739,13 @@ def run_kr_full_update(skip_sync: bool = False):
 
     send_telegram(msg)
 
-    # 대시보드 자동 동기화 + 배포
+    # 대시보드 자동 동기화
     if not skip_sync:
         try:
             logger.info("🔄 대시보드 동기화 시작 (KR)...")
-            sync_dashboard(scope='kr', deploy=True)
+            sync_dashboard(scope='kr', deploy=False)
         except Exception as e:
             logger.error(f"❌ 대시보드 동기화 실패: {e}")
-        auto_git_push('kr')
 
     return all(r[1] for r in results)
 
@@ -862,14 +786,13 @@ def run_us_market_update(skip_sync: bool = False):
     except Exception as e:
         logger.error(f"❌ US 텔레그램 전송 실패: {e}")
 
-    # 대시보드 자동 동기화 + 배포
+    # 대시보드 자동 동기화
     if not skip_sync:
         try:
             logger.info("🔄 대시보드 동기화 시작 (US)...")
-            sync_dashboard(scope='us', deploy=True)
+            sync_dashboard(scope='us', deploy=False)
         except Exception as e:
             logger.error(f"❌ 대시보드 동기화 실패: {e}")
-        auto_git_push('us')
 
     return success
 
@@ -1278,14 +1201,13 @@ def run_crypto_pipeline(skip_sync: bool = False):
 
     logger.info(f"🪙 Crypto 파이프라인 완료: {success_count}/{total_count} ({elapsed:.0f}초)")
 
-    # 대시보드 자동 동기화 + 배포
+    # 대시보드 자동 동기화
     if not skip_sync:
         try:
             logger.info("🔄 대시보드 동기화 시작 (Crypto)...")
-            sync_dashboard(scope='crypto', deploy=True)
+            sync_dashboard(scope='crypto', deploy=False)
         except Exception as e:
             logger.error(f"❌ 대시보드 동기화 실패: {e}")
-        auto_git_push('crypto')
 
     return success_count == total_count
 
@@ -1325,19 +1247,13 @@ def run_full_update():
         status = "✅" if success else "❌"
         logger.info(f"{status} {emoji} {label} ({elapsed:.0f}초)")
 
-    # ── 통합 대시보드 동기화 + Vercel 배포 (1회) ──
+    # ── 통합 대시보드 동기화 ──
     deploy_ok = False
     try:
-        logger.info("🔄 전체 대시보드 동기화 + Vercel 배포...")
-        sync_result = sync_dashboard(scope='all', deploy=True)
-        deploy_ok = sync_result.get('deployed', False) if isinstance(sync_result, dict) else bool(sync_result)
+        logger.info("🔄 전체 대시보드 동기화...")
+        sync_result = sync_dashboard(scope='all', deploy=False)
     except Exception as e:
-        logger.error(f"❌ 대시보드 동기화/배포 실패: {e}")
-
-    # ── Git 자동 커밋 + 푸시 → Vercel 자동 빌드 ──
-    git_ok = auto_git_push('all')
-    if git_ok:
-        deploy_ok = True
+        logger.error(f"❌ 대시보드 동기화 실패: {e}")
 
     # ── 통합 텔레그램 요약 ──
     overall_elapsed = int(time.time() - overall_start)

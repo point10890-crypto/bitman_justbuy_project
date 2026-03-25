@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import PageHeader from '../components/common/PageHeader'
 import GlassCard from '../components/common/GlassCard'
@@ -8,11 +8,22 @@ import FormInput from '../components/common/FormInput'
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { login } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  import('react').then(({ useEffect }) => {
+    useEffect(() => {
+      if (location.state?.message) {
+        setError(location.state.message)
+        // Consume the state message so it doesn't show on reload
+        navigate(location.pathname, { replace: true, state: {} })
+      }
+    }, [location, navigate])
+  })
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -46,7 +57,7 @@ export default function LoginPage() {
 
       <div className="flex-1 flex flex-col justify-center" style={{ padding: '0 20px 32px', maxWidth: '440px', width: '100%', margin: '0 auto' }}>
         <GlassCard>
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
             {/* Title */}
             <div className="text-center mb-3 animate-slide-up" style={{ animationFillMode: 'backwards' }}>
               <h1 className="animate-gold-shimmer font-black text-[22px] mb-2" style={{ filter: 'drop-shadow(0 0 6px rgba(255,215,0,0.35))', letterSpacing: '-0.02em' }}>
@@ -115,7 +126,7 @@ export default function LoginPage() {
 
       {/* Footer */}
       <div className="text-center px-4" style={{ paddingBottom: 'max(16px, env(safe-area-inset-bottom))' }}>
-        <p className="text-[10px]" style={{ color: 'var(--text-muted)', opacity: 0.5 }}>
+        <p className="text-[10px]" style={{ color: 'var(--text-muted)', opacity: 0.8 }}>
           본 정보는 투자자문이 아니며, 투자 판단의 책임은 본인에게 있습니다.
         </p>
       </div>

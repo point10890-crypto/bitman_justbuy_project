@@ -610,74 +610,6 @@ def snapshot_data_version():
 
 
 # ============================================================
-# Vercel 배포
-# ============================================================
-
-def deploy_vercel() -> bool:
-    """Git push를 통한 Vercel 자동 배포 (GitHub 연동)"""
-    log("🚀 Git commit + push → Vercel 자동 배포...")
-    try:
-        # 1. data-snapshot 파일 스테이징
-        result = subprocess.run(
-            ['git', 'add', 'frontend/data-snapshot/'],
-            cwd=BASE_DIR,
-            capture_output=True, text=True, timeout=30
-        )
-        if result.returncode != 0:
-            log(f"❌ git add 실패: {result.stderr[:150]}")
-            return False
-
-        # 2. 변경사항 확인
-        result = subprocess.run(
-            ['git', 'diff', '--cached', '--stat', '--', 'frontend/data-snapshot/'],
-            cwd=BASE_DIR,
-            capture_output=True, text=True, timeout=10
-        )
-        if not result.stdout.strip():
-            log("ℹ️ 변경사항 없음 — 배포 스킵")
-            return True
-
-        # 3. 커밋
-        now = datetime.now().strftime('%Y-%m-%d %H:%M')
-        msg = f"📊 Dashboard data sync ({now})"
-        result = subprocess.run(
-            ['git', 'commit', '-m', msg, '--', 'frontend/data-snapshot/'],
-            cwd=BASE_DIR,
-            capture_output=True, text=True, timeout=30
-        )
-        if result.returncode != 0:
-            log(f"❌ git commit 실패: {result.stderr[:150]}")
-            return False
-
-        # 4. Push → Vercel 자동 배포 트리거
-        result = subprocess.run(
-            ['git', 'push', 'origin', 'main'],
-            cwd=BASE_DIR,
-            capture_output=True, text=True, timeout=120
-        )
-        if result.returncode != 0:
-            # main이 아닌 다른 브랜치일 수 있음
-            result = subprocess.run(
-                ['git', 'push', 'origin', 'HEAD'],
-                cwd=BASE_DIR,
-                capture_output=True, text=True, timeout=120
-            )
-
-        if result.returncode == 0:
-            log("✅ Git push 완료 → Vercel 자동 배포 트리거됨")
-            return True
-        else:
-            log(f"❌ git push 실패: {result.stderr[:200]}")
-            return False
-
-    except subprocess.TimeoutExpired:
-        log("❌ Git 작업 타임아웃")
-        return False
-    except Exception as e:
-        log(f"❌ 배포 에러: {e}")
-        return False
-
-
 # ============================================================
 # 메인 동기화 함수
 # ============================================================
@@ -703,7 +635,6 @@ def sync_dashboard(
     print("║  MarketFlow 대시보드 동기화                    ║")
     print("╚══════════════════════════════════════════════╝")
     print(f"  Scope: {scope}")
-    print(f"  Deploy: {'Yes' if deploy else 'No (dry-run)'}")
     print(f"  Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("")
 
@@ -769,20 +700,13 @@ def sync_dashboard(
     print("")
     print(f"  Total: {ok_count} OK, {fail_count} failed")
 
-    # ── Vercel 배포 ──
-    deployed = False
-    if deploy and ok_count > 0:
-        deployed = deploy_vercel()
-
     print("")
     print("╔══════════════════════════════════════════════╗")
     print(f"║  스냅샷: {ok_count} 파일 동기화 완료")
-    print(f"║  Vercel: {'✅ 배포됨' if deployed else '⏭ 스킵'}")
-    print(f"║  URL:    https://closing-bet.vercel.app")
     print("╚══════════════════════════════════════════════╝")
     print("")
 
-    return {'ok': ok_count, 'fail': fail_count, 'deployed': deployed}
+    return {'ok': ok_count, 'fail': fail_count, 'deployed': False}
 
 
 # ============================================================

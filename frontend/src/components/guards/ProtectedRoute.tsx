@@ -13,7 +13,9 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
     )
   }
 
-  if (!user) return <Navigate to="/register" replace />
+  if (!user) {
+    return <Navigate to="/login" state={{ message: '로그인이 필요한 서비스입니다.' }} replace />
+  }
 
   return <>{children}</>
 }

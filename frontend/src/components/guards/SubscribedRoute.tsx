@@ -1,9 +1,10 @@
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import type { ReactNode } from 'react'
 
 export default function SubscribedRoute({ children }: { children: ReactNode }) {
   const { user, isLoading } = useAuth()
+  const location = useLocation()
 
   if (isLoading) {
     return (
@@ -13,7 +14,12 @@ export default function SubscribedRoute({ children }: { children: ReactNode }) {
     )
   }
 
-  if (!user) return <Navigate to="/register" replace />
+  if (!user) {
+    if (location.pathname === '/') {
+      return <Navigate to="/landing" replace />
+    }
+    return <Navigate to="/login" state={{ message: '로그인이 필요한 서비스입니다.' }} replace />
+  }
   // ADMIN은 구독 없이도 메인 대시보드 접근 허용
   if (user.role === 'ADMIN') return <>{children}</>
   if (user.subscription !== 'pro') return <Navigate to="/subscribe" replace />
