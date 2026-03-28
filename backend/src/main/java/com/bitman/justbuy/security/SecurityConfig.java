@@ -46,11 +46,12 @@ public class SecurityConfig {
                 .requestMatchers(new AntPathRequestMatcher("/api/auth/register"),
                                  new AntPathRequestMatcher("/api/auth/login")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/api/analysis/**")).authenticated()
-                .requestMatchers(new AntPathRequestMatcher("/h2-console/**")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/h2-console/**")).hasRole("ADMIN")
                 .requestMatchers(new AntPathRequestMatcher("/error")).permitAll()
 
-                // Monitor (public health, admin for details)
-                .requestMatchers(new AntPathRequestMatcher("/api/monitor/**")).permitAll()
+                // Monitor: ping은 public, health/logs는 관리자 전용
+                .requestMatchers(new AntPathRequestMatcher("/api/monitor/ping")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/api/monitor/**")).hasRole("ADMIN")
 
                 // Admin only
                 .requestMatchers(new AntPathRequestMatcher("/api/admin/**")).hasRole("ADMIN")
@@ -73,7 +74,7 @@ public class SecurityConfig {
         var config = new CorsConfiguration();
         config.setAllowedOrigins(Arrays.asList(allowedOrigins.split(",")));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("*"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "X-Requested-With"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 

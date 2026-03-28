@@ -10,7 +10,7 @@ from app.models import db
 from app.models.user import User
 
 # Simple token: sha256(user_id + secret + expiry)
-TOKEN_EXPIRY = 86400 * 30  # 30 days
+TOKEN_EXPIRY = 86400 * 7  # 7 days
 
 
 def _get_secret():
@@ -73,10 +73,8 @@ def _auth_disabled():
         return True
     if os.getenv('AUTH_DISABLED', '').lower() in ('true', '1', 'yes'):
         return True
+    # DEV_MODE=true 일 때만 인증 해제 (로컬 개발 전용, 프로덕션에서 절대 설정 금지)
     if os.getenv('DEV_MODE', '').lower() in ('true', '1', 'yes'):
-        return True
-    # 개발 단계: Render 배포 시 자동으로 인증 해제 (프로덕션 전환 시 이 줄 삭제)
-    if os.getenv('RENDER'):
         return True
     return False
 

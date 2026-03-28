@@ -1,10 +1,14 @@
 # app/__init__.py
 """Flask 애플리케이션 팩토리 (KR Market + Auth + Stripe)"""
 
+import logging
 import os
 import sys
-from flask import Flask, make_response
+import traceback
+from flask import Flask, jsonify, make_response
 from flask.json.provider import DefaultJSONProvider
+
+logger = logging.getLogger(__name__)
 
 # 패키지 루트 경로 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -24,12 +28,18 @@ def create_app(config=None):
     app.json_provider_class = SafeJSONProvider
     app.json = SafeJSONProvider(app)
 
-    # CORS 설정 (옵셔널)
+    # CORS 설정 — 허용 도메인 명시 (origins: * 금지)
+    _allowed_origins = os.getenv('CORS_ORIGINS', ','.join([
+        'http://localhost:3000', 'http://localhost:3001', 'http://localhost:4000',
+        'http://localhost:5173', 'http://127.0.0.1:3000',
+        'https://bitman-justbuy.pages.dev',
+        'https://crop-mens-street-kai.trycloudflare.com',
+    ])).split(',')
     try:
         from flask_cors import CORS
-        CORS(app, resources={r"/api/*": {"origins": "*"}})
+        CORS(app, resources={r"/api/*": {"origins": _allowed_origins}})
     except ImportError:
-        print("flask-cors not installed, CORS disabled")
+        logger.warning("flask-cors not installed, CORS disabled")
 
     # 환경변수 로드
     try:
@@ -38,8 +48,13 @@ def create_app(config=None):
     except ImportError:
         pass
 
-    # 기본 설정
-    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'marketflow-secret-key-change-in-production')
+    # 기본 설정 — SECRET_KEY 환경변수 필수 (미설정 시 랜덤 생성 + 경고)
+    _secret = os.getenv('SECRET_KEY')
+    if not _secret:
+        _secret = os.urandom(32).hex()
+        logger.warning("SECRET_KEY not set! Generated random key — sessions will NOT survive restarts. "
+                        "Set SECRET_KEY env var for production.")
+    app.config['SECRET_KEY'] = _secret
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(
         os.path.abspath(os.path.dirname(os.path.dirname(__file__))), 'data', 'users.db'
     )
@@ -97,11 +112,21 @@ def create_app(config=None):
         from app.utils.scheduler import get_scheduler_status
         return _jsonify(get_scheduler_status())
 
-    # ── 스케줄러 수동 트리거 API ──
+    # ── 스케줄러 수동 트리거 API (관리자 인증 필수) ──
     @app.route('/api/scheduler/trigger/<task>', methods=['POST'])
     def scheduler_trigger(task):
-        from flask import jsonify as _jsonify
+        from flask import jsonify as _jsonify, request as _request
         import threading
+        from app.auth.decorators import _auth_disabled, _get_current_user
+
+        # 인증 검사: 관리자만 트리거 가능
+        if not _auth_disabled():
+            user = _get_current_user()
+            if user is None:
+                return _jsonify({'error': 'Authentication required'}), 401
+            if not user.is_admin:
+                return _jsonify({'error': 'Admin access required'}), 403
+
         from app.utils.scheduler import (
             _run_jongga_v2, _run_round2, _run_us_update, _run_crypto_pipeline,
             _run_all_update
@@ -118,7 +143,6 @@ def create_app(config=None):
         if not func:
             return _jsonify({'error': f'Unknown task: {task}', 'available': list(tasks_map.keys())}), 400
 
-        # 백그라운드 스레드에서 실행
         threading.Thread(target=func, daemon=True, name=f'trigger-{task}').start()
         return _jsonify({'status': 'triggered', 'task': task})
 
@@ -154,6 +178,17 @@ def create_app(config=None):
                 f"[FATAL] Critical route not registered: {critical}\n"
                 f"  Registered ({len(registered)}): {sorted(list(registered))[:15]}..."
             )
+
+    # ── Global Error Handler — 내부 정보 노출 방지 ──
+    @app.errorhandler(500)
+    def handle_internal_error(e):
+        logger.error("Internal server error: %s", e, exc_info=True)
+        return jsonify({'error': '서버 오류가 발생했습니다.'}), 500
+
+    @app.errorhandler(Exception)
+    def handle_unhandled_exception(e):
+        logger.error("Unhandled exception: %s", e, exc_info=True)
+        return jsonify({'error': '서버 오류가 발생했습니다.'}), 500
 
     # ── 클라우드 스케줄러 자동 시작 (Render 또는 SCHEDULER_ENABLED) ──
     if os.getenv('RENDER') or os.getenv('SCHEDULER_ENABLED', '').lower() in ('true', '1'):

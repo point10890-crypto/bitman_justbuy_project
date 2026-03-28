@@ -1,6 +1,7 @@
 package com.bitman.justbuy.controller;
 
 import com.bitman.justbuy.ai.agent.AiAgent;
+import com.bitman.justbuy.service.TrackRecordService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,6 +13,7 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 모니터링 API — 서비스 헬스체크 + 상태 대시보드
@@ -23,13 +25,38 @@ public class MonitorController {
     private static final Logger log = LoggerFactory.getLogger(MonitorController.class);
 
     private final List<AiAgent> agents;
+    private final TrackRecordService trackRecordService;
 
     // 분석 실행 로그 (인메모리, 최근 50건)
     private static final List<Map<String, Object>> analysisLogs = Collections.synchronizedList(new ArrayList<>());
     private static final int MAX_LOGS = 50;
 
-    public MonitorController(List<AiAgent> agents) {
+    // 에이전트별 파싱 성공/실패 카운터: int[0] = success, int[1] = failure
+    private static final ConcurrentHashMap<String, int[]> parseStats = new ConcurrentHashMap<>();
+
+    /** 파싱 결과 기록 */
+    public static void recordParseResult(String agentName, boolean success) {
+        parseStats.compute(agentName, (k, v) -> {
+            if (v == null) v = new int[]{0, 0};
+            if (success) v[0]++;
+            else v[1]++;
+            return v;
+        });
+    }
+
+    /** 에이전트별 파싱 성공률 조회 */
+    public static Map<String, Double> getParseRates() {
+        Map<String, Double> rates = new LinkedHashMap<>();
+        parseStats.forEach((agent, counts) -> {
+            int total = counts[0] + counts[1];
+            rates.put(agent, total > 0 ? (double) counts[0] / total : 1.0);
+        });
+        return rates;
+    }
+
+    public MonitorController(List<AiAgent> agents, TrackRecordService trackRecordService) {
         this.agents = agents != null ? agents : List.of();
+        this.trackRecordService = trackRecordService;
         log.info("[Monitor] initialized with {} agents", this.agents.size());
     }
 
@@ -148,6 +175,9 @@ public class MonitorController {
             result.put("stats", stats);
         }
 
+        // 6-1. 구조화 출력 파싱 성공률
+        result.put("structuredParseRate", getParseRates());
+
         // 6. 전체 상태 판정
         try {
             int avail = 0;
@@ -166,6 +196,12 @@ public class MonitorController {
     @GetMapping("/logs")
     public List<Map<String, Object>> getLogs() {
         return new ArrayList<>(analysisLogs);
+    }
+
+    /** GET /api/monitor/track-record — 분석 성과 추적 통계 */
+    @GetMapping("/track-record")
+    public Map<String, Object> getTrackRecord() {
+        return trackRecordService.getStats();
     }
 
     /** 외부 서비스 프로브 (HttpURLConnection 사용, 의존성 없음) */

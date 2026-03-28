@@ -1,6 +1,7 @@
 package com.bitman.justbuy.ai;
 
 import com.bitman.justbuy.ai.agent.AiAgent;
+import com.bitman.justbuy.controller.MonitorController;
 import com.bitman.justbuy.dto.AgentResult;
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.ConsensusResult;
@@ -8,12 +9,17 @@ import com.bitman.justbuy.dto.StockPick;
 import com.bitman.justbuy.service.DartApiService;
 import com.bitman.justbuy.service.KisApiService;
 import com.bitman.justbuy.service.MarketDataService;
+import com.bitman.justbuy.service.TrackRecordService;
 import com.bitman.justbuy.util.StockParser;
 import com.bitman.justbuy.util.StructuredAnalysisParser;
 import com.bitman.justbuy.util.StructuredAnalysisParser.StructuredAnalysis;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestTemplate;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -32,16 +38,24 @@ public class MultiAgentOrchestrator {
     private final ConsensusEngine consensusEngine;
     private final DartApiService dartApiService;
     private final KisApiService kisApiService;
+    private final TrackRecordService trackRecordService;
+    private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
 
     public MultiAgentOrchestrator(List<AiAgent> agents, SynthesisEngine synthesisEngine,
                                    MarketDataService marketDataService, ConsensusEngine consensusEngine,
-                                   DartApiService dartApiService, KisApiService kisApiService) {
+                                   DartApiService dartApiService, KisApiService kisApiService,
+                                   TrackRecordService trackRecordService,
+                                   RestTemplate restTemplate, ObjectMapper objectMapper) {
         this.agents = agents;
         this.synthesisEngine = synthesisEngine;
         this.marketDataService = marketDataService;
         this.consensusEngine = consensusEngine;
         this.dartApiService = dartApiService;
         this.kisApiService = kisApiService;
+        this.trackRecordService = trackRecordService;
+        this.restTemplate = restTemplate;
+        this.objectMapper = objectMapper;
     }
 
     // ═══ SUPER ELITE 6-AGENT KRX TRADING INTELLIGENCE ENGINE ═══
@@ -302,8 +316,10 @@ public class MultiAgentOrchestrator {
             StructuredAnalysis parsed = StructuredAnalysisParser.parse(r.content());
             if (parsed != null) {
                 structuredResults.put(r.agent(), parsed);
+                MonitorController.recordParseResult(r.agent(), true);
                 log.info("[Orchestrator] {}: 구조화 출력 파싱 성공 ({}개 종목)", r.agent(), parsed.stocks().size());
             } else {
+                MonitorController.recordParseResult(r.agent(), false);
                 log.info("[Orchestrator] {}: 구조화 출력 없음 → 기존 파서 폴백", r.agent());
             }
         }
@@ -311,7 +327,9 @@ public class MultiAgentOrchestrator {
         ConsensusResult consensus = null;
         String consensusText = "";
         if (structuredResults.size() >= 2) {
-            consensus = consensusEngine.calculateConsensus(structuredResults);
+            String marketGate = fetchMarketGate();
+            Map<String, Map<String, String>> kisSupplyData = collectKisSupplyData(structuredResults);
+            consensus = consensusEngine.calculateConsensus(structuredResults, kisSupplyData, marketGate);
             consensusText = consensusEngine.formatForSynthesis(consensus);
             log.info("[Orchestrator] 합의 엔진: 전체 합의도 {}%, {}개 종목, {}개 이견",
                 consensus.agreementScore(), consensus.stocks().size(), consensus.divergences().size());
@@ -457,12 +475,21 @@ public class MultiAgentOrchestrator {
         log.info("[Orchestrator] Analysis complete: {}ms, {}/{} agents succeeded",
             totalDuration, successResults.size(), availableAgents.size());
 
-        return new AnalysisResponse(
+        var response = new AnalysisResponse(
             mode, query, round1Results, synthesisResult, finalContent,
             stockPicks.stream().limit(10).toList(),
             consensus,
             Instant.now().toString(), true,
             new AnalysisResponse.Metadata(totalDuration, availableAgents.size(), successResults.size()));
+
+        // 성과 추적 기록 (실패해도 분석 결과에 영향 없음)
+        try {
+            trackRecordService.recordAnalysis(response);
+        } catch (Exception e) {
+            log.warn("[Orchestrator] Track record failed: {}", e.getMessage());
+        }
+
+        return response;
     }
 
     /**
@@ -580,6 +607,48 @@ public class MultiAgentOrchestrator {
             log.warn("[Orchestrator] KIS 데이터 수집 실패: {}", e.getMessage());
             return "";
         }
+    }
+
+    /** Flask API에서 시장 레짐(Market Gate) 상태를 가져온다. 실패 시 YELLOW 기본값. */
+    private String fetchMarketGate() {
+        try {
+            String url = "http://localhost:5001/api/kr/market-gate";
+            ResponseEntity<String> resp = restTemplate.getForEntity(url, String.class);
+            if (resp.getStatusCode().is2xxSuccessful() && resp.getBody() != null) {
+                JsonNode root = objectMapper.readTree(resp.getBody());
+                return root.path("gate").asText("YELLOW");
+            }
+        } catch (Exception e) {
+            log.warn("[Orchestrator] Market gate fetch failed, defaulting to YELLOW: {}", e.getMessage());
+        }
+        return "YELLOW";
+    }
+
+    /** 구조화 분석 결과에서 종목코드를 추출하고 KIS 수급 데이터를 수집한다. (최대 10종목) */
+    private Map<String, Map<String, String>> collectKisSupplyData(Map<String, StructuredAnalysis> results) {
+        Set<String> codes = new LinkedHashSet<>();
+        for (var analysis : results.values()) {
+            for (var stock : analysis.stocks()) {
+                if (stock.code() != null && stock.code().length() == 6) {
+                    codes.add(stock.code());
+                }
+            }
+        }
+        Map<String, Map<String, String>> supplyData = new LinkedHashMap<>();
+        int count = 0;
+        for (String code : codes) {
+            if (count >= 10) break;
+            try {
+                Map<String, String> priceData = kisApiService.fetchCurrentPrice(code);
+                if (!priceData.isEmpty()) {
+                    supplyData.put(code, priceData);
+                }
+            } catch (Exception e) {
+                log.debug("[Orchestrator] KIS supply data fetch failed for {}: {}", code, e.getMessage());
+            }
+            count++;
+        }
+        return supplyData;
     }
 
 }

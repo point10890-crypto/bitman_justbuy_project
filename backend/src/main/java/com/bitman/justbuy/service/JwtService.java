@@ -5,6 +5,9 @@ import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.stereotype.Service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
@@ -13,11 +16,19 @@ import java.util.UUID;
 @Service
 public class JwtService {
 
+    private static final Logger log = LoggerFactory.getLogger(JwtService.class);
+
     private final SecretKey key;
     private final long expirationMs;
 
     public JwtService(JwtProperties props) {
-        this.key = Keys.hmacShaKeyFor(props.secret().getBytes(StandardCharsets.UTF_8));
+        String secret = props.secret();
+        if (secret == null || secret.isBlank()) {
+            secret = UUID.randomUUID().toString() + UUID.randomUUID().toString();
+            log.error("JWT_SECRET not set! Generated random secret — tokens will NOT survive restarts. "
+                    + "Set JWT_SECRET env var for production.");
+        }
+        this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expirationMs = props.expirationMs();
     }
 

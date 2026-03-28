@@ -9,8 +9,8 @@ from app.auth.decorators import generate_token, login_required
 
 auth_bp = Blueprint('auth', __name__)
 
-# 관리자 비밀키 (레거시 호환)
-ADMIN_SECRET = os.getenv('ADMIN_SECRET', 'marketflow-admin-2024')
+# 관리자 비밀키 (레거시 호환) — 환경변수 미설정 시 레거시 관리자 API 비활성화
+ADMIN_SECRET = os.getenv('ADMIN_SECRET', '')
 
 
 # ═══════════════════════════════════════════════════════
@@ -171,7 +171,7 @@ def subscription_status():
 def admin_set_tier_legacy():
     """유저 tier 변경 (레거시 — X-Admin-Secret 헤더)"""
     secret = request.headers.get('X-Admin-Secret', '')
-    if secret != ADMIN_SECRET:
+    if not ADMIN_SECRET or secret != ADMIN_SECRET:
         return jsonify({'error': 'Admin access denied'}), 403
 
     data = request.get_json()

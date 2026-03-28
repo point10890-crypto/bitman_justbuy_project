@@ -1,5 +1,6 @@
 package com.bitman.justbuy.ai;
 
+import com.bitman.justbuy.controller.MonitorController;
 import com.bitman.justbuy.dto.ConsensusResult;
 import com.bitman.justbuy.dto.ConsensusResult.*;
 import com.bitman.justbuy.util.StructuredAnalysisParser.StructuredAnalysis;
@@ -29,9 +30,20 @@ public class ConsensusEngine {
     );
 
     /**
-     * 여러 에이전트의 구조화 분석 결과로부터 합의를 계산한다.
+     * 하위 호환용 — KIS 수급/시장레짐 보정 없이 합의 계산.
      */
     public ConsensusResult calculateConsensus(Map<String, StructuredAnalysis> agentResults) {
+        return calculateConsensus(agentResults, Map.of(), "YELLOW");
+    }
+
+    /**
+     * 여러 에이전트의 구조화 분석 결과로부터 합의를 계산한다.
+     * KIS 수급 데이터와 시장 레짐(Market Gate)으로 추가 보정을 적용한다.
+     */
+    public ConsensusResult calculateConsensus(
+            Map<String, StructuredAnalysis> agentResults,
+            Map<String, Map<String, String>> kisSupplyData,
+            String marketGate) {
         int agentCount = agentResults.size();
         if (agentCount == 0) {
             return new ConsensusResult(List.of(), "neutral", 0, List.of(), 0);
@@ -63,8 +75,11 @@ public class ConsensusEngine {
             double totalWeight = 0;
             double weightedConfidence = 0;
 
+            Map<String, Double> parseRates = MonitorController.getParseRates();
             for (AgentEntry ae : agg.entries) {
-                double weight = AGENT_BASE_WEIGHTS.getOrDefault(ae.agent, 1.0);
+                double baseWeight = AGENT_BASE_WEIGHTS.getOrDefault(ae.agent, 1.0);
+                double parseRate = parseRates.getOrDefault(ae.agent, 1.0);
+                double weight = baseWeight * (parseRate < 0.5 ? 0.5 : 1.0);
                 agentVotes.put(ae.agent, new AgentVote(
                     ae.stock.action(), ae.stock.confidence(),
                     ae.stock.targetPrice(), ae.stock.stopLoss()));
@@ -82,8 +97,41 @@ public class ConsensusEngine {
 
             double actionAgreement = actionWeights.getOrDefault(consensusAction, 0.0) / Math.max(totalWeight, 0.001);
             double mentionRatio = (double) mentionCount / agentCount;
-            int consensusScore = (int) Math.round(actionAgreement * mentionRatio * 100);
+            double rawScore = actionAgreement * mentionRatio * 100;
             double avgConfidence = totalWeight > 0 ? weightedConfidence / totalWeight : 0;
+
+            // KIS 수급 교차 검증
+            if (kisSupplyData.containsKey(code)) {
+                Map<String, String> supplyMap = kisSupplyData.get(code);
+                long supplyDirection = parseSupplyValue(supplyMap, "frgn_ntby_qty", "외국인")
+                                     + parseSupplyValue(supplyMap, "orgn_ntby_qty", "기관");
+
+                boolean isBuy = "매수".equals(consensusAction);
+                boolean isSell = "매도".equals(consensusAction);
+
+                if (supplyDirection > 0 && isSell) {
+                    rawScore *= 0.8;
+                    divergences.add(new Divergence(code, agg.name, "supply_conflict",
+                        List.of(), "수급 양수(매수세)이나 AI 합의는 매도 — 20% 감점"));
+                } else if (supplyDirection < 0 && isBuy) {
+                    rawScore *= 0.8;
+                    divergences.add(new Divergence(code, agg.name, "supply_conflict",
+                        List.of(), "수급 음수(매도세)이나 AI 합의는 매수 — 20% 감점"));
+                } else if (supplyDirection != 0 && (isBuy || isSell)) {
+                    rawScore *= 1.1;
+                }
+            }
+
+            // 시장 레짐 보정
+            if ("매수".equals(consensusAction)) {
+                if ("RED".equals(marketGate)) {
+                    rawScore *= 0.7;
+                } else if ("YELLOW".equals(marketGate)) {
+                    rawScore *= 0.85;
+                }
+            }
+
+            int consensusScore = (int) Math.round(Math.min(100, Math.max(0, rawScore)));
 
             // 시나리오 합산
             ScenarioConsensus scenarioConsensus = calculateScenarioConsensus(agg.entries);
@@ -251,4 +299,15 @@ public class ConsensusEngine {
     }
 
     private record AgentEntry(String agent, StructuredStock stock) {}
+
+    /** KIS 수급 데이터에서 외국인/기관 순매수량 파싱 */
+    private long parseSupplyValue(Map<String, String> supplyMap, String englishKey, String koreanKey) {
+        String val = supplyMap.getOrDefault(englishKey, supplyMap.get(koreanKey));
+        if (val == null || val.isBlank()) return 0;
+        try {
+            return Long.parseLong(val.replaceAll("[^\\-0-9]", ""));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
 }

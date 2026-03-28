@@ -40,16 +40,23 @@ public class AuthService {
     }
 
     @PostConstruct
-    public void resetAdminPasswordOnStartup() {
+    public void ensureAdminExistsOnStartup() {
         if (adminEmail == null || adminEmail.isBlank()) return;
-        userRepository.findByEmail(adminEmail.trim()).ifPresent(user -> {
-            String defaultPassword = "test1234";
-            if (!passwordEncoder.matches(defaultPassword, user.getPasswordHash())) {
-                user.setPasswordHash(passwordEncoder.encode(defaultPassword));
-                userRepository.save(user);
-                log.info("Admin password reset to default on startup: {}", user.getEmail());
+        // Only create admin if not exists — never reset existing password
+        if (userRepository.findByEmail(adminEmail.trim()).isEmpty()) {
+            String defaultPassword = System.getenv("ADMIN_DEFAULT_PASSWORD");
+            if (defaultPassword == null || defaultPassword.isBlank()) {
+                defaultPassword = java.util.UUID.randomUUID().toString().substring(0, 12);
+                log.error("ADMIN_DEFAULT_PASSWORD not set! Generated random password: {} — "
+                        + "save this and set ADMIN_DEFAULT_PASSWORD env var!", defaultPassword);
             }
-        });
+            var admin = new User(adminEmail.trim(), "Admin", passwordEncoder.encode(defaultPassword));
+            admin.setRole(Role.ADMIN);
+            admin.setSubscription(SubscriptionStatus.PRO);
+            admin.setSubscriptionEndDate(null);
+            userRepository.save(admin);
+            log.info("Admin account created: {}", adminEmail.trim());
+        }
     }
 
     public AuthResponse register(RegisterRequest request) {

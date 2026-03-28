@@ -10,7 +10,7 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:}
   h2:
     console:
-      enabled: ${H2_CONSOLE_ENABLED:true}
+      enabled: ${H2_CONSOLE_ENABLED:false}
       path: /h2-console
   jpa:
     hibernate:
@@ -42,7 +42,7 @@ bitman:
     bot-token: ${TELEGRAM_BOT_TOKEN:}
     chat-id: ${TELEGRAM_CHAT_ID:}
   jwt:
-    secret: ${JWT_SECRET:bitman-justbuy-default-jwt-secret-key-change-in-production-at-least-32-bytes}
+    secret: ${JWT_SECRET:}
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
   admin:
-    email: ${ADMIN_EMAIL:point10890@gmail.com}
+    email: ${ADMIN_EMAIL:}
