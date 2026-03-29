@@ -103,9 +103,14 @@ public final class StockParser {
     // 종목명 정제: 후행 불필요 텍스트 제거
     private static final Pattern NAME_SUFFIX_NOISE = Pattern.compile("\\s+(?:등|의|은|는|이|가|을|를|에|도|로|과|와)$");
 
-    private static final Pattern CURRENT_PRICE = Pattern.compile("\ud604\uc7ac\uac00\\s*(?:\uc57d\\s*)?([0-9,]+(?:~[0-9,]+)?)\\s*\uc6d0");
-    private static final Pattern TARGET_PRICE = Pattern.compile("(?:\ubaa9\ud45c\uac00|1\ucc28\\s*\ubaa9\ud45c)[:\\s]*(?:\uc57d\\s*)?([0-9,]+(?:~[0-9,]+)?)\\s*\uc6d0");
-    private static final Pattern STOP_LOSS = Pattern.compile("\uc190\uc808(?:\uac00)?[:\\s]*(?:\uc57d\\s*)?([0-9,]+(?:~[0-9,]+)?)\\s*\uc6d0");
+    // 마크다운 볼드(**) 포함 가격 파싱 패턴 — "**목표가**: 285,000원" 형식 처리
+    private static final Pattern CURRENT_PRICE = Pattern.compile("\ud604\uc7ac\uac00\\*{0,2}[:\\s]*(?:\uc57d\\s*)?([0-9,]+(?:~[0-9,]+)?)\\s*\uc6d0");
+    private static final Pattern TARGET_PRICE = Pattern.compile("(?:\ubaa9\ud45c\uac00|1\ucc28\\s*\ubaa9\ud45c)\\*{0,2}[:\\s]*\\*{0,2}(?:\uc57d\\s*)?([0-9,]+(?:~[0-9,]+)?)\\s*\uc6d0");
+    private static final Pattern STOP_LOSS = Pattern.compile("\uc190\uc808(?:\uac00)?\\*{0,2}[:\\s]*\\*{0,2}(?:\uc57d\\s*)?([0-9,]+(?:~[0-9,]+)?)\\s*\uc6d0");
+    // 투자판단 라인 직접 파싱 (가장 신뢰도 높음): "투자판단: 매수" / "투자판단: 매도"
+    private static final Pattern ACTION_VERDICT = Pattern.compile("\ud22c\uc790\ud310\ub2e8\\s*[:\\uff1a]\\s*(\ub9e4\uc218|\ub9e4\ub3c4|\uad00\ub9dd|\uc8fc\ubaa9|\ubcf4\ub958)");
+    // "시초가 매도", "익절 매도", "목표가 도달 시 매도" 등 전략 서술의 매도는 제외
+    private static final Pattern ACTION_SELL_STRATEGY = Pattern.compile("(?:\uc2dc\ucd08\uac00|\uc775\uc808|\ubaa9\ud45c\uac00\\s*\ub3c4\ub2ec|\uc190\uc808|\uce58\uc5ac|\ubcf4\uc720\\s*\uc8fc|\\d+%\\s*\uc775\uc808)\\s*\ub9e4\ub3c4");
     private static final Pattern ACTION_SELL = Pattern.compile("\ub9e4\ub3c4|\uc219|\ub9e4\ub3c4\\s*\ucd94\ucc9c|\ud558\ub77d\\s*\uc608\uc0c1");
     private static final Pattern ACTION_HOLD = Pattern.compile("\uad00\ub9dd|\ubcf4\ub958|\uc911\ub9bd");
     private static final Pattern ACTION_BUY = Pattern.compile("\ub9e4\uc218|\uc9c4\uc785|\ucd94\ucc9c|\uc720\ub9dd|\uc8fc\ubaa9|\uae0d\uc815|\uac15\uc138");
@@ -196,9 +201,18 @@ public final class StockParser {
     }
 
     private static String extractAction(String context) {
-        if (ACTION_SELL.matcher(context).find()) return "\ub9e4\ub3c4";
-        if (ACTION_HOLD.matcher(context).find()) return "\uad00\ub9dd";
-        if (ACTION_BUY.matcher(context).find()) return "\ub9e4\uc218";
+        // 1순위: "투자판단: 매수/매도/관망" 라인 직접 파싱 (가장 명시적)
+        Matcher verdict = ACTION_VERDICT.matcher(context);
+        if (verdict.find()) return verdict.group(1);
+
+        // 2순위: 전략 서술용 매도("시초가 매도", "익절 매도" 등)를 제거한 컨텍스트로 판단
+        String cleanedCtx = ACTION_SELL_STRATEGY.matcher(context).replaceAll("");
+        if (ACTION_BUY.matcher(cleanedCtx).find() && !ACTION_SELL.matcher(cleanedCtx).find()) return "\ub9e4\uc218";
+
+        // 3순위: 일반 패턴 (매도 → 관망 → 매수 순)
+        if (ACTION_SELL.matcher(cleanedCtx).find()) return "\ub9e4\ub3c4";
+        if (ACTION_HOLD.matcher(cleanedCtx).find()) return "\uad00\ub9dd";
+        if (ACTION_BUY.matcher(cleanedCtx).find()) return "\ub9e4\uc218";
         return "\uc8fc\ubaa9";
     }
 
