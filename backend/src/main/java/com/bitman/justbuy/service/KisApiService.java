@@ -601,6 +601,10 @@ public class KisApiService {
         String indices = fetchMarketIndices();
         if (!indices.isEmpty()) sb.append(indices);
 
+        // 등락률 상위 TOP 20 — 당일 급등주 후보 풀 확장
+        String gainersRank = fetchGainersRanking();
+        if (!gainersRank.isEmpty()) sb.append(gainersRank);
+
         // 거래량 순위
         String volumeRank = fetchVolumeRanking();
         if (!volumeRank.isEmpty()) sb.append(volumeRank);
