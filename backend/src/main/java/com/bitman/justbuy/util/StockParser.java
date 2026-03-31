@@ -90,6 +90,16 @@ public final class StockParser {
         KNOWN_STOCKS = Collections.unmodifiableMap(m);
     }
 
+    /** 종목코드 → 정식 종목명 (KNOWN_STOCKS의 역방향 맵, 첫 등장 이름을 정식명으로) */
+    public static final Map<String, String> CODE_TO_NAME;
+    static {
+        var m = new LinkedHashMap<String, String>();
+        for (var entry : KNOWN_STOCKS.entrySet()) {
+            m.putIfAbsent(entry.getValue(), entry.getKey());
+        }
+        CODE_TO_NAME = Collections.unmodifiableMap(m);
+    }
+
     private static final Pattern[] CODE_PATTERNS = {
         Pattern.compile("\uD83D\uDCCC\\s*([\\uAC00-\\uD7A3A-Za-z0-9\u00B7&\\s]{2,20}?)\\s*[\\(\\uFF08](\\d{6})[\\)\\uFF09]"),
         Pattern.compile("\\*\\*([\\uAC00-\\uD7A3A-Za-z0-9\u00B7&\\s]{2,20}?)\\s*[\\(\\uFF08](\\d{6})[\\)\\uFF09]\\*\\*"),
@@ -132,6 +142,8 @@ public final class StockParser {
                 String code = matcher.group(2);
                 if (name.isEmpty() || seen.contains(code)) continue;
                 seen.add(code);
+                // 코드가 알려진 경우 정식 종목명으로 교정 (LLM 오타 방지: 한화오천→한화오션 등)
+                if (CODE_TO_NAME.containsKey(code)) name = CODE_TO_NAME.get(code);
 
                 String context = getContext(content, matcher.start(), 300);
                 picks.add(new StockPick(name, code,
