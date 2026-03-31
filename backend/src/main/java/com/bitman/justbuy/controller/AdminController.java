@@ -5,6 +5,7 @@ import com.bitman.justbuy.dto.AdminResetPasswordRequest;
 import com.bitman.justbuy.dto.AdminUpdateUserRequest;
 import com.bitman.justbuy.dto.UserDto;
 import com.bitman.justbuy.service.AnalysisService;
+import com.bitman.justbuy.service.KisApiService;
 import com.bitman.justbuy.service.PrecomputeScheduler;
 import com.bitman.justbuy.service.SubscriptionService;
 import jakarta.validation.Valid;
@@ -25,16 +26,19 @@ public class AdminController {
     private final SubscriptionService subscriptionService;
     private final AnalysisService analysisService;
     private final List<AiAgent> agents;
+    private final KisApiService kisApiService;
 
     @Autowired(required = false)
     private PrecomputeScheduler precomputeScheduler;
 
     public AdminController(SubscriptionService subscriptionService,
                            AnalysisService analysisService,
-                           List<AiAgent> agents) {
+                           List<AiAgent> agents,
+                           KisApiService kisApiService) {
         this.subscriptionService = subscriptionService;
         this.analysisService = analysisService;
         this.agents = agents;
+        this.kisApiService = kisApiService;
     }
 
     @GetMapping("/subscriptions/pending")
@@ -113,6 +117,22 @@ public class AdminController {
             result.put("cache", analysisService.getCacheStatus());
         } catch (Exception e) {
             result.put("cache", Map.of("error", e.getMessage() != null ? e.getMessage() : "unknown"));
+        }
+
+        // KIS API 상태
+        try {
+            boolean kisAvailable = kisApiService != null && kisApiService.isAvailable();
+            result.put("kisAvailable", kisAvailable);
+            if (kisAvailable) {
+                // 실제 토큰 발급 및 간단 호출 테스트
+                String testRankings = kisApiService.fetchAllRankings();
+                boolean kisDataOk = testRankings.length() > 200; // 실제 데이터가 있으면 200자 이상
+                result.put("kisDataOk", kisDataOk);
+                result.put("kisDataLength", testRankings.length());
+            }
+        } catch (Exception e) {
+            result.put("kisAvailable", false);
+            result.put("kisError", e.getMessage());
         }
 
         // 스케줄러 상태
