@@ -135,7 +135,7 @@ public class PrecomputeScheduler {
         long startMs = System.currentTimeMillis();
         try {
             AnalysisResponse result = analysisService.runLiveAnalysis(query, mode);
-            lastRunTimes.put(mode, result.updatedAt());
+            if (result.updatedAt() != null) lastRunTimes.put(mode, result.updatedAt());
             log.info("[Scheduler] \u2705 {} \uc644\ub8cc ({}ms, {}/{} agents)",
                 mode, result.metadata().totalDurationMs(),
                 result.metadata().agentsSucceeded(), result.metadata().agentsUsed());

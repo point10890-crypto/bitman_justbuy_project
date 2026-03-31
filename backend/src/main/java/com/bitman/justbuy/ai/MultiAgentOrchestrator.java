@@ -215,9 +215,13 @@ public class MultiAgentOrchestrator {
 
         // ★ 쿼리에 포함된 종목의 실시간 가격을 추가 수집하여 프롬프트에 포함
         Map<String, String> queryStockPrices = new HashMap<>();
-        String queryStockPriceText = fetchQueryStockPrices(query, queryStockPrices);
-        if (!queryStockPriceText.isEmpty()) {
-            marketDataText += queryStockPriceText;
+        try {
+            String queryStockPriceText = fetchQueryStockPrices(query, queryStockPrices);
+            if (!queryStockPriceText.isEmpty()) {
+                marketDataText += queryStockPriceText;
+            }
+        } catch (Exception e) {
+            log.warn("[Orchestrator] 쿼리 종목 가격 수집 실패 (분석 계속): {}", e.getMessage());
         }
 
         // ★ DART 재무/공시 데이터 추가 (쿼리에 포함된 종목)
@@ -327,12 +331,18 @@ public class MultiAgentOrchestrator {
         ConsensusResult consensus = null;
         String consensusText = "";
         if (structuredResults.size() >= 2) {
-            String marketGate = fetchMarketGate();
-            Map<String, Map<String, String>> kisSupplyData = collectKisSupplyData(structuredResults);
-            consensus = consensusEngine.calculateConsensus(structuredResults, kisSupplyData, marketGate);
-            consensusText = consensusEngine.formatForSynthesis(consensus);
-            log.info("[Orchestrator] 합의 엔진: 전체 합의도 {}%, {}개 종목, {}개 이견",
-                consensus.agreementScore(), consensus.stocks().size(), consensus.divergences().size());
+            try {
+                String marketGate = fetchMarketGate();
+                Map<String, Map<String, String>> kisSupplyData = collectKisSupplyData(structuredResults);
+                consensus = consensusEngine.calculateConsensus(structuredResults, kisSupplyData, marketGate);
+                consensusText = consensusEngine.formatForSynthesis(consensus);
+                log.info("[Orchestrator] 합의 엔진: 전체 합의도 {}%, {}개 종목, {}개 이견",
+                    consensus.agreementScore(), consensus.stocks().size(), consensus.divergences().size());
+            } catch (Exception e) {
+                log.warn("[Orchestrator] 합의 엔진 오류 (분석은 계속): {}", e.getMessage());
+                consensus = null;
+                consensusText = "";
+            }
         }
 
         // ★ Synthesis 전에 1차 종목 추출 + 실시간 가격 수집 (stock project 패턴)
@@ -366,8 +376,13 @@ public class MultiAgentOrchestrator {
         if (successResults.size() >= 2 && synthesisEngine.isAvailable()) {
             log.info("[Orchestrator] Starting Round 2: Synthesis ({} results, {} verified prices)",
                 successResults.size(), preSynthesisPrices.size());
-            synthesisResult = synthesisEngine.synthesizeWithResult(
-                successResults, query, mode, today, consensusText, preSynthesisPicks, preSynthesisPrices);
+            try {
+                synthesisResult = synthesisEngine.synthesizeWithResult(
+                    successResults, query, mode, today, consensusText, preSynthesisPicks, preSynthesisPrices);
+            } catch (Exception e) {
+                log.warn("[Orchestrator] Synthesis 오류 (첫 번째 에이전트 결과로 폴백): {}", e.getMessage());
+                synthesisResult = null;
+            }
             finalContent = (synthesisResult != null && "success".equals(synthesisResult.status())
                 && synthesisResult.content() != null && !synthesisResult.content().isBlank())
                 ? synthesisResult.content() : successResults.getFirst().content();
