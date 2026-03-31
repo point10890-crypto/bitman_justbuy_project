@@ -103,27 +103,116 @@ public class MarketDataService {
         }
         text.append("\n");
 
-        // Top stocks
-        text.append("\uD83C\uDFE2 \uc2dc\ucd1d \uc0c1\uc704 50 \uc8fc\uc694 \uc885\ubaa9 \ud604\uc7ac\uac00\n");
-        for (String code : TOP_STOCK_CODES) {
-            JsonNode stock = fetchJson("https://m.stock.naver.com/api/stock/" + code + "/basic");
-            if (stock != null) {
-                String name = stock.path("stockName").asText(code);
-                double price = parseNumber(stock, "closePrice");
-                double chg = parseNumber(stock, "compareToPreviousClosePrice");
-                double pct = parseNumber(stock, "fluctuationsRatio");
-                long vol = (long) parseNumber(stock, "accumulatedTradingVolume");
-                text.append("  ").append(name).append("(").append(code).append("): ")
-                    .append(fmt.format(price)).append("\uc6d0 (")
-                    .append(chg >= 0 ? "+" : "").append(fmt.format(chg)).append("\uc6d0, ")
-                    .append(pct >= 0 ? "+" : "").append(pct).append("%)");
-                if (vol > 0) text.append(" | \uac70\ub798\ub7c9 ").append(fmt.format(vol)).append("\uc8fc");
-                text.append("\n");
+        // ★ 오늘의 동적 랭킹 (고정 목록 대신 실시간 상위 종목)
+        boolean dynamicOk = false;
+        try {
+            String gainers = fetchDynamicGainers(fmt);
+            String volume = fetchDynamicVolume(fmt);
+            if (!gainers.isEmpty() || !volume.isEmpty()) {
+                text.append("\uD83D\uDD25 \uC624\uB298\uC758 \uC2E4\uC2DC\uAC04 \uC2DC\uc7a5 \ub7ad\ud0b9 (\ub124\uc774\ubc84\uae08\uc735)\n");
+                text.append("\u26A0\uFE0F \uBC18\ub4dc\uc2dc \uc544\ub798 \uc2e4\uc2dc\uac04 \ub370\uc774\ud130\uc5d0 \ub4f1\uc7a5\ud55c \uc885\ubaa9 \uc911\uc5d0\uc11c\ub9cc \ucd94\ucc9c \uc120\ud0dd\ud558\uc138\uc694!\n\n");
+                if (!gainers.isEmpty()) text.append(gainers);
+                if (!volume.isEmpty()) text.append(volume);
+                dynamicOk = true;
+            }
+        } catch (Exception e) {
+            log.warn("[MarketData] \ub3d9\uc801 \ub7ad\ud0b9 \ud76c \uc2e4\ud328, \uace0\uc815 \ubaa9\ub85d \ud3f4\ubc31: {}", e.getMessage());
+        }
+
+        // 동적 랭킹 실패 시 폴백 — 정적 목록 상위 20개만
+        if (!dynamicOk) {
+            text.append("\uD83C\uDFE2 \uc8fc\uc694 \uc885\ubaa9 \ud604\uc7ac\uac00 (\uc2dc\ucd1d \uc0c1\uc704 20)\n");
+            for (String code : TOP_STOCK_CODES.subList(0, 20)) {
+                JsonNode stock = fetchJson("https://m.stock.naver.com/api/stock/" + code + "/basic");
+                if (stock != null) {
+                    String name = stock.path("stockName").asText(code);
+                    double price = parseNumber(stock, "closePrice");
+                    double pct = parseNumber(stock, "fluctuationsRatio");
+                    text.append("  ").append(name).append("(").append(code).append("): ")
+                        .append(fmt.format(price)).append("\uc6d0 (")
+                        .append(pct >= 0 ? "+" : "").append(pct).append("%)\n");
+                }
             }
         }
 
         text.append("\n\u2501\u2501\u2501 [\uc704 \ub370\uc774\ud130\ub294 \ub124\uc774\ubc84\uae08\uc735 \uc2e4\uc2dc\uac04 \uc2dc\uc138\uc785\ub2c8\ub2e4. \ubc18\ub4dc\uc2dc \uc774 \uac00\uaca9\uc744 \uae30\uc900\uc73c\ub85c \ubd84\uc11d\ud558\uc138\uc694!] \u2501\u2501\u2501\n");
         return text.toString();
+    }
+
+    /** 오늘 KOSPI+KOSDAQ 상승률 상위 20종목 */
+    private String fetchDynamicGainers(NumberFormat fmt) {
+        List<JsonNode> stocks = new ArrayList<>();
+        // KOSPI 상승률 상위
+        for (String market : List.of("KOSPI", "KOSDAQ")) {
+            JsonNode data = fetchJson("https://m.stock.naver.com/api/index/" + market
+                + "/stocks?pageSize=20&pageNo=1&rankType=FLUCTUATIONS_RATIO");
+            if (data != null) {
+                JsonNode arr = data.isArray() ? data
+                    : data.has("stocks") ? data.get("stocks")
+                    : data.has("result") ? data.get("result") : null;
+                if (arr != null && arr.isArray()) {
+                    for (JsonNode s : arr) stocks.add(s);
+                }
+            }
+        }
+        if (stocks.isEmpty()) return "";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("\uD83D\uDCC8 \uc0c1\uc2b9\ub960 \uc0c1\uc704 \uc885\ubaa9 (KOSPI+KOSDAQ \ud569\uc0b0)\n");
+        int count = 0;
+        for (JsonNode s : stocks) {
+            if (count >= 25) break;
+            String code = s.path("stockCode").asText(s.path("itemCode").asText(""));
+            String name = s.path("stockName").asText(s.path("itemName").asText(""));
+            double price = parseNumber(s, "closePrice");
+            double pct   = parseNumber(s, "fluctuationsRatio");
+            long vol     = (long) parseNumber(s, "accumulatedTradingVolume");
+            if (code.isEmpty() || name.isEmpty() || price <= 0) continue;
+            sb.append("  ").append(name).append("(").append(code).append("): ")
+              .append(fmt.format(price)).append("\uc6d0 (")
+              .append(pct >= 0 ? "+" : "").append(pct).append("%)");
+            if (vol > 0) sb.append(" | \uac70\ub798\ub7c9 ").append(fmt.format(vol)).append("\uc8fc");
+            sb.append("\n");
+            count++;
+        }
+        return count > 0 ? sb.append("\n").toString() : "";
+    }
+
+    /** 오늘 KOSPI+KOSDAQ 거래량 상위 20종목 */
+    private String fetchDynamicVolume(NumberFormat fmt) {
+        List<JsonNode> stocks = new ArrayList<>();
+        for (String market : List.of("KOSPI", "KOSDAQ")) {
+            JsonNode data = fetchJson("https://m.stock.naver.com/api/index/" + market
+                + "/stocks?pageSize=20&pageNo=1&rankType=ACCUMULATE_TRADING_VOLUME");
+            if (data != null) {
+                JsonNode arr = data.isArray() ? data
+                    : data.has("stocks") ? data.get("stocks")
+                    : data.has("result") ? data.get("result") : null;
+                if (arr != null && arr.isArray()) {
+                    for (JsonNode s : arr) stocks.add(s);
+                }
+            }
+        }
+        if (stocks.isEmpty()) return "";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("\uD83D\uDCB0 \uac70\ub798\ub7c9 \uc0c1\uc704 \uc885\ubaa9\n");
+        int count = 0;
+        for (JsonNode s : stocks) {
+            if (count >= 20) break;
+            String code = s.path("stockCode").asText(s.path("itemCode").asText(""));
+            String name = s.path("stockName").asText(s.path("itemName").asText(""));
+            double price = parseNumber(s, "closePrice");
+            double pct   = parseNumber(s, "fluctuationsRatio");
+            long vol     = (long) parseNumber(s, "accumulatedTradingVolume");
+            if (code.isEmpty() || name.isEmpty() || price <= 0) continue;
+            sb.append("  ").append(name).append("(").append(code).append("): ")
+              .append(fmt.format(price)).append("\uc6d0 (")
+              .append(pct >= 0 ? "+" : "").append(pct).append("%) | \uac70\ub798\ub7c9 ")
+              .append(fmt.format(vol)).append("\uc8fc\n");
+            count++;
+        }
+        return count > 0 ? sb.append("\n").toString() : "";
     }
 
     private void appendIndex(StringBuilder text, String indexCode, NumberFormat fmt) {
