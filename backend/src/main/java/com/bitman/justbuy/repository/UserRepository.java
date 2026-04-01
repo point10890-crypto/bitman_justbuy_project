@@ -22,4 +22,12 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     /** 만료일이 지난 PRO 유저 목록 (자동 다운그레이드용) */
     @Query("SELECT u FROM User u WHERE u.subscription = 'PRO' AND u.subscriptionEndDate < :today")
     List<User> findExpiredProUsers(@Param("today") LocalDate today);
+
+    /** 특정 기간 내 만료 예정인 PRO 유저 수 */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.subscription = 'PRO' AND u.subscriptionEndDate BETWEEN :from AND :to")
+    long countExpiringBetween(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /** 특정 날짜 이후 생성된 유저 수 */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.createdAt >= :since")
+    long countCreatedSince(@Param("since") java.time.LocalDateTime since);
 }

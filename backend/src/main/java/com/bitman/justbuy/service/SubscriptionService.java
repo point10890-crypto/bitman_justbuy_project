@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -164,6 +165,52 @@ public class SubscriptionService {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         userRepository.save(user);
         log.info("Admin reset password: userId={}", userId);
+    }
+
+    // ─── 구독 통계 ───
+
+    public Map<String, Object> getSubscriptionStats() {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+
+        long proCount     = userRepository.findBySubscription(SubscriptionStatus.PRO).size();
+        long pendingCount = userRepository.findBySubscription(SubscriptionStatus.PENDING).size();
+        long freeCount    = userRepository.findBySubscription(SubscriptionStatus.FREE).size();
+        long totalUsers   = userRepository.count();
+
+        // 이번 주(7일 이내) 만료 예정
+        long expiringThisWeek = userRepository.countExpiringBetween(today, today.plusDays(7));
+        // 이번 달(30일 이내) 만료 예정
+        long expiringThisMonth = userRepository.countExpiringBetween(today, today.plusDays(30));
+
+        // 최근 7일 신규 가입
+        long newUsersThisWeek = userRepository.countCreatedSince(
+            today.minusDays(7).atStartOfDay());
+        // 최근 30일 신규 가입
+        long newUsersThisMonth = userRepository.countCreatedSince(
+            today.minusDays(30).atStartOfDay());
+
+        // 만료 임박 유저 목록 (7일 이내, 상세)
+        List<UserDto> expiringSoon = userRepository.findBySubscription(SubscriptionStatus.PRO)
+            .stream()
+            .filter(u -> u.getSubscriptionEndDate() != null
+                && !u.getSubscriptionEndDate().isBefore(today)
+                && !u.getSubscriptionEndDate().isAfter(today.plusDays(7)))
+            .sorted(java.util.Comparator.comparing(u -> u.getSubscriptionEndDate()))
+            .map(UserDto::from)
+            .toList();
+
+        Map<String, Object> stats = new java.util.LinkedHashMap<>();
+        stats.put("totalUsers", totalUsers);
+        stats.put("proCount", proCount);
+        stats.put("pendingCount", pendingCount);
+        stats.put("freeCount", freeCount);
+        stats.put("expiringThisWeek", expiringThisWeek);
+        stats.put("expiringThisMonth", expiringThisMonth);
+        stats.put("newUsersThisWeek", newUsersThisWeek);
+        stats.put("newUsersThisMonth", newUsersThisMonth);
+        stats.put("expiringSoonList", expiringSoon);
+        stats.put("asOf", today.toString());
+        return stats;
     }
 
     // ─── 구독 만료 자동 처리 ───

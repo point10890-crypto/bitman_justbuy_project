@@ -46,6 +46,11 @@ public class AdminController {
         return ResponseEntity.ok(subscriptionService.getPendingSubscriptions());
     }
 
+    @GetMapping("/subscriptions/stats")
+    public ResponseEntity<Map<String, Object>> subscriptionStats() {
+        return ResponseEntity.ok(subscriptionService.getSubscriptionStats());
+    }
+
     @PostMapping("/subscriptions/{userId}/approve")
     public ResponseEntity<UserDto> approve(@PathVariable UUID userId) {
         return ResponseEntity.ok(subscriptionService.approveSubscription(userId));
