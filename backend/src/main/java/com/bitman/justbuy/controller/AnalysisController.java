@@ -6,6 +6,7 @@ import com.bitman.justbuy.entity.SubscriptionStatus;
 import com.bitman.justbuy.repository.UserRepository;
 import com.bitman.justbuy.service.AnalysisService;
 import com.bitman.justbuy.service.AsyncJobManager;
+import com.bitman.justbuy.service.SubscriptionService;
 import com.bitman.justbuy.service.AsyncJobManager.JobEntry;
 import com.bitman.justbuy.service.AsyncJobManager.JobStatus;
 import jakarta.validation.Valid;
@@ -27,20 +28,29 @@ public class AnalysisController {
     private final AnalysisService analysisService;
     private final UserRepository userRepository;
     private final AsyncJobManager jobManager;
+    private final SubscriptionService subscriptionService;
 
     public AnalysisController(AnalysisService analysisService, UserRepository userRepository,
-                               AsyncJobManager jobManager) {
+                               AsyncJobManager jobManager, SubscriptionService subscriptionService) {
         this.analysisService = analysisService;
         this.userRepository = userRepository;
         this.jobManager = jobManager;
+        this.subscriptionService = subscriptionService;
     }
 
     private void requireProSubscription(UUID userId) {
-        boolean isPro = userRepository.findById(userId)
-            .map(user -> user.getSubscription() == SubscriptionStatus.PRO)
-            .orElse(false);
-        if (!isPro) {
-            throw new ApiException(HttpStatus.FORBIDDEN, "PRO 구독자만 사용 가능합니다.");
+        var user = userRepository.findById(userId)
+            .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "사용자를 찾을 수 없습니다."));
+
+        if (!subscriptionService.isActivePro(user)) {
+            // 만료된 PRO인지 일반 FREE인지 구분해서 메시지 제공
+            boolean isExpired = user.getSubscription() == SubscriptionStatus.PRO
+                && user.getSubscriptionEndDate() != null
+                && user.getSubscriptionEndDate().isBefore(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul")));
+            String msg = isExpired
+                ? "PRO 구독이 만료되었습니다. 재구독 신청을 해주세요."
+                : "PRO 구독자만 사용 가능합니다.";
+            throw new ApiException(HttpStatus.FORBIDDEN, msg);
         }
     }
 

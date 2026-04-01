@@ -6,10 +6,12 @@ import com.bitman.justbuy.entity.User;
 import com.bitman.justbuy.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 
@@ -155,6 +157,39 @@ public class SubscriptionService {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         userRepository.save(user);
         log.info("Admin reset password: userId={}", userId);
+    }
+
+    // ─── 구독 만료 자동 처리 ───
+
+    /**
+     * 매일 자정(KST) 만료된 PRO 유저를 FREE로 자동 전환.
+     * Scheduler가 비활성화된 환경(Render 무료 티어)에서도 항상 실행되도록
+     * PrecomputeScheduler와 별개로 항상 활성화.
+     */
+    @Scheduled(cron = "0 0 0 * * *", zone = "Asia/Seoul")
+    public void expireSubscriptions() {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        List<User> expired = userRepository.findExpiredProUsers(today);
+        if (expired.isEmpty()) return;
+
+        for (User user : expired) {
+            user.setSubscription(SubscriptionStatus.FREE);
+            user.setSubscriptionEndDate(null);
+            userRepository.save(user);
+            log.info("[Subscription] 만료 처리: userId={}, email={}", user.getId(), user.getEmail());
+        }
+        log.info("[Subscription] 구독 만료 일괄 처리 완료: {}명 FREE 전환", expired.size());
+    }
+
+    /**
+     * 유저가 현재 유효한 PRO 구독 상태인지 확인.
+     * subscriptionEndDate가 오늘 이후여야 PRO로 인정.
+     */
+    public boolean isActivePro(User user) {
+        if (user.getSubscription() != SubscriptionStatus.PRO) return false;
+        LocalDate endDate = user.getSubscriptionEndDate();
+        // endDate가 null이면 관리자가 수동 부여한 무기한 PRO로 허용
+        return endDate == null || !endDate.isBefore(LocalDate.now(ZoneId.of("Asia/Seoul")));
     }
 
     /** 관리자: 회원 검색 (이름 또는 이메일) */
