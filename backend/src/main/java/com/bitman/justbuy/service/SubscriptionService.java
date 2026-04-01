@@ -32,17 +32,24 @@ public class SubscriptionService {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
-        if (user.getSubscription() == SubscriptionStatus.PRO) {
-            throw new IllegalStateException("이미 PRO 구독 중입니다.");
-        }
         if (user.getSubscription() == SubscriptionStatus.PENDING) {
-            throw new IllegalStateException("이미 구독 신청이 접수되었습니다.");
+            throw new IllegalStateException("이미 구독 신청이 접수되었습니다. 관리자 승인을 기다려주세요.");
         }
 
+        // 유효한 PRO(만료 전)는 재신청 불필요
+        if (isActivePro(user)) {
+            throw new IllegalStateException("이미 유효한 PRO 구독 중입니다. (만료일: "
+                + user.getSubscriptionEndDate() + ")");
+        }
+
+        // 만료된 PRO 또는 FREE → PENDING으로 전환 (재신청 허용)
         user.setSubscription(SubscriptionStatus.PENDING);
         user.setDepositorName(depositorName);
+        // 만료된 이전 endDate 초기화
+        user.setSubscriptionEndDate(null);
         userRepository.save(user);
-        log.info("Subscription applied: userId={}, depositor={}", userId, depositorName);
+        log.info("Subscription applied: userId={}, depositor={}, previousStatus={}",
+            userId, depositorName, user.getSubscription());
 
         return UserDto.from(user);
     }
