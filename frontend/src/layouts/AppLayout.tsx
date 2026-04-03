@@ -165,24 +165,24 @@ export default function AppLayout() {
                 <div><div>홈</div><div className="menu-item-desc">메인 대시보드</div></div>
               </button>
 
-              <button className="menu-item" onClick={() => { closeMenu(); navigate('/') }}>
-                <div className="menu-item-icon" style={{ background: 'rgba(0,200,83,0.1)' }}>📈</div>
-                <div><div>오늘 뭐사?</div><div className="menu-item-desc">당일 매매 추천 · 매일 08:00 자동갱신</div></div>
+              <button className="menu-item" onClick={() => { closeMenu(); navigate('/', { state: { mode: 'BREAKOUT', query: '기술적 돌파 매수 후보 분석' } }) }}>
+                <div className="menu-item-icon" style={{ background: 'rgba(0,229,255,0.1)' }}>🚀</div>
+                <div><div style={{ color: '#00E5FF' }}>BREAKOUT</div><div className="menu-item-desc">박스·저항 돌파 종목 · 기술적 돌파 + 거래량 폭발</div></div>
               </button>
 
-              <button className="menu-item" onClick={() => { closeMenu(); navigate('/') }}>
-                <div className="menu-item-icon" style={{ background: 'rgba(66,165,245,0.1)' }}>⚡</div>
-                <div><div>스윙매매</div><div className="menu-item-desc">3일~3주 스윙 후보 · 3일마다 07:00 자동갱신</div></div>
+              <button className="menu-item" onClick={() => { closeMenu(); navigate('/', { state: { mode: 'FLOW_LEADER', query: '외국인·기관 수급 주도 종목 분석' } }) }}>
+                <div className="menu-item-icon" style={{ background: 'rgba(0,200,83,0.1)' }}>💹</div>
+                <div><div style={{ color: '#00C853' }}>FLOW LEADER</div><div className="menu-item-desc">외인·기관 수급 주도 · 스마트머니 추종 전략</div></div>
               </button>
 
-              <button className="menu-item" onClick={() => { closeMenu(); navigate('/') }}>
-                <div className="menu-item-icon" style={{ background: 'rgba(124,77,255,0.1)' }}>💎</div>
-                <div><div>종가매매</div><div className="menu-item-desc">종가·시초가 단타 · 매일 15:10 자동갱신</div></div>
+              <button className="menu-item" onClick={() => { closeMenu(); navigate('/', { state: { mode: 'CATALYST_BURST', query: '재료/이벤트 드리븐 급등 후보 분석' } }) }}>
+                <div className="menu-item-icon" style={{ background: 'rgba(255,152,0,0.1)' }}>⚡</div>
+                <div><div style={{ color: '#FF9800' }}>CATALYST</div><div className="menu-item-desc">재료·이벤트 드리븐 · 공시·뉴스 기반 급등 후보</div></div>
               </button>
 
-              <button className="menu-item" onClick={() => { closeMenu(); navigate('/supply') }}>
-                <div className="menu-item-icon" style={{ background: 'rgba(255,152,0,0.1)' }}>🔍</div>
-                <div><div>수급 분석</div><div className="menu-item-desc">외인·기관 수급 · 매일 10:00·14:00 자동갱신</div></div>
+              <button className="menu-item" onClick={() => { closeMenu(); navigate('/', { state: { mode: 'REVERSAL_EDGE', query: '역발상 반전 매수 후보 분석' } }) }}>
+                <div className="menu-item-icon" style={{ background: 'rgba(124,77,255,0.1)' }}>🔄</div>
+                <div><div style={{ color: '#7C4DFF' }}>REVERSAL</div><div className="menu-item-desc">역발상 반전 매수 · 과매도·비관 극점 반등</div></div>
               </button>
 
               <div className="h-px mx-5 my-1" style={{ backgroundColor: 'var(--border-subtle)' }} />
@@ -236,9 +236,9 @@ export default function AppLayout() {
             <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border-subtle)', marginTop: 'auto' }}>
               <div className="flex items-center gap-2">
                 <span className="text-[9px] font-mono" style={{ color: 'var(--color-bull)' }}>● ACTIVE</span>
-                <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>Multi-Agent V3.0</span>
+                <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>Dual-Agent V4.0</span>
               </div>
-              <p className="text-[8px] mt-1" style={{ color: 'var(--text-muted)' }}>Claude + Gemini + ChatGPT + Perplexity + Grok</p>
+              <p className="text-[8px] mt-1" style={{ color: 'var(--text-muted)' }}>ChatGPT + Grok · 3라운드 토론 · KIS수급 교차검증</p>
             </div>
           </div>
         </>

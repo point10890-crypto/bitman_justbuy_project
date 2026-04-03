@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, type FormEvent } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useAnalysis } from '../hooks/useAnalysis'
 import { getRecentHistory, formatTimeAgo, type HistoryEntry } from '../lib/analysisHistory'
 import { fetchStockPrices } from '../api/analysisApi'
@@ -87,8 +88,20 @@ export default function HomePage() {
   const [showResult, setShowResult] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
+  const location = useLocation()
 
   useEffect(() => { setHistory(getRecentHistory(3)) }, [result])
+
+  // 사이드 메뉴에서 모드 선택 시 자동 분석 트리거
+  useEffect(() => {
+    const state = location.state as { mode?: string; query?: string } | null
+    if (state?.mode && state?.query) {
+      setQuery(state.query)
+      setShowResult(true)
+      analyze(state.query, state.mode)
+      window.history.replaceState({}, '', '/')
+    }
+  }, [location.state])
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
