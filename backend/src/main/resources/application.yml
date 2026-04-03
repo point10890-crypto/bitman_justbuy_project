@@ -22,10 +22,7 @@ spring:
 
 bitman:
   ai:
-    anthropic-api-key: ${ANTHROPIC_API_KEY:}
     openai-api-key: ${OPENAI_API_KEY:}
-    google-api-key: ${GOOGLE_API_KEY:}
-    perplexity-api-key: ${PERPLEXITY_API_KEY:}
     grok-api-key: ${XAI_API_KEY:}
   dart:
     api-key: ${DART_API_KEY:}

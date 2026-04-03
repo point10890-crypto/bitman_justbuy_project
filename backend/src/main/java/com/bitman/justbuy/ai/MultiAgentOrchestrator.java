@@ -58,8 +58,8 @@ public class MultiAgentOrchestrator {
         this.objectMapper = objectMapper;
     }
 
-    // ═══ SUPER ELITE 6-AGENT KRX TRADING INTELLIGENCE ENGINE ═══
-    static final String SYSTEM_PROMPT = "# 🔥 SUPER ELITE 6-AGENT KRX TRADING INTELLIGENCE ENGINE\n\n"
+    // ═══ DUAL-AGENT KRX TRADING INTELLIGENCE ENGINE ═══
+    static final String SYSTEM_PROMPT = "# 🔥 DUAL-AGENT KRX TRADING INTELLIGENCE ENGINE\n\n"
         + "## SYSTEM ROLE\n"
         + "너는 **6개의 핵심 분석 레이어로 구성된 기관급 주식 분석 및 트레이딩 인텔리전스 엔진**이다.\n"
         + "너의 목적은 단순 분석이 아니라 👉 **실제 투자 의사결정에 직접 사용 가능한 판단 생성**이다.\n"
@@ -270,26 +270,28 @@ public class MultiAgentOrchestrator {
 
                     // ★ 수급분석 모드: 에이전트별 차별화
                     if ("\uC218\uAE09\uBD84\uC11D".equals(mode)) {
-                        if ("perplexity".equals(agent.name())) {
-                            // Perplexity: 실시간 수급 웹 검색 강화
-                            agentSystemPrompt += "\n\n⚠️ [수급분석 모드 특별 지시]\n"
-                                + "이 분석의 핵심은 '실시간 수급 데이터'입니다. 다른 어떤 분석보다 수급 데이터 수집이 최우선!\n"
-                                + "반드시 검색하세요: '오늘 외국인 순매수 상위', '오늘 기관 순매수', '코스피 수급 동향', '프로그램 매매'\n"
-                                + "당신이 검색한 실시간 수급 데이터가 다른 4개 AI의 추정보다 정확합니다.\n"
-                                + "수급 데이터 기준 시각을 반드시 명시하세요.";
-                        } else {
-                            // 비-웹검색 AI: 수급 수치 환각 금지
-                            agentSystemPrompt += "\n\n⚠️ [수급분석 모드 — 환각 방지 규칙]\n"
-                                + "당신은 실시간 웹 검색이 불가능합니다. 따라서:\n"
-                                + "1. 외국인/기관 순매수 금액·수량 등 구체적 수급 수치를 절대 만들어내지 마세요.\n"
-                                + "2. 수급 관련 구체적 숫자(예: '외국인 143억 순매수')를 쓰려면 반드시 출처를 명시하세요. 출처 없으면 쓰지 마세요.\n"
-                                + "3. 대신 당신의 전문 영역에서 분석하세요:\n"
-                                + "   - Claude: 리스크 시나리오, 매크로 환경이 수급에 미치는 영향 추론\n"
-                                + "   - Gemini: 차트에서 수급 전환 신호(거래량 급증, 캔들 패턴) 분석\n"
-                                + "   - ChatGPT: 밸류에이션 관점에서 기관 매수 유인 분석, DART 재무 데이터 활용\n"
-                                + "   - Grok: 개인 투자자 센티먼트, 신용잔고, 역발상 관점\n"
-                                + "4. '수급 데이터 미확인' 종목도 기술적/펀더멘탈 근거가 있으면 추천 가능하나, 수급 수치는 비워두세요.\n"
-                                + "5. 시장이 -3% 이상 급락 중이면 매수 추천보다 리스크 관리(관망/손절/헤지)를 우선 제시하세요.";
+                        if ("grok".equals(agent.name())) {
+                            // Grok: 실시간 웹/X 검색으로 수급 데이터 수집 — 최우선 임무
+                            agentSystemPrompt += "\n\n⚠️ [수급분석 모드 특별 지시 — 최우선]\n"
+                                + "이 분석의 핵심은 '실시간 수급 데이터'입니다. web_search 와 x_search 툴을 반드시 사용하세요!\n"
+                                + "검색 필수 항목:\n"
+                                + "  - '오늘 외국인 순매수 상위' (krx.co.kr, finance.naver.com 검색)\n"
+                                + "  - '오늘 기관 순매수 동향' (dart.fss.or.kr 검색)\n"
+                                + "  - '코스피 수급 동향' '프로그램 매매'\n"
+                                + "  - X 피드: '외국인매수', '기관수급', '코스피' 실시간 반응\n"
+                                + "당신이 검색한 실시간 수급 데이터가 ChatGPT의 추정보다 정확합니다.\n"
+                                + "수급 데이터 기준 시각을 반드시 명시하세요 (예: 2026-04-03 10:30 KST 기준).";
+                        } else if ("chatgpt".equals(agent.name())) {
+                            // ChatGPT: 수급 수치 주의 + 전문 영역(매크로/기술/펀더멘탈) 집중
+                            agentSystemPrompt += "\n\n⚠️ [수급분석 모드 — 수급 환각 방지 규칙]\n"
+                                + "1. 외국인/기관 순매수 금액·수량 등 구체적 수급 수치는 반드시 웹검색 출처가 있어야 합니다. 출처 없으면 쓰지 마세요.\n"
+                                + "2. 수급 수치 추정(예: '외국인 143억 순매수')은 Grok이 담당합니다. 당신은 검색 결과 기반으로만 수급 수치를 언급하세요.\n"
+                                + "3. 당신의 수급분석 기여 영역:\n"
+                                + "   - 매크로 환경이 수급에 미치는 구조적 영향 (금리/환율 → 외국인 자금 흐름)\n"
+                                + "   - 밸류에이션 관점에서 기관 매수 유인 분석 (PER/PBR 저평가 여부)\n"
+                                + "   - DART 공시 데이터 기반 수급 유발 재료 분석\n"
+                                + "   - 기술적 분석: 차트에서 수급 전환 신호 (거래량 급증, 캔들 패턴)\n"
+                                + "4. 시장이 -3% 이상 급락 중이면 매수 추천보다 리스크 관리(관망/손절/헤지)를 우선 제시하세요.";
                         }
                     }
 

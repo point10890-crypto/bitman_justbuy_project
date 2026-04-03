@@ -1,6 +1,6 @@
 package com.bitman.justbuy.ai;
 
-import com.bitman.justbuy.ai.agent.ClaudeAgent;
+import com.bitman.justbuy.ai.agent.ChatGptAgent;
 import com.bitman.justbuy.dto.AgentResult;
 import com.bitman.justbuy.dto.StockPick;
 import org.slf4j.Logger;
@@ -16,52 +16,52 @@ public class SynthesisEngine {
 
     private static final Logger log = LoggerFactory.getLogger(SynthesisEngine.class);
 
-    private final ClaudeAgent claudeAgent;
+    private final ChatGptAgent chatGptAgent;
 
-    static final String SYNTHESIS_PROMPT = "\uB2F9\uC2E0\uC740 \uC218\uC11D AI \uBD84\uC11D\uAD00\uC785\uB2C8\uB2E4. \uC544\uB798\uC5D0 \uC5EC\uB7EC AI \uC5D4\uC9C4\uC774 \uB3C5\uB9BD\uC801\uC73C\uB85C \uC218\uD589\uD55C \uC8FC\uC2DD \uBD84\uC11D \uACB0\uACFC\uAC00 \uC788\uC2B5\uB2C8\uB2E4.\n\n"
-        + "**\uC911\uC694**: \uC0AC\uC6A9\uC790\uC758 \uC6D0\uB798 \uC9C8\uBB38\uC744 \uC798 \uD30C\uC545\uD558\uC138\uC694!\n"
-        + "- \uC0AC\uC6A9\uC790\uAC00 \uD2B9\uC815 \uC885\uBAA9(\uC608: \"\uC0BC\uC131\uC804\uC790 \uBD84\uC11D\")\uC744 \uC9C8\uBB38\uD588\uB2E4\uBA74 \u2192 \uADF8 \uC885\uBAA9\uC5D0 \uB300\uD55C \uC2EC\uCE35 \uC885\uD569 \uBD84\uC11D\uC744 \uC791\uC131\uD558\uC138\uC694. \uB2E4\uB978 \uC885\uBAA9 \uCD94\uCC9C \uAE08\uC9C0!\n"
-        + "- \uC0AC\uC6A9\uC790\uAC00 \uC77C\uBC18 \uCD94\uCC9C(\uC608: \"\uC624\uB298 \uBB58 \uC0B4\uAE4C\", \"\uC2A4\uC719 \uD6C4\uBCF4\")\uC744 \uC9C8\uBB38\uD588\uB2E4\uBA74 \u2192 \uCD94\uCC9C \uC885\uBAA9 TOP\uC744 \uC815\uB9AC\uD558\uC138\uC694.\n\n"
-        + "## \uD2B9\uC815 \uC885\uBAA9 \uBD84\uC11D \uBAA8\uB4DC (\uC0AC\uC6A9\uC790\uAC00 \uD2B9\uC815 \uC885\uBAA9\uC744 \uBB3C\uC5C8\uC744 \uB54C):\n\n"
-        + "\uD83C\uDFAF **\uC885\uBAA9 \uC885\uD569 \uBD84\uC11D**\n"
-        + "\uD83D\uDCCC \uC885\uBAA9\uBA85 (6\uC790\uB9AC\uC885\uBAA9\uCF54\uB4DC) \u2014 \uD604\uC7AC\uAC00 \uC57D XX,XXX\uC6D0\n"
-        + "  - \uD22C\uC790\uD310\uB2E8: \uB9E4\uC218/\uAD00\uB9DD/\uB9E4\uB3C4\n"
-        + "  - AI \uD569\uC758: X\uAC1C AI \uC804\uC6D0/\uB2E4\uC218 \uB3D9\uC758\n"
-        + "  - \uBAA9\uD45C\uAC00: XX,XXX\uC6D0 / \uC190\uC808\uAC00: XX,XXX\uC6D0\n\n"
-        + "\uD83E\uDD1D **\uD569\uC758 \uC0AC\uD56D** (\uB2E4\uC218 AI \uB3D9\uC758)\n"
-        + "\u2694\uFE0F **\uC758\uACAC \uCC28\uC774** (AI \uAC04 \uAC08\uB4F1)\n\n"
-        + "\uD83D\uDCCA **\uC885\uD569 \uC2DC\uB098\uB9AC\uC624** (\uD655\uB960 \uD569=100%)\n"
-        + "\uD83D\uDFE2 \uAC15\uC138: XX% \u2014 \uADFC\uAC70\n"
-        + "\uD83D\uDFE1 \uAE30\uC900: XX% \u2014 \uADFC\uAC70\n"
-        + "\uD83D\uDD34 \uC57D\uC138: XX% \u2014 \uADFC\uAC70\n\n"
-        + "\uD83D\uDCA1 **\uCD5C\uC885 \uD1B5\uD569 \uD310\uB2E8** (5~10\uC904)\n"
-        + "\u26A0\uFE0F \uB9AC\uC2A4\uD06C & \uCCB4\uD06C\uB9AC\uC2A4\uD2B8\n\n"
-        + "## \uC885\uBAA9 \uCD94\uCC9C \uBAA8\uB4DC (\uC0AC\uC6A9\uC790\uAC00 \uC77C\uBC18 \uCD94\uCC9C\uC744 \uC694\uCCAD\uD588\uC744 \uB54C):\n\n"
-        + "\uD83C\uDFAF **\uCD94\uCC9C \uC885\uBAA9 TOP**\n"
-        + "\uD83D\uDCCC \uC885\uBAA9\uBA85 (6\uC790\uB9AC\uC885\uBAA9\uCF54\uB4DC) \u2014 \uD604\uC7AC\uAC00 \uC57D XX,XXX\uC6D0\n"
-        + "  - \uD22C\uC790\uD310\uB2E8: \uB9E4\uC218/\uAD00\uB9DD/\uB9E4\uB3C4\n"
-        + "  - AI \uD569\uC758: X\uAC1C AI \uB3D9\uC758\n"
-        + "  - \uBAA9\uD45C\uAC00: XX,XXX\uC6D0 / \uC190\uC808\uAC00: XX,XXX\uC6D0\n"
-        + "(\uAC01 AI\uAC00 \uCD94\uCC9C\uD55C \uC885\uBAA9\uC744 \uC885\uD569\uD558\uC5EC \uD569\uC758\uB3C4\uAC00 \uB192\uC740 \uC21C\uC73C\uB85C 3~5\uAC1C \uC815\uB9AC. \uBC18\uB4DC\uC2DC \uC885\uBAA9\uCF54\uB4DC 6\uC790\uB9AC \uC22B\uC790 \uD3EC\uD568!)\n\n"
-        + "\uD83E\uDD1D **\uD569\uC758 \uC0AC\uD56D** / \u2694\uFE0F **\uC758\uACAC \uCC28\uC774** / \uD83D\uDCCA **\uC885\uD569 \uC2DC\uB098\uB9AC\uC624** / \uD83D\uDCA1 **\uCD5C\uC885 \uD1B5\uD569 \uD310\uB2E8** / \u26A0\uFE0F \uB9AC\uC2A4\uD06C & \uCCB4\uD06C\uB9AC\uC2A4\uD2B8\n\n"
-        + "\uD83D\uDCF0 **\uB274\uC2A4\u00B7\uC7AC\uB8CC \uC885\uD569**\n"
-        + "  - \uB2F9\uC77C/\uAE08\uC8FC \uD575\uC2EC \uB274\uC2A4\u00B7\uACF5\uC2DC\uC640 \uCD94\uCC9C \uC885\uBAA9\uACFC\uC758 \uC5F0\uAD00\uC131\n"
-        + "  - \uC7AC\uB8CC \uAC15\uB3C4: \u2605\u2605\u2605(\uAC15) / \u2605\u2605(\uC911) / \u2605(\uC57D)\n"
-        + "  - \uD5A5\uD6C4 1\uC8FC \uC8FC\uC694 \uC774\uBCA4\uD2B8 \uCE98\uB9B0\uB354\n\n"
-        + "\uBA74\uCC45: \uC815\uBCF4 \uC81C\uACF5 \uBAA9\uC801\uC774\uBA70 \uD22C\uC790\uC790\uBB38\uC774 \uC544\uB2D9\uB2C8\uB2E4.\n\n"
-        + "**\u26A0\uFE0F \uAC00\uACA9 \uADDC\uCE59 (\uCD5C\uC6B0\uC120, \uC704\uBC18 \uC2DC \uBD84\uC11D \uBB34\uD6A8)**:\n"
-        + "1. \uC785\uB825\uC5D0 \"\uC2E4\uC2DC\uAC04 \uC2DC\uC138 \uCC38\uC870\" \uB610\uB294 \"\uC2E4\uC2DC\uAC04 \uC2DC\uC7A5 \uB370\uC774\uD130\"\uAC00 \uD3EC\uD568\uB418\uC5B4 \uC788\uC73C\uBA74, \uD574\uB2F9 \uAC00\uACA9\uC774 \uC720\uC77C\uD55C \uC815\uD655\uD55C \uD604\uC7AC\uAC00\uC785\uB2C8\uB2E4.\n"
-        + "2. \uAC1C\uBCC4 AI\uAC00 \uC81C\uC2DC\uD55C \uAC00\uACA9\uC774 \uC2E4\uC2DC\uAC04 \uB370\uC774\uD130\uC640 \uB2E4\uB974\uBA74 \uBB34\uC870\uAC74 \uC2E4\uC2DC\uAC04 \uB370\uC774\uD130\uC758 \uAC00\uACA9\uC73C\uB85C \uAD50\uCCB4\uD558\uC138\uC694.\n"
-        + "3. AI\uAC00 \uCD94\uC815/\uD559\uC2B5\uD55C \uACFC\uAC70 \uAC00\uACA9\uC744 \uD604\uC7AC\uAC00\uB85C \uC0AC\uC6A9\uD558\uBA74 \uC548 \uB429\uB2C8\uB2E4. \uC774\uB294 \uAC70\uC9D3 \uC815\uBCF4\uC785\uB2C8\uB2E4.\n"
-        + "4. \uC2E4\uC2DC\uAC04 \uB370\uC774\uD130\uC5D0 \uC5C6\uB294 \uC885\uBAA9\uC740 \"\uD604\uC7AC\uAC00: \uC2E4\uC2DC\uAC04 \uB370\uC774\uD130 \uBBF8\uC81C\uACF5\"\uC73C\uB85C \uD45C\uC2DC\uD558\uC138\uC694.\n"
-        + "5. \"\uD83D\uDCCC \uC885\uBAA9\uBA85 (\uC885\uBAA9\uCF54\uB4DC) \u2014 \uD604\uC7AC\uAC00 \uC57D XX,XXX\uC6D0\" \uD615\uC2DD\uC5D0\uC11C XX,XXX\uB294 \uBC18\uB4DC\uC2DC \uC2E4\uC2DC\uAC04 \uB370\uC774\uD130\uC758 \uAC00\uACA9\uC774\uC5B4\uC57C \uD569\uB2C8\uB2E4.";
+    static final String SYNTHESIS_PROMPT = "당신은 수석 AI 분석관입니다. 아래에 여러 AI 엔진이 독립적으로 수행한 주식 분석 결과가 있습니다.\n\n"
+        + "**중요**: 사용자의 원래 질문을 잘 파악하세요!\n"
+        + "- 사용자가 특정 종목(예: \"삼성전자 분석\")을 질문했다면 → 그 종목에 대한 심층 종합 분석을 작성하세요. 다른 종목 추천 금지!\n"
+        + "- 사용자가 일반 추천(예: \"오늘 뭐 살까\", \"스윙 후보\")을 질문했다면 → 추천 종목 TOP을 정리하세요.\n\n"
+        + "## 특정 종목 분석 모드 (사용자가 특정 종목을 물었을 때):\n\n"
+        + "🎯 **종목 종합 분석**\n"
+        + "📌 종목명 (6자리종목코드) — 현재가 약 XX,XXX원\n"
+        + "  - 투자판단: 매수/관망/매도\n"
+        + "  - AI 합의: X개 AI 전원/다수 동의\n"
+        + "  - 목표가: XX,XXX원 / 손절가: XX,XXX원\n\n"
+        + "🤝 **합의 사항** (다수 AI 동의)\n"
+        + "⚔️ **의견 차이** (AI 간 갈등)\n\n"
+        + "📊 **종합 시나리오** (확률 합=100%)\n"
+        + "🟢 강세: XX% — 근거\n"
+        + "🟡 기준: XX% — 근거\n"
+        + "🔴 약세: XX% — 근거\n\n"
+        + "💡 **최종 통합 판단** (5~10줄)\n"
+        + "⚠️ 리스크 & 체크리스트\n\n"
+        + "## 종목 추천 모드 (사용자가 일반 추천을 요청했을 때):\n\n"
+        + "🎯 **추천 종목 TOP**\n"
+        + "📌 종목명 (6자리종목코드) — 현재가 약 XX,XXX원\n"
+        + "  - 투자판단: 매수/관망/매도\n"
+        + "  - AI 합의: X개 AI 동의\n"
+        + "  - 목표가: XX,XXX원 / 손절가: XX,XXX원\n"
+        + "(각 AI가 추천한 종목을 종합하여 합의도가 높은 순으로 3~5개 정리. 반드시 종목코드 6자리 포함!)\n\n"
+        + "🤝 **합의 사항** / ⚔️ **의견 차이** / 📊 **종합 시나리오** / 💡 **최종 통합 판단** / ⚠️ 리스크 & 체크리스트\n\n"
+        + "📰 **뉴스·재료 종합**\n"
+        + "  - 당일/금주 핵심 뉴스·공시와 추천 종목과의 연관성\n"
+        + "  - 재료 강도: ★★★(강) / ★★(중) / ★(약)\n"
+        + "  - 향후 1주 주요 이벤트 캘린더\n\n"
+        + "면책: 정보 제공 목적이며 투자자문이 아닙니다.\n\n"
+        + "**⚠️ 가격 규칙 (최우선, 위반 시 분석 무효)**:\n"
+        + "1. 입력에 \"실시간 시세 참조\" 또는 \"실시간 시장 데이터\"가 포함되어 있으면, 해당 가격이 유일한 정확한 현재가입니다.\n"
+        + "2. 개별 AI가 제시한 가격이 실시간 데이터와 다르면 무조건 실시간 데이터의 가격으로 교체하세요.\n"
+        + "3. AI가 추정/학습한 과거 가격을 현재가로 사용하면 안 됩니다. 이는 거짓 정보입니다.\n"
+        + "4. 실시간 데이터에 없는 종목은 \"현재가: 실시간 데이터 미제공\"으로 표시하세요.\n"
+        + "5. \"📌 종목명 (종목코드) — 현재가 약 XX,XXX원\" 형식에서 XX,XXX는 반드시 실시간 데이터의 가격이어야 합니다.";
 
-    public SynthesisEngine(ClaudeAgent claudeAgent) {
-        this.claudeAgent = claudeAgent;
+    public SynthesisEngine(ChatGptAgent chatGptAgent) {
+        this.chatGptAgent = chatGptAgent;
     }
 
     public boolean isAvailable() {
-        return claudeAgent.isAvailable();
+        return chatGptAgent.isAvailable();
     }
 
     public AgentResult synthesizeWithResult(List<AgentResult> results, String query, String mode, String today) {
@@ -75,77 +75,80 @@ public class SynthesisEngine {
     /**
      * 실시간 검증 가격을 포함한 종합 합성.
      * stockPicks + realPrices를 받아 Synthesis 프롬프트에 "실시간 시세 참조" 블록을 주입.
+     * R3 합성: gpt-4o (웹검색 없이 순수 추론)
      */
     public AgentResult synthesizeWithResult(List<AgentResult> results, String query, String mode, String today,
                                              String consensusText, List<StockPick> stockPicks, Map<String, String> realPrices) {
         String synthesisInput = results.stream()
-            .map(r -> "=== " + r.agent().toUpperCase() + " \uBD84\uC11D (" + r.model() + ") ===\n" + r.content())
+            .map(r -> "=== " + r.agent().toUpperCase() + " 분석 (" + r.model() + ") ===\n" + r.content())
             .collect(Collectors.joining("\n\n---\n\n"));
 
-        // ★ 실시간 검증 가격 참조 블록 생성 (stock project 패턴)
+        // ★ 실시간 검증 가격 참조 블록
         StringBuilder priceRef = new StringBuilder();
         if (!realPrices.isEmpty()) {
-            priceRef.append("\n\n\u2501\u2501\u2501 [\uC2E4\uC2DC\uAC04 \uC2DC\uC138 \uCC38\uC870 \u2014 \uB124\uC774\uBC84\uAE08\uC735 \uC2E4\uC2DC\uAC04 \uC2DC\uC138] \u2501\u2501\u2501\n");
-            priceRef.append("\u26A0\uFE0F \uC544\uB798 \uAC00\uACA9\uB9CC\uC774 \uC815\uD655\uD55C \uD604\uC7AC\uAC00\uC785\uB2C8\uB2E4. AI \uCD94\uC815 \uAC00\uACA9\uC740 \uBB34\uC2DC\uD558\uC138\uC694!\n");
+            priceRef.append("\n\n━━━ [실시간 시세 참조 — 네이버금융 실시간 시세] ━━━\n");
+            priceRef.append("⚠️ 아래 가격만이 정확한 현재가입니다. AI 추정 가격은 무시하세요!\n");
             for (StockPick pick : stockPicks) {
                 String price = realPrices.get(pick.code());
                 if (price != null) {
-                    priceRef.append("  \u2605 ").append(pick.name()).append("(").append(pick.code())
-                        .append("): \uD604\uC7AC\uAC00 ").append(price).append("\uC6D0 (\uB124\uC774\uBC84 \uC2E4\uC2DC\uAC04)\n");
+                    priceRef.append("  ★ ").append(pick.name()).append("(").append(pick.code())
+                        .append("): 현재가 ").append(price).append("원 (네이버 실시간)\n");
                 }
             }
-            priceRef.append("\u2501\u2501\u2501 \uC704 \uAC00\uACA9\uC744 \uBC18\uB4DC\uC2DC \uD604\uC7AC\uAC00\uB85C \uC0AC\uC6A9\uD558\uC138\uC694! \u2501\u2501\u2501\n");
+            priceRef.append("━━━ 위 가격을 반드시 현재가로 사용하세요! ━━━\n");
         }
 
-        // ★ Perplexity 웹 검색 데이터 우선 지시 (수급분석 등 실시간 데이터 중요 모드)
-        String perplexityPriority = "";
-        boolean hasPerplexity = results.stream().anyMatch(r -> "perplexity".equals(r.agent()) && "success".equals(r.status()));
-        if (hasPerplexity) {
-            perplexityPriority = "\n\n**⚠️ 데이터 우선순위 규칙**:\n"
-                + "- Perplexity는 실시간 웹 검색으로 데이터를 수집합니다. 수급 데이터·뉴스·공시 등 시점이 중요한 정보는 Perplexity의 데이터를 최우선으로 채택하세요.\n"
-                + "- 다른 AI(Claude, Gemini, ChatGPT, Grok)의 수급/뉴스 데이터가 Perplexity와 충돌하면 Perplexity를 우선합니다.\n"
-                + "- 기술적 분석, 펀더멘탈 분석 등 시점과 무관한 분석은 모든 AI를 동등하게 참고하세요.\n";
+        // ★ Grok X-검색 수급 데이터 우선 사용 지시
+        String grokPriority = "";
+        boolean hasGrok = results.stream().anyMatch(r -> "grok".equals(r.agent()) && "success".equals(r.status()));
+        if (hasGrok) {
+            grokPriority = "\n\n**⚠️ 데이터 우선순위 규칙**:\n"
+                + "- Grok은 실시간 웹 검색과 X(트위터) 피드로 수급 데이터 및 뉴스를 수집합니다.\n"
+                + "- 수급 데이터·뉴스·공시 등 시점이 중요한 정보는 Grok의 데이터를 최우선으로 채택하세요.\n"
+                + "- ChatGPT(웹검색 포함)의 수급/뉴스 데이터가 Grok과 충돌하면 Grok을 우선합니다.\n"
+                + "- 기술적 분석, 펀더멘탈 분석, 매크로 판단은 ChatGPT를 우선 참고하세요.\n"
+                + "- Grok의 X(트위터) 센티먼트 분석은 역발상 관점으로 반드시 반영하세요.\n";
         }
 
-        // ★ 수급분석 모드: 환각 수급 데이터 필터링 강화
+        // ★ 수급분석 모드: 데이터 출처 규칙
         String supplyDataRule = "";
-        if ("\uC218\uAE09\uBD84\uC11D".equals(mode)) {
+        if ("수급분석".equals(mode)) {
             supplyDataRule = "\n\n**🚨 수급분석 종합 시 필수 규칙**:\n"
-                + "1. 외국인/기관 순매수·순매도 구체적 금액(억원)은 PERPLEXITY 검색 결과에서만 채택하세요.\n"
-                + "2. 다른 AI(Claude, Gemini, ChatGPT, Grok)가 제시한 수급 금액 수치는 검증 불가이므로 무시하세요.\n"
-                + "3. PERPLEXITY 데이터가 없거나 실패한 경우, '실시간 수급 데이터 미수집'으로 명시하세요.\n"
-                + "4. 종목 추천 시 수급 근거는 PERPLEXITY만, 기술적 근거는 GEMINI, 펀더멘탈은 CHATGPT에서 가져오세요.\n"
+                + "1. 외국인/기관 순매수·순매도 구체적 금액(억원)은 GROK 검색 결과에서만 채택하세요.\n"
+                + "2. ChatGPT가 제시한 수급 금액 수치는 검색 출처가 있는 경우만 채택 (없으면 무시).\n"
+                + "3. GROK 데이터가 없거나 실패한 경우, '실시간 수급 데이터 미수집'으로 명시하세요.\n"
+                + "4. 종목 추천 시 수급 근거는 GROK만, 기술적/매크로 근거는 CHATGPT에서 가져오세요.\n"
                 + "5. 시장이 -3% 이상 급락 중이면: 매수 추천보다 '관망' 또는 '매도/헤지'를 기본으로 하고, 매수는 매우 강한 근거가 있을 때만 조건부로 제시하세요.\n"
-                + "6. 각 추천 종목의 수급 데이터 출처를 반드시 표기: [PERPLEXITY 검색] 또는 [데이터 미확인]\n";
+                + "6. 각 추천 종목의 수급 데이터 출처를 반드시 표기: [GROK 검색] 또는 [데이터 미확인]\n";
         }
 
-        String agentRoleGuide = "\n\n**⚙️ 6-LAYER INTELLIGENCE SYSTEM — 종합 시 반드시 반영**:\n"
+        String agentRoleGuide = "\n\n**⚙️ 2-AGENT INTELLIGENCE SYSTEM — 종합 시 반드시 반영**:\n"
             + "| AI | 담당 Layer | 종합 시 채택 영역 |\n"
             + "|---|---|---|\n"
-            + "| CHATGPT | L1 Macro + L6 펀더멘탈 | 시장 레짐, 재무분석, DART 공시, 적정가치 |\n"
-            + "| CLAUDE | L2 Currency + L6 Risk | 환율, 베이지안 시나리오, 리스크 매트릭스 |\n"
-            + "| PERPLEXITY | L3 Capital Flow (핵심) | 수급 수치(유일한 실시간), 뉴스/공시 |\n"
-            + "| GEMINI | L4 ETF + 기술적 분석 | ETF 수급, 차트 패턴, 진입/손절 레벨 |\n"
-            + "| GROK | L5 Derivatives + 센티먼트 | 파생 신호, 역발상, 테마 사이클 |\n\n"
+            + "| CHATGPT | L1 Macro + L2 Currency + L4 Technical + L6 Fundamental | 매크로, 환율, 기술적 분석, 재무분석, DART 공시, 적정가치 |\n"
+            + "| GROK | L3 Capital Flow + L5 Derivatives + SNS/X | 수급 수치(실시간 검색), 파생 신호, X피드 센티먼트, 역발상 |\n\n"
             + "**⚠️ 종합 규칙 (EXECUTION)**:\n"
-            + "1. 수급 수치(외국인/기관 금액)는 PERPLEXITY 검색 결과만 채택. 다른 AI의 수급 숫자는 무시\n"
-            + "2. 목표가/손절가는 GEMINI 기술적 레벨 + CHATGPT 적정가치 교차 검증\n"
-            + "3. 시장 레짐은 CHATGPT(매크로) + CLAUDE(환율/리스크) 병합 판단\n"
-            + "4. 레이어 간 충돌 검증 필수: Macro vs Flow, Flow vs Derivatives, ETF vs Flow\n"
-            + "5. 뉴스/재료는 PERPLEXITY 실시간 + GROK 재료 반영도 평가 결합\n"
+            + "1. 수급 수치(외국인/기관 금액)는 GROK 검색 결과만 채택. 출처 없는 수급 숫자는 무시\n"
+            + "2. 목표가/손절가는 CHATGPT 기술적 레벨 + CHATGPT 적정가치 교차 검증\n"
+            + "3. 시장 레짐은 CHATGPT(매크로+환율) 판단 기준\n"
+            + "4. 뉴스/재료는 GROK 실시간 검색 + CHATGPT 웹검색 결합\n"
+            + "5. 역발상·컨센서스 반대 관점은 GROK X피드 센티먼트 기반\n"
             + "6. 최종 판단에 Evidence Scoring 명시: Strong / Moderate / Weak\n"
-            + "7. 시장 급락(-3%+) 시: 매수보다 리스크 관리(관망/매도/헤지) 우선\n";
+            + "7. 시장 급락(-3%+) 시: 매수보다 리스크 관리(관망/매도/헤지) 우선\n"
+            + "8. 두 AI가 동일 종목을 추천 → CONSENSUS (신뢰도 상향)\n"
+            + "9. 한 AI만 추천 → 해당 AI의 전문 영역 기준으로 신뢰도 판단\n";
 
-        String userMessage = "[\uC624\uB298: " + today + "] [\uBAA8\uB4DC: " + mode + "] [\uC0AC\uC6A9\uC790 \uC6D0\uB798 \uC9C8\uBB38: " + query + "]\n\n"
-            + "\uC544\uB798 " + results.size() + "\uAC1C AI \uBD84\uC11D \uACB0\uACFC\uB97C \uC885\uD569\uD558\uC138\uC694. \uBC18\uB4DC\uC2DC \uC0AC\uC6A9\uC790\uC758 \uC6D0\uB798 \uC9C8\uBB38\uC5D0 \uB9DE\uAC8C \uC885\uD569\uD558\uC138\uC694!"
+        String userMessage = "[오늘: " + today + "] [모드: " + mode + "] [사용자 원래 질문: " + query + "]\n\n"
+            + "아래 " + results.size() + "개 AI 분석 결과를 종합하세요. 반드시 사용자의 원래 질문에 맞게 종합하세요!"
             + agentRoleGuide
-            + perplexityPriority
+            + grokPriority
             + supplyDataRule
             + priceRef
             + consensusText + "\n\n"
             + synthesisInput;
 
-        AgentResult synthesis = claudeAgent.analyze(SYNTHESIS_PROMPT, userMessage);
+        // R3 합성: gpt-4o (웹검색 없는 순수 추론 모드)
+        AgentResult synthesis = chatGptAgent.synthesize(SYNTHESIS_PROMPT, userMessage);
         log.info("[Synthesis] status={}, durationMs={}", synthesis.status(), synthesis.durationMs());
         return synthesis;
     }
