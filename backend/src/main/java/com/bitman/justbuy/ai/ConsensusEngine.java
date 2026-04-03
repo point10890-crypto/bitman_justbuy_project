@@ -20,13 +20,10 @@ public class ConsensusEngine {
 
     private static final Logger log = LoggerFactory.getLogger(ConsensusEngine.class);
 
-    /** 에이전트 역할별 기본 가중치 */
+    /** 에이전트 역할별 기본 가중치 (2-에이전트 체계) */
     private static final Map<String, Double> AGENT_BASE_WEIGHTS = Map.of(
-        "claude", 1.2,
-        "gemini", 1.0,
-        "chatgpt", 1.1,
-        "perplexity", 1.15,
-        "grok", 0.9
+        "chatgpt", 1.1,   // L1+L2+L4+L6 담당 — 매크로/기술/펀더멘탈
+        "grok", 1.1       // L3+L5+SNS 담당 — 수급/파생/X피드 (동등 가중치)
     );
 
     /**
