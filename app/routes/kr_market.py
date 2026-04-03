@@ -14,7 +14,7 @@ kr_bp = Blueprint('kr', __name__)
 # ── 고정 경로 ──────────────────────────────────────────────
 _ROUTES_DIR = os.path.dirname(os.path.abspath(__file__))  # app/routes/
 _APP_DIR = os.path.dirname(_ROUTES_DIR)                    # app/
-_BASE_DIR = os.path.dirname(_APP_DIR)                      # /c/bitman_service
+_BASE_DIR = os.path.dirname(_APP_DIR)                      # project root
 DATA_DIR = os.path.join(_BASE_DIR, 'data')
 
 # market_gate 임포트를 위한 경로 등록
@@ -169,7 +169,7 @@ def get_kr_signals():
                                                 entry = float(s.get('entry_price', 0))
                                                 if entry > 0:
                                                     s['return_pct'] = round((float(val) - entry) / entry * 100, 2)
-                                    except:
+                                    except Exception:
                                         pass
                 except Exception as e:
                     print(f"Error fetching realtime signal prices: {e}")
@@ -654,9 +654,9 @@ def kr_market_gate():
                     'sectors': [],
                     'error': f"Enhanced failed: {str(e)}"
                 })
-        except:
+        except Exception:
             pass
-            
+
         return jsonify({'error': str(e), 'sectors': []}), 500
 
 
@@ -688,7 +688,7 @@ def get_kr_realtime_prices():
             try:
                 map_df = pd.read_csv(ticker_map_path, dtype={'ticker': str})
                 yahoo_map = dict(zip(map_df['ticker'].str.zfill(6), map_df['yahoo_ticker']))
-            except:
+            except Exception:
                 pass
         
         # 2. Prepare Yahoo Tickers
@@ -730,7 +730,7 @@ def get_kr_realtime_prices():
                             if pd.notna(val) and float(val) > 0:
                                 t = req_ticker_map[yf_t]
                                 result[t] = float(val)
-                    except:
+                    except Exception:
                         pass
                         
         return jsonify(result)

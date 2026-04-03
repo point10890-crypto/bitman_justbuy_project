@@ -7,13 +7,17 @@ echo   BitMan JustBuy Local Server
 echo ========================================
 echo.
 
-:: Load .env file
-for /f "usebackq tokens=1,* delims==" %%a in ("backend\.env") do (
-    if not "%%a"=="" (
-        echo %%a | findstr /r "^#" >nul || (
-            set "%%a=%%b"
+:: Load .env file from project root
+if exist ".env" (
+    for /f "usebackq tokens=1,* delims==" %%a in (".env") do (
+        if not "%%a"=="" (
+            echo %%a | findstr /r "^#" >nul || (
+                set "%%a=%%b"
+            )
         )
     )
+) else (
+    echo [WARN] .env file not found, using system environment variables
 )
 
 echo [OK] Environment variables loaded

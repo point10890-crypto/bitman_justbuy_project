@@ -54,8 +54,10 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> float:
     delta = series.diff()
     gain = delta.where(delta > 0, 0).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
+    # Avoid division by zero — if loss is 0, RSI is 100 (max overbought)
+    rs = gain / loss.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
+    rsi = rsi.fillna(100.0)  # loss=0 means all gains → RSI=100
     return float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50.0
 
 def calculate_macd_signal(series: pd.Series) -> str:
@@ -289,7 +291,7 @@ def run_kr_market_gate() -> KRMarketGateResult:
                     rsi=s_details.get('rsi', 50),
                     rs_vs_kospi=s_details.get('rs_vs_kospi', 0)
                 ))
-            except:
+            except Exception:
                 continue
         
         # Sort by score
@@ -298,7 +300,7 @@ def run_kr_market_gate() -> KRMarketGateResult:
         # Exchange Rate Gate
         try:
             usd_krw = float(data['Close'][USD_KRW_TICKER].iloc[-1])
-        except:
+        except Exception:
             usd_krw = 1350.0  # Default fallback
         gate_open = usd_krw < config.usd_krw_danger
         

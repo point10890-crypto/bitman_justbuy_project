@@ -7,7 +7,8 @@ title BitMan MarketFlow Services
 :: Flask(5001) + Spring Boot(8080) + Next.js(4000) + Scheduler
 :: ====================================
 
-set PROJECT=C:\bitman_service
+set "PROJECT=%~dp0"
+if "%PROJECT:~-1%"=="\" set "PROJECT=%PROJECT:~0,-1%"
 set PYTHON=%PROJECT%\.venv\Scripts\python.exe
 set FRONTEND=%PROJECT%\frontend
 set BACKEND=%PROJECT%\backend

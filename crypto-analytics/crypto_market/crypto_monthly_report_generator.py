@@ -143,7 +143,7 @@ class CryptoMonthlyReportGenerator:
             if hasattr(end_val, 'iloc'):
                 end_val = end_val.iloc[0]
             return ((float(end_val) / float(start_val)) - 1) * 100
-        except:
+        except Exception:
             return 0.0
     
     def _safe_value(self, df: Optional[pd.DataFrame], col: str = 'Close', agg: str = 'last') -> float:
@@ -168,7 +168,7 @@ class CryptoMonthlyReportGenerator:
             if hasattr(val, 'iloc'):
                 val = val.iloc[0]
             return float(val)
-        except:
+        except Exception:
             return 0.0
     
     def _calculate_correlation(self, df1: Optional[pd.DataFrame], df2: Optional[pd.DataFrame]) -> float:
@@ -187,7 +187,7 @@ class CryptoMonthlyReportGenerator:
             
             corr = close1.loc[common].corr(close2.loc[common])
             return float(corr) if not pd.isna(corr) else 0.0
-        except:
+        except Exception:
             return 0.0
     
     def _generate_ai_summary(self, data: CryptoMonthlyData) -> str:
@@ -283,7 +283,7 @@ Format exactly as follows:
                     ratio_end = eth_end / btc_end
                     if ratio_start > 0:
                         eth_btc_change = ((ratio_end / ratio_start) - 1) * 100
-            except:
+            except Exception:
                 pass
         
         return CryptoMonthlyData(

@@ -5,13 +5,13 @@
 
 ### 경로 변수 (모든 Bash 명령어에서 반드시 선언 후 사용)
 ```bash
-PROJECT="/c/bitman_service"
+PROJECT="/c/bitman_justbuy_project"
 PYTHON="$PROJECT/.venv/Scripts/python.exe"
 FRONTEND="$PROJECT/frontend"
 ```
 
 ### 절대 규칙
-1. **경로**: Windows 경로(`C:\...`) 사용 금지 → 항상 MINGW 경로: `/c/bitman_service`
+1. **경로**: Windows 경로(`C:\...`) 사용 금지 → 항상 MINGW 경로: `/c/bitman_justbuy_project`
 2. **Python 실행**: 반드시 `"$PYTHON"` 변수 사용. `python`, `py` 직접 사용 금지
 3. **인코딩**: Python 실행 시 `PYTHONIOENCODING=utf-8` 환경변수 필수 (cp949 에러 방지)
 4. **작업 디렉토리**: 명령어 실행 전 반드시 `cd "$PROJECT"` 선행
@@ -56,7 +56,7 @@ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_placeholder
 
 ### 디렉토리 구조
 ```
-/c/bitman_service/
+/c/bitman_justbuy_project/
 ├── flask_app.py              # Flask API 진입점 (포트 5001)
 ├── scheduler.py              # 통합 스케줄러 (US/KR/Crypto, 고정경로)
 ├── market_gate.py            # KR 시장 레짐 감지 (RISK_ON/OFF/NEUTRAL)
@@ -448,7 +448,7 @@ def add_cache_headers(response):
 
 ### 스킬 1: 종가베팅 V2 엔진 실행
 ```bash
-PROJECT="/c/bitman_service"
+PROJECT="/c/bitman_justbuy_project"
 PYTHON="$PROJECT/.venv/Scripts/python.exe"
 cd "$PROJECT" && PYTHONIOENCODING=utf-8 "$PYTHON" -c "
 import asyncio
@@ -459,7 +459,7 @@ asyncio.run(run_screener(capital=50_000_000))
 
 ### 스킬 2: 서버 전체 재시작
 ```bash
-PROJECT="/c/bitman_service"
+PROJECT="/c/bitman_justbuy_project"
 PYTHON="$PROJECT/.venv/Scripts/python.exe"
 FRONTEND="$PROJECT/frontend"
 netstat -ano | grep 5001 | awk '{print $5}' | sort -u | xargs -I{} taskkill //F //PID {} 2>/dev/null
@@ -474,13 +474,13 @@ netstat -ano | grep -E "5001|4000"
 
 ### 스킬 3: 프론트엔드 빌드 검증
 ```bash
-PROJECT="/c/bitman_service"
+PROJECT="/c/bitman_justbuy_project"
 cd "$PROJECT/frontend" && npx next build
 ```
 
 ### 스킬 4: 전체 검증 (임포트 + 경로 + 데이터모델)
 ```bash
-PROJECT="/c/bitman_service"
+PROJECT="/c/bitman_justbuy_project"
 PYTHON="$PROJECT/.venv/Scripts/python.exe"
 cd "$PROJECT" && PYTHONIOENCODING=utf-8 "$PYTHON" -c "
 from engine.generator import SignalGenerator, run_screener
@@ -514,7 +514,7 @@ print('ALL CHECKS PASSED')
 
 ### 스킬 5: 최신 결과 확인
 ```bash
-PROJECT="/c/bitman_service"
+PROJECT="/c/bitman_justbuy_project"
 PYTHON="$PROJECT/.venv/Scripts/python.exe"
 cd "$PROJECT" && PYTHONIOENCODING=utf-8 "$PYTHON" -c "
 import json
@@ -532,7 +532,7 @@ print(f'AI: {len(picks.get(\"picks\",[]))} picks (Consensus:{picks.get(\"consens
 
 ### 스킬 6: 단일 종목 재분석
 ```bash
-PROJECT="/c/bitman_service"
+PROJECT="/c/bitman_justbuy_project"
 PYTHON="$PROJECT/.venv/Scripts/python.exe"
 STOCK_CODE="005930"
 cd "$PROJECT" && PYTHONIOENCODING=utf-8 "$PYTHON" -c "
@@ -549,7 +549,7 @@ else:
 
 ### 스킬 7: US 엔드포인트 검증
 ```bash
-PROJECT="/c/bitman_service"
+PROJECT="/c/bitman_justbuy_project"
 echo "=== US Endpoint Check ==="
 curl -s http://localhost:5001/api/us/market-briefing | python3 -c "
 import sys,json; d=json.load(sys.stdin)
@@ -638,10 +638,10 @@ cd "$PROJECT" && PYTHONIOENCODING=utf-8 "$PYTHON" scheduler.py --now
 
 ### 경로 설정
 ```python
-Config.BASE_DIR     = /c/bitman_service          # __file__ 기반
-Config.DATA_DIR     = /c/bitman_service/data
-Config.PYTHON_PATH  = /c/bitman_service/.venv/Scripts/python.exe  # venv 우선
-Config.LOG_DIR      = /c/bitman_service/logs
+Config.BASE_DIR     = /c/bitman_justbuy_project          # __file__ 기반
+Config.DATA_DIR     = /c/bitman_justbuy_project/data
+Config.PYTHON_PATH  = /c/bitman_justbuy_project/.venv/Scripts/python.exe  # venv 우선
+Config.LOG_DIR      = /c/bitman_justbuy_project/logs
 ```
 
 ---
@@ -773,20 +773,20 @@ ngrok http 4000
 
 ### 스킬 9: SQLite DB 조회
 ```bash
-PROJECT="/c/bitman_service"
+PROJECT="/c/bitman_justbuy_project"
 sqlite3 "$PROJECT/data/users.db" ".tables"
 sqlite3 "$PROJECT/data/users.db" "SELECT * FROM users LIMIT 10;"
 ```
 
 ### 스킬 10: Vercel 프론트엔드 배포
 ```bash
-PROJECT="/c/bitman_service"
+PROJECT="/c/bitman_justbuy_project"
 cd "$PROJECT/frontend" && vercel --prod
 ```
 
 ### 스킬 11: API 일괄 테스트 (curl 기반)
 ```bash
-PROJECT="/c/bitman_service"
+PROJECT="/c/bitman_justbuy_project"
 echo "=== API Health Check ==="
 endpoints=(
   "http://localhost:5001/api/kr/jongga-v2/latest"

@@ -429,7 +429,7 @@ class Orchestrator:
             from operations.notifier import Notifier
             notifier = Notifier()
             # Would track previous gate and notify on change
-        except:
+        except Exception:
             pass
 
     def _notify_signals(self, signals: List[Dict]):
@@ -445,7 +445,7 @@ class Orchestrator:
                     score=signal.get('score', 0),
                     gate=self.state.current_gate
                 )
-        except:
+        except Exception:
             pass
 
     # ===== EXECUTION =====

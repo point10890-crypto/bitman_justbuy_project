@@ -1,8 +1,9 @@
 #!/bin/bash
 # MarketFlow - Local Server Startup
-# Usage: cd /c/bitman_service && bash start.sh
+# Usage: bash start.sh (from project root)
 
-PROJECT="/c/bitman_service"
+# Dynamic path detection — works from any location
+PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON="$PROJECT/.venv/Scripts/python.exe"
 FRONTEND="$PROJECT/frontend"
 BACKEND="$PROJECT/backend"

@@ -323,7 +323,7 @@ class EnhancedKoreanInstitutionalTrendAnalyzer:
             numbers = re.findall(r'\d+', text)
             return int(numbers[0]) if numbers else 0
 
-        except:
+        except Exception:
             return 0
 
     def _parse_number_with_sign(self, text: str) -> int:
@@ -343,7 +343,7 @@ class EnhancedKoreanInstitutionalTrendAnalyzer:
                 numbers = re.findall(r'\d+', text)
                 return int(numbers[0]) if numbers else 0
 
-        except:
+        except Exception:
             return 0
 
     def _analyze_comprehensive_trend(self, ticker: str, daily_data: List[Dict]) -> InstitutionalData:
