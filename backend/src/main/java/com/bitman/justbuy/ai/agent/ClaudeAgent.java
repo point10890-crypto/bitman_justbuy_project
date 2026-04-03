@@ -35,7 +35,7 @@ public class ClaudeAgent implements AiAgent {
     @Override
     public AgentResult analyze(String systemPrompt, String userMessage) {
         long start = System.currentTimeMillis();
-        String model = "claude-sonnet-4-20250514";
+        String model = "claude-sonnet-4-5";
 
         if (!isAvailable()) {
             return AgentResult.skipped("claude", "API key not configured");

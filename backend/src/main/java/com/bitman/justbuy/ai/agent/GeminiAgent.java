@@ -44,6 +44,7 @@ public class GeminiAgent implements AiAgent {
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("x-goog-api-key", props.googleApiKey());
 
             Map<String, Object> body = Map.of(
                 "systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))),
@@ -54,7 +55,7 @@ public class GeminiAgent implements AiAgent {
                 "generationConfig", Map.of("maxOutputTokens", 4096)
             );
 
-            String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + props.googleApiKey();
+            String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
             HttpEntity<String> request = new HttpEntity<>(mapper.writeValueAsString(body), headers);
             ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, request, String.class);
