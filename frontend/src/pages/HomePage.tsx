@@ -156,51 +156,52 @@ export default function HomePage() {
               </div>
 
               <div className="quick-grid">
-                <button className="quick-card animate-slide-up" style={{ backgroundImage: 'linear-gradient(135deg, rgba(0,200,83,0.1) 0%, rgba(0,200,83,0.02) 100%)', animationDelay: '0s', animationFillMode: 'backwards' }} onClick={() => handleCardClick('오늘뭐사', '오늘 뭐 살까? 당일 매매 추천')}>
-                  <span className="text-lg">📈</span>
+                {/* BREAKOUT */}
+                <button className="quick-card animate-slide-up" style={{ backgroundImage: 'linear-gradient(135deg, rgba(0,229,255,0.12) 0%, rgba(0,229,255,0.02) 100%)', animationDelay: '0s', animationFillMode: 'backwards' }} onClick={() => handleCardClick('BREAKOUT', '기술적 돌파 매수 후보 분석')}>
+                  <span className="text-lg">🚀</span>
                   <div>
                     <div className="flex items-baseline gap-1">
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--text-primary)' }}>오늘</span>
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-bull)' }}>뭐사?</span>
+                      <span className="font-bold text-[13px]" style={{ color: '#00E5FF' }}>BREAKOUT</span>
                     </div>
-                    <span className="text-[9.5px]" style={{ color: 'var(--text-secondary)' }}>당일 종가·시초가 매매</span>
-                    <span className="text-[8px] block mt-0.5" style={{ color: 'var(--text-muted)' }}>⏰ 매일 08:00 자동갱신</span>
+                    <span className="text-[9.5px]" style={{ color: 'var(--text-secondary)' }}>박스·저항 돌파 종목</span>
+                    <span className="text-[8px] block mt-0.5" style={{ color: 'var(--text-muted)' }}>기술적 돌파 + 거래량 폭발</span>
                   </div>
                 </button>
 
-                <button className="quick-card animate-slide-up" style={{ backgroundImage: 'linear-gradient(135deg, rgba(66,165,245,0.1) 0%, rgba(66,165,245,0.02) 100%)', animationDelay: '0.05s', animationFillMode: 'backwards' }} onClick={() => handleCardClick('스윙매매', '스윙매매 후보 종목 분석')}>
+                {/* FLOW LEADER */}
+                <button className="quick-card animate-slide-up" style={{ backgroundImage: 'linear-gradient(135deg, rgba(0,200,83,0.12) 0%, rgba(0,200,83,0.02) 100%)', animationDelay: '0.05s', animationFillMode: 'backwards' }} onClick={() => handleCardClick('FLOW_LEADER', '외국인·기관 수급 주도 종목 분석')}>
+                  <span className="text-lg">💹</span>
+                  <div>
+                    <div className="flex items-baseline gap-1">
+                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-bull)' }}>FLOW</span>
+                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-bull)' }}>LEADER</span>
+                    </div>
+                    <span className="text-[9.5px]" style={{ color: 'var(--text-secondary)' }}>외인·기관 수급 주도</span>
+                    <span className="text-[8px] block mt-0.5" style={{ color: 'var(--text-muted)' }}>스마트머니 추종 전략</span>
+                  </div>
+                </button>
+
+                {/* CATALYST BURST */}
+                <button className="quick-card animate-slide-up" style={{ backgroundImage: 'linear-gradient(135deg, rgba(255,152,0,0.12) 0%, rgba(255,152,0,0.02) 100%)', animationDelay: '0.1s', animationFillMode: 'backwards' }} onClick={() => handleCardClick('CATALYST_BURST', '재료/이벤트 드리븐 급등 후보 분석')}>
                   <span className="text-lg">⚡</span>
                   <div>
                     <div className="flex items-baseline gap-1">
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--text-primary)' }}>스윙매매</span>
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-neutral)' }}>뭐사?</span>
+                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-warning)' }}>CATALYST</span>
                     </div>
-                    <span className="text-[9.5px]" style={{ color: 'var(--text-secondary)' }}>3일~3주 스윙 후보</span>
-                    <span className="text-[8px] block mt-0.5" style={{ color: 'var(--text-muted)' }}>⏰ 3일마다 07:00 자동갱신</span>
+                    <span className="text-[9.5px]" style={{ color: 'var(--text-secondary)' }}>재료·이벤트 드리븐</span>
+                    <span className="text-[8px] block mt-0.5" style={{ color: 'var(--text-muted)' }}>공시·뉴스 기반 급등 후보</span>
                   </div>
                 </button>
 
-                <button className="quick-card animate-slide-up" style={{ backgroundImage: 'linear-gradient(135deg, rgba(124,77,255,0.1) 0%, rgba(124,77,255,0.02) 100%)', animationDelay: '0.1s', animationFillMode: 'backwards' }} onClick={() => handleCardClick('종가매매', '종가매매 후보 종목 분석')}>
-                  <span className="text-lg">💎</span>
+                {/* REVERSAL EDGE */}
+                <button className="quick-card animate-slide-up" style={{ backgroundImage: 'linear-gradient(135deg, rgba(124,77,255,0.12) 0%, rgba(124,77,255,0.02) 100%)', animationDelay: '0.15s', animationFillMode: 'backwards' }} onClick={() => handleCardClick('REVERSAL_EDGE', '역발상 반전 매수 후보 분석')}>
+                  <span className="text-lg">🔄</span>
                   <div>
                     <div className="flex items-baseline gap-1">
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--text-primary)' }}>종가매매</span>
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-grade-s)' }}>뭐사?</span>
+                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-grade-s)' }}>REVERSAL</span>
                     </div>
-                    <span className="text-[9.5px]" style={{ color: 'var(--text-secondary)' }}>종가·시초가 단타 매매</span>
-                    <span className="text-[8px] block mt-0.5" style={{ color: 'var(--text-muted)' }}>⏰ 매일 15:10 자동갱신</span>
-                  </div>
-                </button>
-
-                <button className="quick-card animate-slide-up" style={{ backgroundImage: 'linear-gradient(135deg, rgba(255,152,0,0.1) 0%, rgba(255,152,0,0.02) 100%)', animationDelay: '0.15s', animationFillMode: 'backwards' }} onClick={() => handleCardClick('수급분석', '오늘 수급 현황 분석')}>
-                  <span className="text-lg">🔍</span>
-                  <div>
-                    <div className="flex items-baseline gap-1">
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--text-primary)' }}>수급</span>
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-warning)' }}>뭐야?</span>
-                    </div>
-                    <span className="text-[9.5px]" style={{ color: 'var(--text-secondary)' }}>외인·기관 교차 분석</span>
-                    <span className="text-[8px] block mt-0.5" style={{ color: 'var(--text-muted)' }}>⏰ 매일 10:00·14:00 자동갱신</span>
+                    <span className="text-[9.5px]" style={{ color: 'var(--text-secondary)' }}>역발상 반전 매수</span>
+                    <span className="text-[8px] block mt-0.5" style={{ color: 'var(--text-muted)' }}>과매도·비관 극점 반등</span>
                   </div>
                 </button>
               </div>
@@ -217,7 +218,7 @@ export default function HomePage() {
                     <span className="text-gradient-brand font-bold text-[13px]">분석해줘</span>
                     <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: 'rgba(124,77,255,0.2)', color: 'var(--color-grade-s)' }}>FULL</span>
                   </div>
-                  <span className="text-[9.5px] block truncate" style={{ color: 'var(--text-secondary)' }}>5 AI 병렬 심층 분석 · Claude + Gemini + ChatGP...</span>
+                  <span className="text-[9.5px] block truncate" style={{ color: 'var(--text-secondary)' }}>ChatGPT × Grok 2-에이전트 심층분석 · 3라운드 토론</span>
                 </div>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
                   <polyline points="9 18 15 12 9 6" />
@@ -231,19 +232,14 @@ export default function HomePage() {
                 <span className="section-title">AI Engine Status</span>
                 <span className="text-[8.5px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(0,200,83,0.12)', color: 'var(--color-bull)' }}>ALL ONLINE</span>
               </div>
-              <div className="engine-grid-3">
-                <EngineBadge name="Claude" role="종합·공시" color="#FF6B35" />
-                <EngineBadge name="Gemini" role="차트·섹터" color="#4285F4" />
-                <EngineBadge name="ChatGPT" role="심층·글로벌" color="#10A37F" />
-              </div>
-              <div className="engine-grid-2" style={{ marginTop: '6px' }}>
-                <EngineBadge name="Perplexity" role="실시간 웹" color="#20B2AA" />
-                <EngineBadge name="Grok" role="소셜·감성" color="#FF4500" />
+              <div className="engine-grid-2">
+                <EngineBadge name="ChatGPT" role="매크로·기술·펀더멘털" color="#10A37F" />
+                <EngineBadge name="Grok" role="수급·파생·SNS/X" color="#FF4500" />
               </div>
               <div className="flex items-center gap-2" style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)' }}>
-                <span className="text-[8.5px]" style={{ color: 'var(--text-muted)' }}>Multi-Agent V3.0</span>
+                <span className="text-[8.5px]" style={{ color: 'var(--text-muted)' }}>Dual-Agent V4.0</span>
                 <span className="text-[8.5px] font-mono" style={{ color: 'var(--color-bull)' }}>● ACTIVE</span>
-                <span className="text-[8.5px] ml-auto" style={{ color: 'var(--text-muted)' }}>W(공시)=0.95 · W(연기금)=0.85</span>
+                <span className="text-[8.5px] ml-auto" style={{ color: 'var(--text-muted)' }}>3R 토론 · KIS수급 교차검증</span>
               </div>
             </div>
 
@@ -337,14 +333,14 @@ export default function HomePage() {
               <div className="flex flex-col items-center justify-center gap-4 py-10">
                 <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl robot-icon-pulse" style={{ backgroundImage: 'var(--gradient-brand)' }}>🤖</div>
                 <div className="text-center">
-                  <p className="text-[13px] font-bold" style={{ color: 'var(--text-primary)' }}>5 AI 에이전트 병렬 분석중...</p>
-                  <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>베이즈 추론 · 시나리오 분석 · 리스크 매트릭스</p>
+                  <p className="text-[13px] font-bold" style={{ color: 'var(--text-primary)' }}>ChatGPT × Grok 병렬 분석중...</p>
+                  <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>3라운드 토론 · 베이즈 추론 · KIS 수급 교차검증</p>
                 </div>
-                <div className="flex items-center gap-3">
-                  {[{ name: 'Claude', color: '#FF6B35' }, { name: 'Gemini', color: '#4285F4' }, { name: 'ChatGPT', color: '#10A37F' }, { name: 'Perplexity', color: '#20B2AA' }, { name: 'Grok', color: '#FF4500' }].map((a, i) => (
+                <div className="flex items-center gap-5">
+                  {[{ name: 'ChatGPT', color: '#10A37F' }, { name: 'Grok', color: '#FF4500' }].map((a, i) => (
                     <div key={a.name} className="flex flex-col items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ backgroundColor: a.color, animationDelay: `${i * 0.2}s`, boxShadow: `0 0 8px ${a.color}80` }} />
-                      <span className="text-[8px]" style={{ color: a.color }}>{a.name}</span>
+                      <span className="w-3 h-3 rounded-full animate-pulse" style={{ backgroundColor: a.color, animationDelay: `${i * 0.3}s`, boxShadow: `0 0 10px ${a.color}80` }} />
+                      <span className="text-[9px] font-bold" style={{ color: a.color }}>{a.name}</span>
                     </div>
                   ))}
                 </div>

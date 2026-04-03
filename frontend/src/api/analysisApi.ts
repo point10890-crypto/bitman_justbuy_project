@@ -2,7 +2,7 @@
 import { API_BASE } from './config'
 
 export interface AgentInfo {
-  agent: 'claude' | 'gemini' | 'chatgpt' | 'perplexity' | 'grok'
+  agent: 'chatgpt' | 'grok'
   status: 'success' | 'error' | 'skipped'
   model: string
   durationMs: number

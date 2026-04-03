@@ -2,15 +2,12 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 /* ─── Types ─── */
-type DemoPhase = 'idle' | 'analyzing' | 'agent-0' | 'agent-1' | 'agent-2' | 'agent-3' | 'agent-4' | 'consensus' | 'result'
+type DemoPhase = 'idle' | 'analyzing' | 'agent-0' | 'agent-1' | 'consensus' | 'result'
 
 /* ─── Mock Data ─── */
 const MOCK_AGENTS = [
-  { name: 'Claude',     role: '리스크·베이즈 추론', color: '#FF6B35', rgb: '255,107,53',   weight: '1.2x', verdict: '매수', confidence: 87 },
-  { name: 'Gemini',     role: '차트·기술 분석',     color: '#4285F4', rgb: '66,133,244',    weight: '1.0x', verdict: '매수', confidence: 82 },
-  { name: 'ChatGPT',    role: '펀더멘털·글로벌',    color: '#10A37F', rgb: '16,163,127',    weight: '1.1x', verdict: '매수', confidence: 79 },
-  { name: 'Perplexity', role: '실시간 뉴스',        color: '#20B2AA', rgb: '32,178,170',    weight: '1.15x', verdict: '주목', confidence: 73 },
-  { name: 'Grok',       role: '소셜·감성',          color: '#FF4500', rgb: '255,69,0',      weight: '0.9x', verdict: '매수', confidence: 68 },
+  { name: 'ChatGPT', role: '매크로·기술·펀더멘털', color: '#10A37F', rgb: '16,163,127',  weight: '1.1x', verdict: '매수', confidence: 84 },
+  { name: 'Grok',    role: '수급·파생·SNS/X',     color: '#FF4500', rgb: '255,69,0',     weight: '1.1x', verdict: '매수', confidence: 78 },
 ]
 
 const MOCK_RESULT = {
@@ -31,12 +28,9 @@ const MOCK_PICKS = [
 ]
 
 const DEMO_TIMINGS: Record<string, [DemoPhase, number]> = {
-  'analyzing': ['agent-0', 400],
-  'agent-0': ['agent-1', 600],
-  'agent-1': ['agent-2', 500],
-  'agent-2': ['agent-3', 500],
-  'agent-3': ['agent-4', 450],
-  'agent-4': ['consensus', 400],
+  'analyzing': ['agent-0', 500],
+  'agent-0': ['agent-1', 700],
+  'agent-1': ['consensus', 600],
   'consensus': ['result', 800],
 }
 
@@ -151,13 +145,13 @@ export default function LandingPage() {
         <div className="l-hero-grid" />
         <div className="l-container">
           <div className="l-hero-content">
-            <div className="l-hero-badge">★ 5개 AI 합의 엔진 V4.0</div>
+            <div className="l-hero-badge">★ ChatGPT × Grok 듀얼 에이전트 V4.0</div>
             <h1>
               <span>Multi-AI</span>
               <span className="l-text-gradient">Consensus Engine</span>
             </h1>
             <p className="l-hero-subtitle">
-              5개 AI가 동시에 분석하고, 가중 투표로 합의합니다<br />
+              ChatGPT와 Grok이 3라운드 토론으로 합의합니다<br />
               단일 AI의 편향을 넘어선 차세대 투자 분석 시스템
             </p>
             <div className="l-hero-stats">
@@ -166,8 +160,8 @@ export default function LandingPage() {
                 <div className="l-stat-label">합의 정확도</div>
               </div>
               <div className="l-stat-item">
-                <div className="l-stat-value">5 AI</div>
-                <div className="l-stat-label">병렬 엔진</div>
+                <div className="l-stat-value">2 AI</div>
+                <div className="l-stat-label">전문 에이전트</div>
               </div>
               <div className="l-stat-item">
                 <div className="l-stat-value">3</div>
@@ -192,7 +186,7 @@ export default function LandingPage() {
             <h2 className="l-section-title">왜 BitMan 뭐사 인가</h2>
             <p className="l-section-desc">
               단일 AI에 의존하는 투자 분석의 한계를 넘어,<br />
-              5개 전문 AI의 교차 검증으로 편향을 제거합니다.
+              ChatGPT × Grok의 교차 검증으로 편향을 제거합니다.
             </p>
           </div>
 
@@ -202,15 +196,15 @@ export default function LandingPage() {
                 하나의 AI는 학습 데이터에 따라 강세 또는 약세 편향이 존재합니다.
                 차트만, 뉴스만, 감성만 보는 AI는 전체 그림을 놓칩니다.
                 검증 없이 제공되는 추천은 동전 던지기와 다르지 않습니다.<br /><br />
-                <strong>BitMan은 이 문제를 5개 AI의 합의로 해결합니다.</strong>
+                <strong>BitMan은 이 문제를 ChatGPT × Grok 3라운드 토론으로 해결합니다.</strong>
               </blockquote>
             </div>
             <div className="l-animate-on-scroll">
               <ul className="l-achievement-list">
                 <li>
                   <div>
-                    <strong>단일 AI 편향 → 5 AI 교차 검증</strong>
-                    <p>각 AI가 서로 다른 관점에서 분석, 가중 투표로 편향 제거</p>
+                    <strong>단일 AI 편향 → 2 AI 교차 검증</strong>
+                    <p>ChatGPT(매크로·기술)와 Grok(수급·SNS)이 서로 비판하며 편향 제거</p>
                   </div>
                 </li>
                 <li>
@@ -242,9 +236,9 @@ export default function LandingPage() {
         <div className="l-container">
           <div className="l-animate-on-scroll" style={{ textAlign: 'center' }}>
             <span className="l-section-label">Architecture</span>
-            <h2 className="l-section-title">5 AI 에이전트 아키텍처</h2>
+            <h2 className="l-section-title">Dual-Agent 아키텍처</h2>
             <p className="l-section-desc" style={{ margin: '0 auto' }}>
-              5개 AI가 병렬 분석 후 가중 합의를 거쳐<br />
+              ChatGPT × Grok이 3라운드 토론 후 합의를 거쳐<br />
               Bull/Base/Bear 3-시나리오 리포트를 생성합니다.
             </p>
           </div>
@@ -252,10 +246,9 @@ export default function LandingPage() {
           <div className="l-pipeline">
             <div className="l-pipeline-stage l-animate-on-scroll">
               <div className="l-stage-number">1</div>
-              <h4>5 AI 병렬 분석</h4>
+              <h4>R1 병렬 분석</h4>
               <p>
-                Claude(리스크), Gemini(차트), ChatGPT(펀더멘털),
-                Perplexity(뉴스), Grok(감성) — 각 전문 영역에서 동시 분석을 수행합니다.
+                ChatGPT(매크로·기술·펀더멘털)와 Grok(수급·파생·SNS/X) — 각 전문 영역에서 동시 분석을 수행합니다.
               </p>
             </div>
             <div className="l-pipeline-stage l-animate-on-scroll">
@@ -314,7 +307,7 @@ export default function LandingPage() {
               <div className="l-mode-number">05</div>
               <h4>분석해줘</h4>
               <div className="l-mode-schedule">On-demand</div>
-              <p>원하는 종목명을 입력하면 5개 AI가 즉시 심층 분석을 수행합니다. 아래에서 직접 체험해 보세요.</p>
+              <p>원하는 종목명을 입력하면 ChatGPT × Grok이 즉시 심층 분석을 수행합니다. 아래에서 직접 체험해 보세요.</p>
             </div>
           </div>
         </div>
@@ -327,7 +320,7 @@ export default function LandingPage() {
             <span className="l-section-label">Try It</span>
             <h2 className="l-section-title">직접 체험해 보세요</h2>
             <p className="l-section-desc" style={{ margin: '0 auto 32px' }}>
-              5개 AI 합의 엔진의 분석 과정을 직접 확인하세요.
+              ChatGPT × Grok 듀얼 에이전트의 분석 과정을 직접 확인하세요.
             </p>
             <div className="l-demo-warning">
               ⚠️ 시연용 가상 데이터입니다. 실제 서비스에서는 실시간 시장 데이터로 분석됩니다.
@@ -475,11 +468,11 @@ export default function LandingPage() {
         <div className="l-container">
           <div className="l-cta-content l-animate-on-scroll">
             <h2 className="l-section-title" style={{ textAlign: 'center', marginBottom: 32 }}>
-              5개 AI의 합의를<br /><span className="l-text-gold">지금 받아보세요</span>
+              두 AI의 합의를<br /><span className="l-text-gold">지금 받아보세요</span>
             </h2>
             <p className="l-cta-quote">
               "데이터가 아닌, 합의를 믿으세요.<br />
-              5개 AI가 동의할 때, 그것이 진짜 신호입니다."
+              두 AI가 동의할 때, 그것이 진짜 신호입니다."
               <span className="l-cta-author">— BitMan AI Engine</span>
             </p>
             <div className="l-cta-buttons">
@@ -599,7 +592,7 @@ export default function LandingPage() {
               <div className="l-mock-blur-icon">📊</div>
               <h3>이런 분석을 매일 받아보세요</h3>
               <p>
-                매일 아침 8시, 5개 AI가<br />
+                매일 아침 8시, ChatGPT × Grok이<br />
                 오늘의 추천 종목을 분석합니다
               </p>
               <div className="l-mock-blur-buttons">

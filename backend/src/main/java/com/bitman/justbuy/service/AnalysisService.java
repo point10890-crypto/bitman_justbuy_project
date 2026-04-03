@@ -24,7 +24,8 @@ public class AnalysisService {
 
     private static final Logger log = LoggerFactory.getLogger(AnalysisService.class);
     private static final List<String> VALID_MODES = List.of(
-        "\uc624\ub298\ubb50\uc0ac", "\uc2a4\uc719\ub9e4\ub9e4", "\uc885\uac00\ub9e4\ub9e4", "\uc218\uae09\ubd84\uc11d", "\ubd84\uc11d\ud574\uc918"
+        "\uc624\ub298\ubb50\uc0ac", "\uc2a4\uc719\ub9e4\ub9e4", "\uc885\uac00\ub9e4\ub9e4", "\uc218\uae09\ubd84\uc11d", "\ubd84\uc11d\ud574\uc918",
+        "BREAKOUT", "FLOW_LEADER", "CATALYST_BURST", "REVERSAL_EDGE"
     );
 
     /** 모드별 프리컴퓨트 결과 유효 시간 (분 단위) */

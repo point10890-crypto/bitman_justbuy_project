@@ -23,8 +23,11 @@ export function useAnalysis() {
       const effectiveMode = mode || '분석해줘'
       const token = getStoredToken() || undefined
 
+      // 컨셉 모드(BREAKOUT/FLOW_LEADER/CATALYST_BURST/REVERSAL_EDGE)는 라이브 분석으로 처리
+      const LIVE_MODES = new Set(['BREAKOUT', 'FLOW_LEADER', 'CATALYST_BURST', 'REVERSAL_EDGE', '분석해줘'])
+
       // 프리컴퓨트 모드(오늘뭐사, 수급분석, 종가매매, 스윙매매)는 항상 서버 최신 데이터 확인
-      if (mode && mode !== '분석해줘') {
+      if (mode && !LIVE_MODES.has(mode)) {
         const cached = getCached(query, effectiveMode)
         const precomputed = await fetchPrecomputed(mode, token)
 
@@ -49,7 +52,7 @@ export function useAnalysis() {
         // 프리컴퓨트 없음 → 스케줄 분석 대기 안내 (라이브 분석 차단)
         throw new Error('예약 분석 준비 중입니다. 잠시 후 다시 시도해 주세요.')
       } else {
-        // 라이브 분석 모드: 캐시 우선
+        // 라이브 분석 모드 (분석해줘 + 컨셉 모드): 캐시 우선
         const cached = getCached(query, effectiveMode)
         if (cached && cached.metadata.agentsSucceeded > 0) {
           setResult({ ...cached, isPrecomputed: false })

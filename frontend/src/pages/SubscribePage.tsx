@@ -13,19 +13,16 @@ const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
 const TELEGRAM_URL = 'https://t.me/+411gMUrGnNc2YzU1'
 
 const engineColors: Record<string, string> = {
-  Claude: '#FF6B35',
-  Gemini: '#4285F4',
   ChatGPT: '#10A37F',
-  Perplexity: '#20B2AA',
   Grok: '#FF4500',
 }
 
 const proFeatures = [
   '무제한 분석',
-  'AI 5개 전체 엔진',
+  'ChatGPT + Grok 2-에이전트',
   '프리미엄 심층 리포트',
   '실시간 시장 데이터',
-  '멀티 AI 종합분석',
+  '3라운드 AI 교차 토론',
   '맞춤 알림 설정',
 ]
 

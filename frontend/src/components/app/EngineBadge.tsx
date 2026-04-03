@@ -2,15 +2,17 @@ interface EngineBadgeProps {
   name: string
   role: string
   color: string
+  layers?: string
 }
 
-export function EngineBadge({ name, role, color }: EngineBadgeProps) {
+export function EngineBadge({ name, role, color, layers }: EngineBadgeProps) {
   return (
     <div className="engine-badge" style={{ backgroundColor: `${color}10`, border: `1px solid ${color}20` }}>
       <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}60` }} />
       <div className="flex flex-col min-w-0">
         <span className="text-[10px] font-bold truncate" style={{ color }}>{name}</span>
         <span className="text-[8px]" style={{ color: 'var(--text-muted)' }}>{role}</span>
+        {layers && <span className="text-[7px]" style={{ color: `${color}90` }}>{layers}</span>}
       </div>
     </div>
   )
@@ -23,19 +25,14 @@ export function EngineStatusPanel() {
         <span className="section-title">AI Engine Status</span>
         <span className="text-[8.5px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(0,200,83,0.12)', color: 'var(--color-bull)' }}>ALL ONLINE</span>
       </div>
-      <div className="engine-grid-3">
-        <EngineBadge name="Claude" role="종합·공시" color="#FF6B35" />
-        <EngineBadge name="Gemini" role="차트·섹터" color="#4285F4" />
-        <EngineBadge name="ChatGPT" role="심층·글로벌" color="#10A37F" />
-      </div>
-      <div className="engine-grid-2" style={{ marginTop: '6px' }}>
-        <EngineBadge name="Perplexity" role="실시간 웹" color="#20B2AA" />
-        <EngineBadge name="Grok" role="소셜·감성" color="#FF4500" />
+      <div className="engine-grid-2">
+        <EngineBadge name="ChatGPT" role="매크로·기술·펀더멘털" color="#10A37F" layers="L1+L2+L4+L6" />
+        <EngineBadge name="Grok" role="수급·파생·SNS/X" color="#FF4500" layers="L3+L5+X피드" />
       </div>
       <div className="flex items-center gap-2" style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)' }}>
-        <span className="text-[8.5px]" style={{ color: 'var(--text-muted)' }}>Multi-Agent V3.0</span>
+        <span className="text-[8.5px]" style={{ color: 'var(--text-muted)' }}>Dual-Agent V4.0</span>
         <span className="text-[8.5px] font-mono" style={{ color: 'var(--color-bull)' }}>● ACTIVE</span>
-        <span className="text-[8.5px] ml-auto" style={{ color: 'var(--text-muted)' }}>W(공시)=0.95 · W(연기금)=0.85</span>
+        <span className="text-[8.5px] ml-auto" style={{ color: 'var(--text-muted)' }}>3R 토론 · KIS수급 교차검증</span>
       </div>
     </div>
   )
