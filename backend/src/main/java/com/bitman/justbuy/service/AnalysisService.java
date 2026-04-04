@@ -28,12 +28,13 @@ public class AnalysisService {
         "BREAKOUT", "FLOW_LEADER", "CATALYST_BURST", "REVERSAL_EDGE"
     );
 
-    /** 모드별 프리컴퓨트 결과 유효 시간 (분 단위) */
+    /** 모드별 프리컴퓨트 결과 유효 시간 (분 단위)
+     *  컨셉 모드 4종: 매시 50분 갱신 → 70분 TTL */
     private static final Map<String, Long> MODE_TTL_MINUTES = Map.of(
-        "\uc624\ub298\ubb50\uc0ac", 23L * 60 + 50,  // 23시간 50분 (08:00 → 다음날 07:50)
-        "\uc2a4\uc719\ub9e4\ub9e4", 71L * 60 + 50,    // 71시간 50분 (07:00 → 3일 후 06:50)
-        "\uc885\uac00\ub9e4\ub9e4", 23L * 60 + 50,   // 23시간 50분 (15:00 → 다음날 14:50)
-        "\uc218\uae09\ubd84\uc11d", 3L * 60 + 50     // 3시간 50분 (10:00→13:50, 14:00→17:50)
+        "BREAKOUT",       70L,   // 매시 50분 갱신
+        "FLOW_LEADER",    70L,
+        "CATALYST_BURST", 70L,
+        "REVERSAL_EDGE",  70L
     );
 
     /** 라이브 분석 서버 캐시 TTL (30분) */

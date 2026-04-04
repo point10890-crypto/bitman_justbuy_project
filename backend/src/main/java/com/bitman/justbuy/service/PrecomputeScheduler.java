@@ -6,7 +6,6 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -18,6 +17,16 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * 홈 카드 4개 컨셉 모드 프리컴퓨트 스케줄러.
+ *
+ * 스케줄 (평일 거래일만):
+ *   08:50 → BREAKOUT, FLOW_LEADER, CATALYST_BURST, REVERSAL_EDGE 분석
+ *   09:50 → 갱신 ... 14:50까지 매시 50분 반복
+ *   → 정각에 최신 데이터 서빙
+ *
+ * 주말·KRX 공휴일 자동 건너뜀.
+ */
 @Component
 @ConditionalOnProperty(name = "bitman.scheduler.enabled", havingValue = "true")
 public class PrecomputeScheduler {
@@ -27,12 +36,12 @@ public class PrecomputeScheduler {
     private final TelegramNotifier telegramNotifier;
     private final Map<String, String> lastRunTimes = new ConcurrentHashMap<>();
 
-    /** 서버 시작 시 캐시에 데이터 없는 모드를 자동 실행 */
-    private static final Map<String, String> STARTUP_MODES = Map.of(
-        "오늘뭐사", "오늘 뭐 살까? 당일 매매 추천",
-        "스윙매매", "스윙매매 후보 종목 분석",
-        "종가매매", "종가매매 후보 종목 분석",
-        "수급분석", "오늘 수급 현황 분석"
+    /** 스케줄 대상 4개 컨셉 모드 + 쿼리 */
+    private static final Map<String, String> SCHEDULED_MODES = Map.of(
+        "BREAKOUT",       "기술적 돌파 매수 후보 분석",
+        "FLOW_LEADER",    "외국인·기관 수급 주도 종목 분석",
+        "CATALYST_BURST", "재료/이벤트 드리븐 급등 후보 분석",
+        "REVERSAL_EDGE",  "역발상 반전 매수 후보 분석"
     );
 
     public PrecomputeScheduler(AnalysisService analysisService,
@@ -40,7 +49,7 @@ public class PrecomputeScheduler {
                                TelegramNotifier telegramNotifier) {
         this.analysisService = analysisService;
         this.telegramNotifier = telegramNotifier;
-        log.info("[Scheduler] Initialized - precompute schedules active (KST), telegram={}", telegramNotifier != null);
+        log.info("[Scheduler] 컨셉 모드 4종 스케줄러 초기화 (매시 50분, KST), telegram={}", telegramNotifier != null);
     }
 
     /** 서버 시작 후 캐시 없는 모드 자동 분석 */
@@ -50,97 +59,78 @@ public class PrecomputeScheduler {
     }
 
     private void runStartupPrecompute() {
-        // 서버 완전 시작 후 30초 대기
         try { Thread.sleep(30_000); } catch (InterruptedException e) { return; }
 
-        log.info("[Scheduler] 🚀 서버 시작 - 캐시 확인 중...");
-        int success = 0;
-        int total = 0;
-        for (var entry : STARTUP_MODES.entrySet()) {
+        log.info("[Scheduler] 🚀 서버 시작 — 캐시 확인 중...");
+        int success = 0, total = 0;
+        for (var entry : SCHEDULED_MODES.entrySet()) {
             String mode = entry.getKey();
-            String query = entry.getValue();
+            total++;
             try {
                 var cached = analysisService.getPrecomputed(mode);
                 if (cached != null) {
-                    log.info("[Scheduler] ✅ {} - 캐시 유효, 건너뜀", mode);
+                    log.info("[Scheduler] ✅ {} — 캐시 유효, 건너뜀", mode);
                     success++;
-                    total++;
                     continue;
                 }
-                log.info("[Scheduler] ▶ {} - 캐시 없음, 자동 실행", mode);
-                total++;
-                execute(mode, query);
+                log.info("[Scheduler] ▶ {} — 캐시 없음, 자동 실행", mode);
+                execute(mode, entry.getValue());
                 success++;
             } catch (Exception e) {
                 log.error("[Scheduler] ❌ {} 시작 시 실행 실패: {}", mode, e.getMessage());
             }
         }
-        log.info("[Scheduler] 🏁 시작 시 프리컴퓨트 완료");
+        log.info("[Scheduler] 🏁 시작 시 프리컴퓨트 완료 ({}/{})", success, total);
 
         if (telegramNotifier != null) {
             telegramNotifier.sendStartupComplete(success, total);
         }
     }
 
-    /** 오늘뭐사: 평일 오전 8시, 휴장일 제외 (결과 유효: 다음날 07:50까지) */
-    @Scheduled(cron = "0 0 8 * * MON-FRI", zone = "Asia/Seoul")
-    public void precomputeToday() {
+    /**
+     * 매시 50분 — 평일 08:50~14:50 (KST)
+     * 4개 컨셉 모드 순차 실행 → 정각에 최신 데이터 서빙
+     */
+    @Scheduled(cron = "0 50 8-14 * * MON-FRI", zone = "Asia/Seoul")
+    public void hourlyPrecompute() {
         if (!isTradingDay()) {
-            log.info("[Scheduler] \u23ED \uc624\ub298\ubb50\uc0ac \uac74\ub108\ub700 (\ud734\uc7a5\uc77c)");
+            log.info("[Scheduler] ⏭ 매시 분석 건너뜀 (휴장일)");
             return;
         }
-        execute("\uc624\ub298\ubb50\uc0ac", "\uc624\ub298 \ubb58 \uc0b4\uae4c? \ub2f9\uc77c \ub9e4\ub9e4 \ucd94\ucc9c");
-    }
 
-    /** 스윙매매: 3일마다 오전 7시, 휴장일 제외 (결과 유효: 71시간 50분) */
-    @Scheduled(cron = "0 0 7 */3 * *", zone = "Asia/Seoul")
-    public void precomputeSwing() {
-        if (!isTradingDay()) {
-            log.info("[Scheduler] \u23ED \uc2a4\uc719\ub9e4\ub9e4 \uac74\ub108\ub700 (\ud734\uc7a5\uc77c)");
-            return;
+        int hour = ZonedDateTime.now(ZoneId.of("Asia/Seoul")).getHour();
+        log.info("[Scheduler] ⏰ {}:50 컨셉 모드 4종 분석 시작", hour);
+
+        int success = 0;
+        for (var entry : SCHEDULED_MODES.entrySet()) {
+            try {
+                execute(entry.getKey(), entry.getValue());
+                success++;
+            } catch (Exception e) {
+                log.error("[Scheduler] ❌ {}:50 {} 실패: {}", hour, entry.getKey(), e.getMessage());
+            }
         }
-        execute("\uc2a4\uc719\ub9e4\ub9e4", "\uc2a4\uc719\ub9e4\ub9e4 \ud6c4\ubcf4 \uc885\ubaa9 \ubd84\uc11d");
+
+        log.info("[Scheduler] ✅ {}:50 완료 ({}/{})", hour, success, SCHEDULED_MODES.size());
     }
 
-    /** 종가매매: 평일 오후 3시 10분, 휴장일 제외 (결과 유효: 23시간 50분) */
-    @Scheduled(cron = "0 10 15 * * MON-FRI", zone = "Asia/Seoul")
-    public void precomputeClosing() {
-        if (!isTradingDay()) {
-            log.info("[Scheduler] \u23ED \uc885\uac00\ub9e4\ub9e4 \uac74\ub108\ub700 (\ud734\uc7a5\uc77c)");
-            return;
-        }
-        execute("\uc885\uac00\ub9e4\ub9e4", "\uc885\uac00\ub9e4\ub9e4 \ud6c4\ubcf4 \uc885\ubaa9 \ubd84\uc11d");
-    }
-
-    /** 수급분석: 평일 오전 10시 + 오후 2시, 휴장일 제외 (결과 유효: 3시간 50분) */
-    @Scheduled(cron = "0 0 10,14 * * MON-FRI", zone = "Asia/Seoul")
-    public void precomputeSupply() {
-        if (!isTradingDay()) {
-            log.info("[Scheduler] \u23ED \uc218\uae09\ubd84\uc11d \uac74\ub108\ub700 (\ud734\uc7a5\uc77c)");
-            return;
-        }
-        execute("\uc218\uae09\ubd84\uc11d", "\uc624\ub298 \uc218\uae09 \ud604\ud669 \ubd84\uc11d");
-    }
-
-    /** 오늘이 한국 증시 거래일인지 확인 */
     private boolean isTradingDay() {
         return KoreanMarketCalendar.isTradingDay(LocalDate.now(ZoneId.of("Asia/Seoul")));
     }
 
     private void execute(String mode, String query) {
         String now = ZonedDateTime.now(ZoneId.of("Asia/Seoul"))
-            .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-        log.info("[Scheduler] \u25B6 {} \uc2e4\ud589 \uc2dc\uc791 ({})", mode, now);
+            .format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+        log.info("[Scheduler] ▶ {} 실행 시작 ({})", mode, now);
 
         long startMs = System.currentTimeMillis();
         try {
             AnalysisResponse result = analysisService.runLiveAnalysis(query, mode);
             if (result.updatedAt() != null) lastRunTimes.put(mode, result.updatedAt());
-            log.info("[Scheduler] \u2705 {} \uc644\ub8cc ({}ms, {}/{} agents)",
+            log.info("[Scheduler] ✅ {} 완료 ({}ms, {}/{} agents)",
                 mode, result.metadata().totalDurationMs(),
                 result.metadata().agentsSucceeded(), result.metadata().agentsUsed());
 
-            // 모니터링 기록
             com.bitman.justbuy.controller.MonitorController.recordAnalysis(
                 mode, true, result.metadata().totalDurationMs(),
                 result.metadata().agentsUsed(), result.metadata().agentsSucceeded(),
@@ -150,9 +140,8 @@ public class PrecomputeScheduler {
                 telegramNotifier.sendAnalysisResult(mode, result);
             }
         } catch (Exception e) {
-            log.error("[Scheduler] \u274C {} \uc2e4\ud328: {}", mode, e.getMessage());
+            log.error("[Scheduler] ❌ {} 실패: {}", mode, e.getMessage());
 
-            // 모니터링 기록
             com.bitman.justbuy.controller.MonitorController.recordAnalysis(
                 mode, false, System.currentTimeMillis() - startMs, 0, 0, 0, e.getMessage());
 
@@ -162,23 +151,18 @@ public class PrecomputeScheduler {
         }
     }
 
-    /**
-     * 모든 STARTUP_MODES를 순차 실행하고, 각 모드별 결과를 반환합니다.
-     * 한 모드의 실패가 다른 모드 실행을 막지 않습니다.
-     */
+    /** 전체 모드 수동 새로고침 (관리자용) */
     public Map<String, String> refreshAll() {
         Map<String, String> results = new LinkedHashMap<>();
         log.info("[Scheduler] 전체 새로고침 시작");
 
-        for (var entry : STARTUP_MODES.entrySet()) {
-            String mode = entry.getKey();
-            String query = entry.getValue();
+        for (var entry : SCHEDULED_MODES.entrySet()) {
             try {
-                execute(mode, query);
-                results.put(mode, "success");
+                execute(entry.getKey(), entry.getValue());
+                results.put(entry.getKey(), "success");
             } catch (Exception e) {
-                log.error("[Scheduler] {} 새로고침 실패: {}", mode, e.getMessage());
-                results.put(mode, "error: " + e.getMessage());
+                log.error("[Scheduler] {} 새로고침 실패: {}", entry.getKey(), e.getMessage());
+                results.put(entry.getKey(), "error: " + e.getMessage());
             }
         }
 

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState, useEffect, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import PageHeader from '../components/common/PageHeader'
@@ -52,7 +52,12 @@ function Checkbox({ checked, onChange, label, error, muted }: {
 
 export default function RegisterPage() {
   const navigate = useNavigate()
-  const { register } = useAuth()
+  const { register, user, isLoading } = useAuth()
+
+  // 이미 로그인된 유저는 홈으로 리다이렉트
+  useEffect(() => {
+    if (!isLoading && user) navigate('/', { replace: true })
+  }, [user, isLoading, navigate])
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')

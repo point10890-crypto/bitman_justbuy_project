@@ -1,6 +1,6 @@
 /** BitMan Service Worker - PWA Offline + Cache Strategy */
 
-const CACHE_NAME = 'bitman-v1'
+const CACHE_NAME = 'bitman-v2'
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
@@ -30,7 +30,7 @@ self.addEventListener('activate', (event) => {
   self.clients.claim()
 })
 
-// Fetch: Network-first for API, Cache-first for static
+// Fetch: Network-first for HTML/API, Cache-first for hashed assets
 self.addEventListener('fetch', (event) => {
   const { request } = event
   const url = new URL(request.url)
@@ -41,29 +41,33 @@ self.addEventListener('fetch', (event) => {
   // API calls: Network only (real-time data)
   if (url.pathname.startsWith('/api/')) return
 
-  // Static assets: Stale-while-revalidate
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      const fetchPromise = fetch(request)
+  // HTML (document) requests: Network-first — 항상 최신 index.html 로드
+  if (request.destination === 'document' || request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
         .then((response) => {
-          // Only cache successful responses from same origin
-          if (response.ok && url.origin === self.location.origin) {
+          if (response.ok) {
             const clone = response.clone()
             caches.open(CACHE_NAME).then((cache) => cache.put(request, clone))
           }
           return response
         })
-        .catch(() => {
-          // Offline fallback: return cached version or offline page
-          if (cached) return cached
-          if (request.destination === 'document') {
-            return caches.match('/')
-          }
-          return new Response('Offline', { status: 503 })
-        })
+        .catch(() => caches.match(request).then((c) => c || caches.match('/')))
+    )
+    return
+  }
 
-      // Return cached immediately, update in background
-      return cached || fetchPromise
+  // Hashed static assets (JS/CSS): Cache-first (파일명에 해시 포함)
+  event.respondWith(
+    caches.match(request).then((cached) => {
+      if (cached) return cached
+      return fetch(request).then((response) => {
+        if (response.ok && url.origin === self.location.origin) {
+          const clone = response.clone()
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone))
+        }
+        return response
+      }).catch(() => new Response('Offline', { status: 503 }))
     })
   )
 })

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 
 /* ─── Types ─── */
 type DemoPhase = 'idle' | 'analyzing' | 'agent-0' | 'agent-1' | 'consensus' | 'result'
@@ -36,6 +37,13 @@ const DEMO_TIMINGS: Record<string, [DemoPhase, number]> = {
 
 export default function LandingPage() {
   const navigate = useNavigate()
+  const { user, isLoading } = useAuth()
+
+  // 로그인된 유저는 홈으로 리다이렉트
+  useEffect(() => {
+    if (!isLoading && user) navigate('/', { replace: true })
+  }, [user, isLoading, navigate])
+
   const [demoPhase, setDemoPhase] = useState<DemoPhase>('idle')
   const [demoStock, setDemoStock] = useState('')
   const [showMockScreen, setShowMockScreen] = useState(false)

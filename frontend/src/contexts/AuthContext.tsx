@@ -22,7 +22,7 @@ interface AuthContextType {
   user: User | null
   isGuest: boolean
   isLoading: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>
   register: (name: string, email: string, password: string) => Promise<void>
   logout: () => void
   applySubscription: (depositorName: string) => Promise<void>
@@ -35,6 +35,7 @@ const AuthContext = createContext<AuthContextType | null>(null)
 
 const TOKEN_KEY = 'bitman_token'
 const USER_KEY = 'bitman_auth_user'
+const REMEMBER_KEY = 'bitman_remember'
 
 function dtoToUser(dto: UserDto): User {
   return {
@@ -50,8 +51,28 @@ function dtoToUser(dto: UserDto): User {
   }
 }
 
+/** 로그인 유지 여부에 따라 localStorage 또는 sessionStorage 사용 */
+function getStorage(): Storage {
+  return localStorage.getItem(REMEMBER_KEY) === '1' ? localStorage : sessionStorage
+}
+
+function setToken(token: string) {
+  getStorage().setItem(TOKEN_KEY, token)
+}
+
+function setUserData(user: string) {
+  getStorage().setItem(USER_KEY, user)
+}
+
+function clearAuth() {
+  localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(USER_KEY)
+  sessionStorage.removeItem(TOKEN_KEY)
+  sessionStorage.removeItem(USER_KEY)
+}
+
 export function getStoredToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
+  return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY)
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -63,6 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // ─── 레거시 키 마이그레이션 (justbuy_* → bitman_*) ───
     const legacyToken = localStorage.getItem('justbuy_token')
     if (legacyToken && !localStorage.getItem(TOKEN_KEY)) {
+      localStorage.setItem(REMEMBER_KEY, '1')
       localStorage.setItem(TOKEN_KEY, legacyToken)
       localStorage.removeItem('justbuy_token')
       const legacyUser = localStorage.getItem('justbuy_user')
@@ -72,7 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    const token = localStorage.getItem(TOKEN_KEY)
+    const token = getStoredToken()
     if (!token) {
       setIsLoading(false)
       return
@@ -82,22 +104,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(dto => {
         const u = dtoToUser(dto)
         setUser(u)
-        localStorage.setItem(USER_KEY, JSON.stringify(u))
+        setUserData(JSON.stringify(u))
       })
       .catch(() => {
         // 토큰 만료 또는 무효 → 정리
-        localStorage.removeItem(TOKEN_KEY)
-        localStorage.removeItem(USER_KEY)
+        clearAuth()
       })
       .finally(() => setIsLoading(false))
   }, [])
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, rememberMe?: boolean) => {
     const res = await loginUser(email, password)
-    localStorage.setItem(TOKEN_KEY, res.token)
+    // 로그인 유지 설정 저장 (항상 localStorage에)
+    if (rememberMe) {
+      localStorage.setItem(REMEMBER_KEY, '1')
+    } else {
+      localStorage.removeItem(REMEMBER_KEY)
+    }
+    setToken(res.token)
     const u = dtoToUser(res.user)
     setUser(u)
-    localStorage.setItem(USER_KEY, JSON.stringify(u))
+    setUserData(JSON.stringify(u))
   }
 
   const register = async (name: string, email: string, password: string) => {
@@ -107,41 +134,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     setUser(null)
-    localStorage.removeItem(TOKEN_KEY)
-    localStorage.removeItem(USER_KEY)
+    clearAuth()
+    localStorage.removeItem(REMEMBER_KEY)
   }
 
   const applySubscription = async (depositorName: string) => {
-    const token = localStorage.getItem(TOKEN_KEY)
+    const token = getStoredToken()
     if (!token || !user) return
     const dto = await apiApplySubscription(token, depositorName)
     const u = dtoToUser(dto)
     setUser(u)
-    localStorage.setItem(USER_KEY, JSON.stringify(u))
+    setUserData(JSON.stringify(u))
   }
 
   const refreshUser = async () => {
-    const token = localStorage.getItem(TOKEN_KEY)
+    const token = getStoredToken()
     if (!token) return
     try {
       const dto = await fetchCurrentUser(token)
       const u = dtoToUser(dto)
       setUser(u)
-      localStorage.setItem(USER_KEY, JSON.stringify(u))
+      setUserData(JSON.stringify(u))
     } catch { /* ignore */ }
   }
 
   const updateProfile = async (name: string) => {
-    const token = localStorage.getItem(TOKEN_KEY)
+    const token = getStoredToken()
     if (!token || !user) return
     const dto = await apiUpdateProfile(token, name)
     const u = dtoToUser(dto)
     setUser(u)
-    localStorage.setItem(USER_KEY, JSON.stringify(u))
+    setUserData(JSON.stringify(u))
   }
 
   const changePassword = async (currentPassword: string, newPassword: string) => {
-    const token = localStorage.getItem(TOKEN_KEY)
+    const token = getStoredToken()
     if (!token || !user) return
     await apiChangePassword(token, currentPassword, newPassword)
   }

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState, useEffect, type FormEvent } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import PageHeader from '../components/common/PageHeader'
@@ -9,21 +9,24 @@ import FormInput from '../components/common/FormInput'
 export default function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { login } = useAuth()
+  const { login, user, isLoading } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [rememberMe, setRememberMe] = useState(() => localStorage.getItem('bitman_remember') === '1')
 
-  import('react').then(({ useEffect }) => {
-    useEffect(() => {
-      if (location.state?.message) {
-        setError(location.state.message)
-        // Consume the state message so it doesn't show on reload
-        navigate(location.pathname, { replace: true, state: {} })
-      }
-    }, [location, navigate])
-  })
+  // 이미 로그인된 유저는 홈으로 리다이렉트
+  useEffect(() => {
+    if (!isLoading && user) navigate('/', { replace: true })
+  }, [user, isLoading, navigate])
+
+  useEffect(() => {
+    if (location.state?.message) {
+      setError(location.state.message)
+      navigate(location.pathname, { replace: true, state: {} })
+    }
+  }, [location, navigate])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -34,8 +37,8 @@ export default function LoginPage() {
 
     try {
       setLoading(true)
-      await login(email.trim(), password)
-      const stored = localStorage.getItem('bitman_auth_user')
+      await login(email.trim(), password, rememberMe)
+      const stored = localStorage.getItem('bitman_auth_user') || sessionStorage.getItem('bitman_auth_user')
       const userData = stored ? JSON.parse(stored) : null
       if (userData?.role === 'ADMIN') {
         navigate('/', { replace: true })
@@ -100,6 +103,23 @@ export default function LoginPage() {
               delay={0.15}
               icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>}
             />
+
+            {/* Remember me */}
+            <label className="flex items-center gap-2.5 cursor-pointer py-0.5 animate-slide-up" style={{ animationDelay: '0.18s', animationFillMode: 'backwards' }}>
+              <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} className="sr-only" />
+              <span
+                className="flex-shrink-0 w-[18px] h-[18px] rounded-[5px] flex items-center justify-center transition-all duration-200"
+                style={{
+                  backgroundColor: rememberMe ? 'rgba(255,215,0,0.15)' : 'rgba(255,255,255,0.06)',
+                  border: `1.5px solid ${rememberMe ? 'rgba(255,215,0,0.5)' : 'rgba(255,255,255,0.15)'}`,
+                }}
+              >
+                {rememberMe && (
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#FFD700" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                )}
+              </span>
+              <span className="text-[13px]" style={{ color: 'var(--text-secondary)' }}>로그인 유지</span>
+            </label>
 
             {/* Submit */}
             <div className="mt-1">
