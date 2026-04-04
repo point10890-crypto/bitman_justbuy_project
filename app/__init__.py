@@ -14,6 +14,15 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+class ApiException(Exception):
+    """Spring Boot ApiException과 유사한 Flask용 예외 클래스"""
+
+    def __init__(self, message, status_code=400):
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+
+
 class SafeJSONProvider(DefaultJSONProvider):
     """NaN/Infinity → null 변환 (JSON 표준 준수)"""
     def dumps(self, obj, **kwargs):
@@ -179,7 +188,37 @@ def create_app(config=None):
                 f"  Registered ({len(registered)}): {sorted(list(registered))[:15]}..."
             )
 
-    # ── Global Error Handler — 내부 정보 노출 방지 ──
+    # ── Global Error Handler — Spring Boot 스타일 표준화 ──
+    @app.errorhandler(ApiException)
+    def handle_api_exception(e):
+        logger.warning("API exception: %s", e.message)
+        return jsonify({'error': e.message}), e.status_code
+
+    @app.errorhandler(400)
+    def handle_bad_request(e):
+        logger.warning("Bad request: %s", e)
+        return jsonify({'error': '잘못된 요청입니다.'}), 400
+
+    @app.errorhandler(401)
+    def handle_unauthorized(e):
+        logger.warning("Unauthorized access: %s", e)
+        return jsonify({'error': '인증이 필요합니다.'}), 401
+
+    @app.errorhandler(403)
+    def handle_forbidden(e):
+        logger.warning("Forbidden access: %s", e)
+        return jsonify({'error': '접근 권한이 없습니다.'}), 403
+
+    @app.errorhandler(404)
+    def handle_not_found(e):
+        logger.warning("Not found: %s", e)
+        return jsonify({'error': '요청한 리소스를 찾을 수 없습니다.'}), 404
+
+    @app.errorhandler(429)
+    def handle_too_many_requests(e):
+        logger.warning("Too many requests: %s", e)
+        return jsonify({'error': '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.'}), 429
+
     @app.errorhandler(500)
     def handle_internal_error(e):
         logger.error("Internal server error: %s", e, exc_info=True)

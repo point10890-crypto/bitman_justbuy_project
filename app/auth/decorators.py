@@ -1,59 +1,56 @@
 """Auth decorators for Flask routes"""
 
-import hashlib
-import hmac
 import os
-import time
+import PyJWT as jwt
 from functools import wraps
 from flask import request, jsonify, current_app
 from app.models import db
 from app.models.user import User
 
-# Simple token: sha256(user_id + secret + expiry)
+# JWT 설정
+JWT_SECRET = os.getenv('JWT_SECRET', 'bitman-justbuy-secret-key-change-in-production')
+JWT_ALGORITHM = 'HS512'
 TOKEN_EXPIRY = 86400 * 7  # 7 days
 
 
-def _get_secret():
-    return current_app.config.get('SECRET_KEY', 'marketflow-default-secret')
-
-
-def generate_token(user_id: int) -> str:
-    expiry = int(time.time()) + TOKEN_EXPIRY
-    payload = f"{user_id}:{expiry}"
-    sig = hmac.new(
-        _get_secret().encode(), payload.encode(), hashlib.sha256
-    ).hexdigest()[:32]
-    return f"{payload}:{sig}"
+def generate_token(user_id: str, email: str, role: str) -> str:
+    """Spring Boot와 동일한 JWT 토큰 생성"""
+    import datetime
+    payload = {
+        'sub': str(user_id),
+        'email': email,
+        'role': role,
+        'iat': datetime.datetime.utcnow(),
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(seconds=TOKEN_EXPIRY)
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
 def validate_token(token: str):
-    """Returns user_id if valid, None otherwise."""
+    """JWT 토큰 검증 및 페이로드 반환"""
     try:
-        parts = token.split(':')
-        if len(parts) != 3:
-            return None
-        user_id, expiry, sig = int(parts[0]), int(parts[1]), parts[2]
-        if time.time() > expiry:
-            return None
-        expected = hmac.new(
-            _get_secret().encode(), f"{user_id}:{expiry}".encode(), hashlib.sha256
-        ).hexdigest()[:32]
-        if not hmac.compare_digest(sig, expected):
-            return None
-        return user_id
-    except (ValueError, IndexError):
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
         return None
 
 
 def _get_current_user():
+    """현재 사용자 조회 (JWT 기반)"""
     auth = request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return None
     token = auth[7:]
-    user_id = validate_token(token)
-    if user_id is None:
+    payload = validate_token(token)
+    if payload is None:
         return None
-    return db.session.get(User, user_id)
+    try:
+        user_id = payload['sub']
+        return db.session.get(User, user_id)
+    except (KeyError, ValueError):
+        return None
 
 
 def _auth_disabled():
