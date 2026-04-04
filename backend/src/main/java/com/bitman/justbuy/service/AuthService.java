@@ -42,19 +42,30 @@ public class AuthService {
     @PostConstruct
     public void ensureAdminExistsOnStartup() {
         if (adminEmail == null || adminEmail.isBlank()) return;
-        // Only create admin if not exists — never reset existing password
-        if (userRepository.findByEmail(adminEmail.trim()).isEmpty()) {
-            String defaultPassword = System.getenv("ADMIN_DEFAULT_PASSWORD");
-            if (defaultPassword == null || defaultPassword.isBlank()) {
-                defaultPassword = "Admin1234";
-                log.warn("ADMIN_DEFAULT_PASSWORD not set, using default. Change in production!");
-            }
+
+        String defaultPassword = System.getenv("ADMIN_DEFAULT_PASSWORD");
+        if (defaultPassword == null || defaultPassword.isBlank()) {
+            defaultPassword = "Admin1234";
+            log.warn("ADMIN_DEFAULT_PASSWORD not set, using default. Change in production!");
+        }
+
+        var existing = userRepository.findByEmail(adminEmail.trim());
+        if (existing.isEmpty()) {
             var admin = new User(adminEmail.trim(), "Admin", passwordEncoder.encode(defaultPassword));
             admin.setRole(Role.ADMIN);
             admin.setSubscription(SubscriptionStatus.PRO);
             admin.setSubscriptionEndDate(null);
             userRepository.save(admin);
             log.info("Admin account created: {}", adminEmail.trim());
+        } else {
+            // 기존 admin 비밀번호를 ADMIN_DEFAULT_PASSWORD로 동기화
+            var admin = existing.get();
+            admin.setPasswordHash(passwordEncoder.encode(defaultPassword));
+            admin.setRole(Role.ADMIN);
+            admin.setSubscription(SubscriptionStatus.PRO);
+            admin.setSubscriptionEndDate(null);
+            userRepository.save(admin);
+            log.info("Admin password synced from ADMIN_DEFAULT_PASSWORD: {}", adminEmail.trim());
         }
     }
 
