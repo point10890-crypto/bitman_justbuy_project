@@ -36,10 +36,18 @@ public class AnalysisService {
         "\uc218\uae09\ubd84\uc11d", 3L * 60 + 50     // 3시간 50분 (10:00→13:50, 14:00→17:50)
     );
 
+    /** 라이브 분석 서버 캐시 TTL (30분) */
+    private static final long LIVE_CACHE_TTL_MS = 30L * 60 * 1000;
+
     private final MultiAgentOrchestrator orchestrator;
     private final ObjectMapper mapper;
     private final Path dataDir;
     private final Set<String> runningAnalyses = ConcurrentHashMap.newKeySet();
+    private final Map<String, CachedResult> liveCache = new ConcurrentHashMap<>();
+
+    private record CachedResult(AnalysisResponse response, long timestamp) {
+        boolean isExpired() { return System.currentTimeMillis() - timestamp > LIVE_CACHE_TTL_MS; }
+    }
 
     public AnalysisService(MultiAgentOrchestrator orchestrator, ObjectMapper mapper,
                            @Value("${bitman.storage.data-dir:./data}") String dataDir) {
@@ -87,8 +95,21 @@ public class AnalysisService {
         }
     }
 
+    /** 캐시된 라이브 분석 결과 조회 (컨트롤러에서 호출) */
+    public AnalysisResponse getCachedLive(String query, String mode) {
+        String key = mode + ":" + query;
+        CachedResult cached = liveCache.get(key);
+        if (cached != null && !cached.isExpired()) {
+            log.info("[Cache] 라이브 캐시 적중: {} ({}분 전)", key,
+                (System.currentTimeMillis() - cached.timestamp) / 60000);
+            return cached.response;
+        }
+        return null;
+    }
+
     public AnalysisResponse runLiveAnalysis(String query, String mode) {
         String key = mode + ":" + query;
+
         if (!runningAnalyses.add(key)) {
             throw new DuplicateAnalysisException("\ub3d9\uc77c\ud55c \ubd84\uc11d\uc774 \uc774\ubbf8 \uc9c4\ud589 \uc911\uc785\ub2c8\ub2e4.");
         }
@@ -96,6 +117,9 @@ public class AnalysisService {
         try {
             AnalysisResponse result = orchestrator.runAnalysis(query, mode);
             saveAnalysis(mode, result);
+            liveCache.put(key, new CachedResult(result, System.currentTimeMillis()));
+            // 만료된 캐시 정리
+            liveCache.entrySet().removeIf(e -> e.getValue().isExpired());
             return result;
         } finally {
             runningAnalyses.remove(key);

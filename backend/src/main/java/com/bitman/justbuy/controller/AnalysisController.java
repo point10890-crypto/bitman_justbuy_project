@@ -82,7 +82,7 @@ public class AnalysisController {
     );
 
     @PostMapping("/live")
-    public ResponseEntity<Map<String, String>> liveAnalysis(@AuthenticationPrincipal UUID userId,
+    public ResponseEntity<?> liveAnalysis(@AuthenticationPrincipal UUID userId,
                                                               @Valid @RequestBody AnalysisRequest request) {
         requireProSubscription(userId);
 
@@ -94,6 +94,13 @@ public class AnalysisController {
         if (SCHEDULED_ONLY_MODES.contains(request.mode())) {
             throw new ApiException(HttpStatus.BAD_REQUEST,
                 "'" + request.mode() + "'는 예약 분석 전용입니다. 스케줄 실행 결과를 확인해 주세요.");
+        }
+
+        // 서버 캐시 확인 (30분 TTL) — 캐시 적중 시 AI 호출 없이 즉시 반환
+        AnalysisResponse cached = analysisService.getCachedLive(request.query(), request.mode());
+        if (cached != null) {
+            log.info("[API] Cache hit: mode={}, query={}", request.mode(), request.query());
+            return ResponseEntity.ok(cached);
         }
 
         log.info("[API] Live analysis started: mode={}, query={}", request.mode(), request.query());
