@@ -784,10 +784,13 @@ public class MultiAgentOrchestrator {
         }
     }
 
+    @org.springframework.beans.factory.annotation.Value("${bitman.flask.base-url:http://localhost:5001}")
+    private String flaskBaseUrl;
+
     /** Flask API에서 시장 레짐(Market Gate) 상태를 가져온다. 실패 시 YELLOW 기본값. */
     private String fetchMarketGate() {
         try {
-            String url = "http://localhost:5001/api/kr/market-gate";
+            String url = flaskBaseUrl + "/api/kr/market-gate";
             ResponseEntity<String> resp = restTemplate.getForEntity(url, String.class);
             if (resp.getStatusCode().is2xxSuccessful() && resp.getBody() != null) {
                 JsonNode root = objectMapper.readTree(resp.getBody());

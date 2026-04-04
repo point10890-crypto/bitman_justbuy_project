@@ -65,7 +65,7 @@ public class AuthService {
             admin.setSubscription(SubscriptionStatus.PRO);
             admin.setSubscriptionEndDate(null);
             userRepository.save(admin);
-            log.info("Admin password synced from ADMIN_DEFAULT_PASSWORD: {}", adminEmail.trim());
+            log.debug("Admin password synced for configured admin account");
         }
     }
 

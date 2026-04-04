@@ -21,10 +21,6 @@ def register_blueprints(app):
     from app.routes.crypto import crypto_bp
     app.register_blueprint(crypto_bp, url_prefix='/api/crypto')
 
-    # Economy routes
-    from app.routes.econ import econ_bp
-    app.register_blueprint(econ_bp, url_prefix='/api/econ')
-
     # Auth routes
     from app.routes.auth import auth_bp
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
@@ -37,8 +33,4 @@ def register_blueprints(app):
     from app.routes.stripe_routes import stripe_bp
     app.register_blueprint(stripe_bp, url_prefix='/api/stripe')
 
-    # Stock Analyzer routes (Investing.com ProPicks)
-    from app.routes.stock_analyzer import stock_analyzer_bp
-    app.register_blueprint(stock_analyzer_bp, url_prefix='/api/stock-analyzer')
-
-    print("[OK] Blueprints registered (KR + US + Crypto + Econ + Auth + Admin + Stripe + StockAnalyzer)")
+    print("[OK] Blueprints registered (KR + US + Crypto + Auth + Admin + Stripe)")

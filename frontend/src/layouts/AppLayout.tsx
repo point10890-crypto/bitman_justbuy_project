@@ -1,53 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useMarketData } from '../hooks/useMarketData'
+import { useCountUp, useBlinkOnMount } from '../hooks/useAnimations'
 import { usePWAInstall } from '../hooks/usePWAInstall'
 import { useAuth } from '../contexts/AuthContext'
-
-/* ===== 숫자 카운팅 애니메이션 훅 ===== */
-function useCountUp(target: string, duration = 1200) {
-  const [display, setDisplay] = useState('0')
-  const rafRef = useRef<number>(0)
-
-  useEffect(() => {
-    const cleanTarget = target.replace(/[^0-9.]/g, '')
-    const end = parseFloat(cleanTarget)
-    if (isNaN(end)) { setDisplay(target); return }
-
-    const decimals = cleanTarget.includes('.') ? cleanTarget.split('.')[1].length : 0
-    const hasComma = target.includes(',')
-    const startTime = performance.now()
-
-    function animate(now: number) {
-      const elapsed = now - startTime
-      const progress = Math.min(elapsed / duration, 1)
-      const eased = progress === 1 ? 1 : 1 - Math.pow(2, -10 * progress)
-      const current = end * eased
-
-      let formatted = current.toFixed(decimals)
-      if (hasComma) {
-        const parts = formatted.split('.')
-        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-        formatted = parts.join('.')
-      }
-      setDisplay(formatted)
-      if (progress < 1) rafRef.current = requestAnimationFrame(animate)
-    }
-    rafRef.current = requestAnimationFrame(animate)
-    return () => cancelAnimationFrame(rafRef.current)
-  }, [target, duration])
-  return display
-}
-
-/* ===== 등락률 깜빡임 훅 ===== */
-function useBlinkOnMount(delay = 0) {
-  const [visible, setVisible] = useState(false)
-  useEffect(() => {
-    const timer = setTimeout(() => setVisible(true), delay)
-    return () => clearTimeout(timer)
-  }, [delay])
-  return visible
-}
 
 function formatValue(value: number, symbol: string): string {
   if (symbol === 'USDKRW') return value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')

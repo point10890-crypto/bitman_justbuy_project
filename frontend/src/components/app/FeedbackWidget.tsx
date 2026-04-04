@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { API_BASE } from '../../api/config'
+import { getStoredToken } from '../../contexts/AuthContext'
 
 interface FeedbackWidgetProps {
   mode: string
@@ -37,7 +38,7 @@ export default function FeedbackWidget({ mode, analysisId, stockPicks }: Feedbac
     }
 
     try {
-      const token = localStorage.getItem('auth_token')
+      const token = getStoredToken()
       await fetch(`${API_BASE}/api/feedback`, {
         method: 'POST',
         headers: {

@@ -1,7 +1,7 @@
 """Auth decorators for Flask routes"""
 
 import os
-import PyJWT as jwt
+import jwt
 from functools import wraps
 from flask import request, jsonify, current_app
 from app.models import db

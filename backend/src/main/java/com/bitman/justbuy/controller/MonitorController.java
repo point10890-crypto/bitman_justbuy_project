@@ -218,15 +218,15 @@ public class MonitorController {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("name", name);
 
+        HttpURLConnection conn = null;
         try {
-            HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+            conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(8000);
             conn.setReadTimeout(8000);
             conn.setInstanceFollowRedirects(true);
             int code = conn.getResponseCode();
             long latency = System.currentTimeMillis() - start;
-            conn.disconnect();
 
             result.put("status", (code >= 200 && code < 400) ? "healthy" : "degraded");
             result.put("latencyMs", latency);
@@ -234,6 +234,8 @@ public class MonitorController {
             result.put("status", "down");
             result.put("latencyMs", System.currentTimeMillis() - start);
             result.put("error", e.getMessage() != null ? e.getMessage() : "unknown");
+        } finally {
+            if (conn != null) conn.disconnect();
         }
 
         return result;
