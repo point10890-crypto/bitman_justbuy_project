@@ -4,6 +4,9 @@ import com.bitman.justbuy.ai.agent.AiAgent;
 import com.bitman.justbuy.service.TrackRecordService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -11,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.lang.management.ManagementFactory;
 import java.net.HttpURLConnection;
 import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -87,7 +91,8 @@ public class MonitorController {
 
     /** GET /api/monitor/health — 종합 헬스체크 */
     @GetMapping("/health")
-    public Map<String, Object> fullHealthCheck() {
+    @Cacheable(value = "health", key = "'fullHealthCheck'")
+    public ResponseEntity<Map<String, Object>> fullHealthCheck() {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("timestamp", Instant.now().toString());
 
@@ -189,7 +194,10 @@ public class MonitorController {
             result.put("status", "unknown");
         }
 
-        return result;
+        // 5분 캐시 적용
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.maxAge(Duration.ofMinutes(5)))
+                .body(result);
     }
 
     /** GET /api/monitor/logs — 분석 실행 로그 */

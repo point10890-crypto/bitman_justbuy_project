@@ -12,4 +12,6 @@ COPY --from=build /app/build/libs/*.jar app.jar
 RUN mkdir -p /app/data
 EXPOSE 8080
 ENV H2_CONSOLE_ENABLED=false
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENTRYPOINT ["java", "-Dfile.encoding=UTF-8", "-Dsun.jvm.stdout.encoding=UTF-8", "-Dsun.jvm.stderr.encoding=UTF-8", "-jar", "app.jar"]
