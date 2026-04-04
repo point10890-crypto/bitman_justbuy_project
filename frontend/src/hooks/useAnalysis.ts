@@ -24,7 +24,7 @@ export function useAnalysis() {
       const token = getStoredToken() || undefined
 
       // 컨셉 모드(BREAKOUT/FLOW_LEADER/CATALYST_BURST/REVERSAL_EDGE)는 라이브 분석으로 처리
-      const LIVE_MODES = new Set(['BREAKOUT', 'FLOW_LEADER', 'CATALYST_BURST', 'REVERSAL_EDGE', '분석해줘'])
+      const LIVE_MODES = new Set(['BREAKOUT', 'FLOW_LEADER', 'CATALYST_BURST', 'REVERSAL_EDGE', '분석해줘', '수급분석'])
 
       // 프리컴퓨트 모드(오늘뭐사, 수급분석, 종가매매, 스윙매매)는 항상 서버 최신 데이터 확인
       if (mode && !LIVE_MODES.has(mode)) {

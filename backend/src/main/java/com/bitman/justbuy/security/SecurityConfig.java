@@ -48,14 +48,17 @@ public class SecurityConfig {
                 .requestMatchers(new AntPathRequestMatcher("/manifest.json")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/sw.js")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/favicon.ico")).permitAll()
-                // SPA client-side routes (forwarded to index.html)
+                // SPA client-side routes (forwarded to index.html by SpaWebConfig)
                 .requestMatchers(new AntPathRequestMatcher("/login")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/register")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/landing")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/home")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/supply")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/my")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/subscribe")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/admin")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/admin/**")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/search")).permitAll()
 
                 // Public API
                 .requestMatchers(new AntPathRequestMatcher("/api/health")).permitAll()

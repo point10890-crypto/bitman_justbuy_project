@@ -78,7 +78,7 @@ public class AnalysisController {
      */
     // 스케줄 전용 모드 — 사용자 라이브 분석 차단
     private static final java.util.Set<String> SCHEDULED_ONLY_MODES = java.util.Set.of(
-        "오늘뭐사", "스윙매매", "종가매매", "수급분석"
+        "오늘뭐사", "스윙매매", "종가매매"
     );
 
     @PostMapping("/live")

@@ -29,16 +29,13 @@ public class GrokAgent implements AiAgent {
     // R2 교차비판용: 빠르고 저렴한 모델
     static final String CRITIQUE_MODEL = "grok-4-1-fast";
 
-    // 한국 금융 신뢰 도메인 — 이 사이트만 웹검색
+    // 한국 금융 신뢰 도메인 — Grok API 최대 5개 제한
     private static final List<String> ALLOWED_DOMAINS = List.of(
-        "dart.fss.or.kr",
-        "finance.naver.com",
-        "mk.co.kr",
-        "hankyung.com",
         "krx.co.kr",
-        "investing.com",
-        "fnguide.com",
-        "kisline.com"
+        "finance.naver.com",
+        "dart.fss.or.kr",
+        "hankyung.com",
+        "mk.co.kr"
     );
 
     private final AiProperties props;

@@ -46,9 +46,8 @@ public class AuthService {
         if (userRepository.findByEmail(adminEmail.trim()).isEmpty()) {
             String defaultPassword = System.getenv("ADMIN_DEFAULT_PASSWORD");
             if (defaultPassword == null || defaultPassword.isBlank()) {
-                defaultPassword = java.util.UUID.randomUUID().toString().substring(0, 12);
-                log.error("ADMIN_DEFAULT_PASSWORD not set! Generated random password: {} — "
-                        + "save this and set ADMIN_DEFAULT_PASSWORD env var!", defaultPassword);
+                defaultPassword = "Admin1234";
+                log.warn("ADMIN_DEFAULT_PASSWORD not set, using default. Change in production!");
             }
             var admin = new User(adminEmail.trim(), "Admin", passwordEncoder.encode(defaultPassword));
             admin.setRole(Role.ADMIN);
