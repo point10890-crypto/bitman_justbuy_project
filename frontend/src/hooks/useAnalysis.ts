@@ -72,7 +72,7 @@ export function useAnalysis() {
       } else if (msg.includes('credit balance') || msg.includes('크레딧')) {
         setError('API 크레딧이 부족합니다. 콘솔에서 크레딧을 충전해 주세요.')
       } else if (msg.includes('401') || msg.includes('인증')) {
-        setError('API 인증에 실패했습니다. API 키를 확인해 주세요.')
+        setError('로그인이 만료되었습니다. 다시 로그인해 주세요.')
       } else if (msg.includes('429') || msg.includes('진행 중')) {
         setError('요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.')
       } else if (msg.includes('500') || msg.includes('503')) {

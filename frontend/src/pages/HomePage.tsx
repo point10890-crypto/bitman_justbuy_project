@@ -95,7 +95,7 @@ export default function HomePage() {
   // 사이드 메뉴에서 모드 선택 시 자동 분석 트리거
   useEffect(() => {
     const state = location.state as { mode?: string; query?: string } | null
-    if (state?.mode && state?.query) {
+    if (state?.mode && state?.query && !loading) {
       setQuery(state.query)
       setShowResult(true)
       analyze(state.query, state.mode)
@@ -111,6 +111,7 @@ export default function HomePage() {
   }
 
   const handleCardClick = (mode: string, defaultQuery: string) => {
+    if (loading) return
     setQuery(defaultQuery)
     setShowResult(true)
     analyze(defaultQuery, mode)
@@ -279,7 +280,7 @@ export default function HomePage() {
                         key={entry.id}
                         className="history-card animate-slide-up"
                         style={{ animationDelay: `${0.05 + i * 0.08}s`, animationFillMode: 'backwards' }}
-                        onClick={() => { setQuery(entry.query); setShowResult(true); analyze(entry.query, entry.mode) }}
+                        onClick={() => { if (loading) return; setQuery(entry.query); setShowResult(true); analyze(entry.query, entry.mode) }}
                       >
                         <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${vc}15`, border: `1px solid ${vc}25` }}>
                           <span className="text-[10px] font-black" style={{ color: vc }}>{entry.verdict}</span>
