@@ -96,52 +96,62 @@ public class AdminController {
 
     @GetMapping("/system/status")
     public ResponseEntity<Map<String, Object>> getSystemStatus() {
+        long startMs = System.currentTimeMillis();
         Map<String, Object> result = new LinkedHashMap<>();
 
         // 서버 상태
         result.put("status", "ok");
         result.put("timestamp", Instant.now().toString());
 
-        // AI 에이전트 상태
+        // AI 엔진 상태 — 프론트엔드가 engines: [{name, online}] 배열을 기대
         try {
-            Map<String, Object> agentStatus = new LinkedHashMap<>();
+            List<Map<String, Object>> engines = new java.util.ArrayList<>();
             for (AiAgent agent : agents) {
-                agentStatus.put(agent.name(), Map.of("available", agent.isAvailable()));
+                engines.add(Map.of("name", agent.name(), "online", agent.isAvailable()));
             }
-            result.put("agents", agentStatus);
+            result.put("engines", engines);
             result.put("totalAgents", agents.size());
             result.put("availableAgents", agents.stream().filter(AiAgent::isAvailable).count());
         } catch (Exception e) {
-            result.put("agents", Map.of());
+            result.put("engines", List.of());
             result.put("totalAgents", 0);
             result.put("availableAgents", 0);
         }
 
-        // 캐시 상태
+        // 캐시 상태 — 프론트엔드가 cache: [{mode, status, lastUpdated, elapsed}] 배열을 기대
         try {
-            result.put("cache", analysisService.getCacheStatus());
+            Map<String, Map<String, Object>> rawCache = analysisService.getCacheStatus();
+            List<Map<String, Object>> cacheList = new java.util.ArrayList<>();
+            for (var entry : rawCache.entrySet()) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("mode", entry.getKey());
+                Map<String, Object> v = entry.getValue();
+                boolean exists = Boolean.TRUE.equals(v.get("exists"));
+                boolean valid = Boolean.TRUE.equals(v.get("valid"));
+                item.put("status", !exists ? "missing" : valid ? "valid" : "expired");
+                item.put("lastUpdated", v.getOrDefault("updatedAt", null));
+                long elapsedMin = v.get("elapsedMinutes") instanceof Number n ? n.longValue() : -1;
+                item.put("elapsed", elapsedMin >= 0 ? elapsedMin + "분 전" : null);
+                cacheList.add(item);
+            }
+            result.put("cache", cacheList);
         } catch (Exception e) {
-            result.put("cache", Map.of("error", e.getMessage() != null ? e.getMessage() : "unknown"));
+            result.put("cache", List.of());
         }
 
         // KIS API 상태
         try {
             boolean kisAvailable = kisApiService != null && kisApiService.isAvailable();
             result.put("kisAvailable", kisAvailable);
-            if (kisAvailable) {
-                // 실제 토큰 발급 및 간단 호출 테스트
-                String testRankings = kisApiService.fetchAllRankings();
-                boolean kisDataOk = testRankings.length() > 200; // 실제 데이터가 있으면 200자 이상
-                result.put("kisDataOk", kisDataOk);
-                result.put("kisDataLength", testRankings.length());
-            }
         } catch (Exception e) {
             result.put("kisAvailable", false);
-            result.put("kisError", e.getMessage());
         }
 
         // 스케줄러 상태
         result.put("schedulerEnabled", precomputeScheduler != null);
+
+        // 응답 시간
+        result.put("responseTime", System.currentTimeMillis() - startMs);
 
         return ResponseEntity.ok(result);
     }
