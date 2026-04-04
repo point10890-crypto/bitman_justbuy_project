@@ -40,7 +40,24 @@ public class SecurityConfig {
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()))
             .authorizeHttpRequests(auth -> auth
-                // Public
+                // Static files + SPA routes (non-API paths)
+                .requestMatchers(new AntPathRequestMatcher("/")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/index.html")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/assets/**")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/icons/**")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/manifest.json")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/sw.js")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/favicon.ico")).permitAll()
+                // SPA client-side routes (forwarded to index.html)
+                .requestMatchers(new AntPathRequestMatcher("/login")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/register")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/landing")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/supply")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/my")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/subscribe")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/admin")).permitAll()
+
+                // Public API
                 .requestMatchers(new AntPathRequestMatcher("/api/health")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/api/market/**")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/api/auth/register"),
@@ -48,6 +65,10 @@ public class SecurityConfig {
                 .requestMatchers(new AntPathRequestMatcher("/api/analysis/**")).authenticated()
                 .requestMatchers(new AntPathRequestMatcher("/h2-console/**")).hasRole("ADMIN")
                 .requestMatchers(new AntPathRequestMatcher("/error")).permitAll()
+
+                // Swagger/OpenAPI
+                .requestMatchers(new AntPathRequestMatcher("/swagger-ui/**")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/v3/api-docs/**")).permitAll()
 
                 // Monitor: ping은 public, health/logs는 관리자 전용
                 .requestMatchers(new AntPathRequestMatcher("/api/monitor/ping")).permitAll()
@@ -60,6 +81,7 @@ public class SecurityConfig {
                 .requestMatchers(new AntPathRequestMatcher("/api/auth/me")).authenticated()
                 .requestMatchers(new AntPathRequestMatcher("/api/auth/me/**")).authenticated()
                 .requestMatchers(new AntPathRequestMatcher("/api/subscription/**")).authenticated()
+                .requestMatchers(new AntPathRequestMatcher("/api/feedback/**")).authenticated()
 
                 .anyRequest().authenticated()
             )

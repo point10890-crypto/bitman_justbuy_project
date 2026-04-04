@@ -24,10 +24,11 @@ const SYMBOLS = [
 /** 개별 심볼 chart API 조회 (2일 범위로 전일 종가 정확히 확보) */
 async function fetchChart(yahoo: string): Promise<{ value: number; prevClose: number } | null> {
   try {
-    // 배포 환경: 백엔드 프록시, 로컬: Vite 프록시
+    // Spring Boot 백엔드 프록시 경유 (same-origin)
+    const range = 'range=2d&interval=1d'
     const url = API_BASE
-      ? `${API_BASE}/api/market/chart/${encodeURIComponent(yahoo)}?range=2d&interval=1d`
-      : `/api/yahoo/v8/finance/chart/${encodeURIComponent(yahoo)}?range=2d&interval=1d`
+      ? `${API_BASE}/api/market/chart/${encodeURIComponent(yahoo)}?${range}`
+      : `/api/market/chart/${encodeURIComponent(yahoo)}?${range}`
     const res = await fetch(url)
     if (!res.ok) return null
     const json = await res.json()
