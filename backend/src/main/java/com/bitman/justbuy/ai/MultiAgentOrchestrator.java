@@ -487,14 +487,19 @@ public class MultiAgentOrchestrator {
                 Map<String, String> fetchedPrices = marketDataService.fetchStockPrices(codes);
                 realPrices.putAll(fetchedPrices);
 
-                // 1) stockPick 현재가 교정
+                // 1) stockPick 현재가 교정 + 목표가/손절가 이상치 검증
                 List<StockPick> corrected = new ArrayList<>();
                 for (StockPick pick : stockPicks) {
                     String realPrice = realPrices.get(pick.code());
-                    corrected.add(realPrice != null
-                        ? new StockPick(pick.name(), pick.code(), realPrice,
-                            pick.targetPrice(), pick.stopLoss(), pick.action(), pick.reason())
-                        : pick);
+                    if (realPrice != null) {
+                        long current = parseKoreanPrice(realPrice);
+                        String fixedTarget = validatePrice(pick.targetPrice(), current, pick.name(), "목표가");
+                        String fixedStop = validatePrice(pick.stopLoss(), current, pick.name(), "손절가");
+                        corrected.add(new StockPick(pick.name(), pick.code(), realPrice,
+                            fixedTarget, fixedStop, pick.action(), pick.reason()));
+                    } else {
+                        corrected.add(pick);
+                    }
                 }
                 stockPicks = corrected;
 
@@ -536,6 +541,52 @@ public class MultiAgentOrchestrator {
                         "$1$2" + realPrice + "\uc6d0");
                 }
 
+                // 2-b) 본문 내 목표가/손절가 이상치 교정
+                for (StockPick pick : stockPicks) {
+                    String realPrice = realPrices.get(pick.code());
+                    if (realPrice == null || pick.name() == null) continue;
+                    long current = parseKoreanPrice(realPrice);
+                    if (current <= 0) continue;
+                    String nameEsc2 = java.util.regex.Pattern.quote(pick.name());
+
+                    // 기술적 타겟/목표가 패턴: "기술적 타겟: XX,XXX원" 또는 "목표가: XX,XXX원"
+                    String targetPattern = "(" + nameEsc2 + "[^\\n]{0,200}?)"
+                        + "(\uae30\uc220\uc801\\s*\ud0c0(?:\ucf13|\uac9f)\\s*(?::\\s*)?|"
+                        + "\ubaa9\ud45c(?:\uac00)?\\s*(?::\\s*)?)"
+                        + "(?:\uc57d\\s*)?([0-9,]+)(?:\\s*\uc6d0)?";
+                    java.util.regex.Matcher tm = java.util.regex.Pattern.compile(targetPattern).matcher(finalContent);
+                    StringBuffer tbuf = new StringBuffer();
+                    while (tm.find()) {
+                        long val = parseKoreanPrice(tm.group(3));
+                        double r = (double) val / current;
+                        if (val > 0 && (r < 0.5 || r > 2.0)) {
+                            long fixed = Math.round(current * 1.05);
+                            log.warn("[ContentFix] {} 본문 목표가 교정: {}→{}", pick.name(), val, fixed);
+                            tm.appendReplacement(tbuf, tm.group(1) + tm.group(2) + String.format("%,d", fixed) + "원");
+                        }
+                    }
+                    tm.appendTail(tbuf);
+                    finalContent = tbuf.toString();
+
+                    // 손절 패턴: "손절: XX,XXX원" 또는 "손절가: XX,XXX원"
+                    String stopPattern = "(" + nameEsc2 + "[^\\n]{0,200}?)"
+                        + "(\uc190\uc808(?:\uac00)?\\s*(?::\\s*)?)"
+                        + "(?:\uc57d\\s*)?([0-9,]+)(?:\\s*\uc6d0)?";
+                    java.util.regex.Matcher sm = java.util.regex.Pattern.compile(stopPattern).matcher(finalContent);
+                    StringBuffer sbuf = new StringBuffer();
+                    while (sm.find()) {
+                        long val = parseKoreanPrice(sm.group(3));
+                        double r = (double) val / current;
+                        if (val > 0 && (r > 1.0 || r < 0.5)) {
+                            long fixed = Math.round(current * 0.95);
+                            log.warn("[ContentFix] {} 본문 손절가 교정: {}→{}", pick.name(), val, fixed);
+                            sm.appendReplacement(sbuf, sm.group(1) + sm.group(2) + String.format("%,d", fixed) + "원");
+                        }
+                    }
+                    sm.appendTail(sbuf);
+                    finalContent = sbuf.toString();
+                }
+
                 // 3) 실시간 검증 현재가 푸터 추가
                 StringBuilder footer = new StringBuilder();
                 for (StockPick pick : stockPicks) {
@@ -574,6 +625,46 @@ public class MultiAgentOrchestrator {
         }
 
         return response;
+    }
+
+    /** 한국식 가격 문자열 → long 변환 ("191,100" → 191100, "약 36,000원" → 36000) */
+    private static long parseKoreanPrice(String priceStr) {
+        if (priceStr == null || priceStr.isBlank()) return 0;
+        String digits = priceStr.replaceAll("[^0-9]", "");
+        if (digits.isEmpty()) return 0;
+        try { return Long.parseLong(digits); } catch (NumberFormatException e) { return 0; }
+    }
+
+    /**
+     * 목표가/손절가가 현재가 대비 비정상적이면 자동 보정.
+     * - 매수 목표가가 현재가의 50% 미만 또는 200% 초과 → "현재가 ±N%" 기반 보정
+     * - 손절가가 현재가보다 높거나 50% 미만 → 보정
+     */
+    private String validatePrice(String priceStr, long currentPrice, String stockName, String label) {
+        if (priceStr == null || currentPrice <= 0) return priceStr;
+        long price = parseKoreanPrice(priceStr);
+        if (price <= 0) return priceStr;
+
+        double ratio = (double) price / currentPrice;
+
+        if (label.contains("목표")) {
+            // 목표가: 현재가의 50%~200% 범위 밖이면 비정상
+            if (ratio < 0.5 || ratio > 2.0) {
+                long fixed = Math.round(currentPrice * 1.05); // 기본 +5%
+                log.warn("[PriceValidation] {} {} 이상치 보정: {}→{} (현재가: {})",
+                    stockName, label, price, fixed, currentPrice);
+                return String.format("%,d", fixed);
+            }
+        } else if (label.contains("손절")) {
+            // 손절가: 현재가보다 높거나 50% 미만이면 비정상
+            if (ratio > 1.0 || ratio < 0.5) {
+                long fixed = Math.round(currentPrice * 0.95); // 기본 -5%
+                log.warn("[PriceValidation] {} {} 이상치 보정: {}→{} (현재가: {})",
+                    stockName, label, price, fixed, currentPrice);
+                return String.format("%,d", fixed);
+            }
+        }
+        return priceStr;
     }
 
     /**
