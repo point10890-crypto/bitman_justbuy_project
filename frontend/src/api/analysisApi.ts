@@ -165,7 +165,7 @@ async function pollJob(jobId: string, token?: string, maxWaitMs = 180_000): Prom
 
 /** 실시간 멀티에이전트 분석 트리거 (비동기 폴링) */
 export async function fetchLiveAnalysis(query: string, mode: string, token?: string): Promise<AnalysisResponse> {
-  const headers: HeadersInit = { 'Content-Type': 'application/json' }
+  const headers: HeadersInit = { 'Content-Type': 'application/json; charset=utf-8' }
   if (token) headers['Authorization'] = `Bearer ${token}`
 
   // 1단계: 작업 시작 → jobId 받기

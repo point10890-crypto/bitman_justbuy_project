@@ -75,7 +75,7 @@ export function useAnalysis() {
         setError('로그인이 만료되었습니다. 다시 로그인해 주세요.')
       } else if (msg.includes('429') || msg.includes('진행 중')) {
         setError('요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.')
-      } else if (msg.includes('500') || msg.includes('503')) {
+      } else if (msg.includes('500') || msg.includes('503') || msg.includes('서버 오류')) {
         setError('서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.')
       } else {
         setError(msg)
