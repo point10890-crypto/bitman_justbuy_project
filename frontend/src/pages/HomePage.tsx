@@ -115,7 +115,7 @@ export default function HomePage() {
                   <span className="text-lg">🚀</span>
                   <div>
                     <div className="flex items-baseline gap-1">
-                      <span className="font-bold text-[13px]" style={{ color: '#00E5FF' }}>BREAKOUT</span>
+                      <span className="font-bold text-[13px]" style={{ color: '#00E5FF' }}>돌파매수</span>
                     </div>
                     <span className="text-[9.5px]" style={{ color: 'var(--text-secondary)' }}>박스·저항 돌파 종목</span>
                     <span className="text-[8px] block mt-0.5" style={{ color: 'var(--text-muted)' }}>기술적 돌파 + 거래량 폭발</span>
@@ -127,8 +127,7 @@ export default function HomePage() {
                   <span className="text-lg">💹</span>
                   <div>
                     <div className="flex items-baseline gap-1">
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-bull)' }}>FLOW</span>
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-bull)' }}>LEADER</span>
+                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-bull)' }}>수급주도</span>
                     </div>
                     <span className="text-[9.5px]" style={{ color: 'var(--text-secondary)' }}>외인·기관 수급 주도</span>
                     <span className="text-[8px] block mt-0.5" style={{ color: 'var(--text-muted)' }}>스마트머니 추종 전략</span>
@@ -140,7 +139,7 @@ export default function HomePage() {
                   <span className="text-lg">⚡</span>
                   <div>
                     <div className="flex items-baseline gap-1">
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-warning)' }}>CATALYST</span>
+                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-warning)' }}>급등재료</span>
                     </div>
                     <span className="text-[9.5px]" style={{ color: 'var(--text-secondary)' }}>재료·이벤트 드리븐</span>
                     <span className="text-[8px] block mt-0.5" style={{ color: 'var(--text-muted)' }}>공시·뉴스 기반 급등 후보</span>
@@ -152,7 +151,7 @@ export default function HomePage() {
                   <span className="text-lg">🔄</span>
                   <div>
                     <div className="flex items-baseline gap-1">
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-grade-s)' }}>REVERSAL</span>
+                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-grade-s)' }}>반전매수</span>
                     </div>
                     <span className="text-[9.5px]" style={{ color: 'var(--text-secondary)' }}>역발상 반전 매수</span>
                     <span className="text-[8px] block mt-0.5" style={{ color: 'var(--text-muted)' }}>과매도·비관 극점 반등</span>

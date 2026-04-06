@@ -123,22 +123,22 @@ export default function AppLayout() {
 
               <button className="menu-item" onClick={() => { closeMenu(); navigate('/', { state: { mode: 'BREAKOUT', query: '기술적 돌파 매수 후보 분석' } }) }}>
                 <div className="menu-item-icon" style={{ background: 'rgba(0,229,255,0.1)' }}>🚀</div>
-                <div><div style={{ color: '#00E5FF' }}>BREAKOUT</div><div className="menu-item-desc">박스·저항 돌파 종목 · 기술적 돌파 + 거래량 폭발</div></div>
+                <div><div style={{ color: '#00E5FF' }}>돌파매수</div><div className="menu-item-desc">박스·저항 돌파 종목 · 기술적 돌파 + 거래량 폭발</div></div>
               </button>
 
               <button className="menu-item" onClick={() => { closeMenu(); navigate('/', { state: { mode: 'FLOW_LEADER', query: '외국인·기관 수급 주도 종목 분석' } }) }}>
                 <div className="menu-item-icon" style={{ background: 'rgba(0,200,83,0.1)' }}>💹</div>
-                <div><div style={{ color: '#00C853' }}>FLOW LEADER</div><div className="menu-item-desc">외인·기관 수급 주도 · 스마트머니 추종 전략</div></div>
+                <div><div style={{ color: '#00C853' }}>수급주도</div><div className="menu-item-desc">외인·기관 수급 주도 · 스마트머니 추종 전략</div></div>
               </button>
 
               <button className="menu-item" onClick={() => { closeMenu(); navigate('/', { state: { mode: 'CATALYST_BURST', query: '재료/이벤트 드리븐 급등 후보 분석' } }) }}>
                 <div className="menu-item-icon" style={{ background: 'rgba(255,152,0,0.1)' }}>⚡</div>
-                <div><div style={{ color: '#FF9800' }}>CATALYST</div><div className="menu-item-desc">재료·이벤트 드리븐 · 공시·뉴스 기반 급등 후보</div></div>
+                <div><div style={{ color: '#FF9800' }}>급등재료</div><div className="menu-item-desc">재료·이벤트 드리븐 · 공시·뉴스 기반 급등 후보</div></div>
               </button>
 
               <button className="menu-item" onClick={() => { closeMenu(); navigate('/', { state: { mode: 'REVERSAL_EDGE', query: '역발상 반전 매수 후보 분석' } }) }}>
                 <div className="menu-item-icon" style={{ background: 'rgba(124,77,255,0.1)' }}>🔄</div>
-                <div><div style={{ color: '#7C4DFF' }}>REVERSAL</div><div className="menu-item-desc">역발상 반전 매수 · 과매도·비관 극점 반등</div></div>
+                <div><div style={{ color: '#7C4DFF' }}>반전매수</div><div className="menu-item-desc">역발상 반전 매수 · 과매도·비관 극점 반등</div></div>
               </button>
 
               <div className="h-px mx-5 my-1" style={{ backgroundColor: 'var(--border-subtle)' }} />

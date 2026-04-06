@@ -27,8 +27,9 @@ class Config:
         SQLALCHEMY_DATABASE_URI = f'postgresql://{_username}:{_encoded_password}@{_host}:{_port}/{_database}'
 
     elif _db_type == 'sqlite':
-        _db_path = os.getenv('SQLITE_PATH', 'data/users.db')
-        os.makedirs(os.path.dirname(_db_path) or '.', exist_ok=True)
+        import os
+        _db_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'users.db')
+        os.makedirs(os.path.dirname(_db_path), exist_ok=True)
         SQLALCHEMY_DATABASE_URI = f'sqlite:///{_db_path}'
 
     else:
