@@ -52,4 +52,4 @@ bitman:
   flask:
     base-url: ${FLASK_BASE_URL:http://localhost:5001}
   admin:
-    email: ${ADMIN_EMAIL:}
+    email: ${ADMIN_EMAIL:admin@bitman.net}

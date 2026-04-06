@@ -6,7 +6,9 @@ import com.bitman.justbuy.dto.AgentResult;
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.ConsensusResult;
 import com.bitman.justbuy.dto.StockPick;
+import com.bitman.justbuy.dto.FinancialScore;
 import com.bitman.justbuy.service.DartApiService;
+import com.bitman.justbuy.service.FinancialScorer;
 import com.bitman.justbuy.service.KisApiService;
 import com.bitman.justbuy.service.MarketDataService;
 import com.bitman.justbuy.service.TrackRecordService;
@@ -37,6 +39,7 @@ public class MultiAgentOrchestrator {
     private final MarketDataService marketDataService;
     private final ConsensusEngine consensusEngine;
     private final DartApiService dartApiService;
+    private final FinancialScorer financialScorer;
     private final KisApiService kisApiService;
     private final TrackRecordService trackRecordService;
     private final RestTemplate restTemplate;
@@ -44,7 +47,8 @@ public class MultiAgentOrchestrator {
 
     public MultiAgentOrchestrator(List<AiAgent> agents, SynthesisEngine synthesisEngine,
                                    MarketDataService marketDataService, ConsensusEngine consensusEngine,
-                                   DartApiService dartApiService, KisApiService kisApiService,
+                                   DartApiService dartApiService, FinancialScorer financialScorer,
+                                   KisApiService kisApiService,
                                    TrackRecordService trackRecordService,
                                    RestTemplate restTemplate, ObjectMapper objectMapper) {
         this.agents = agents;
@@ -52,6 +56,7 @@ public class MultiAgentOrchestrator {
         this.marketDataService = marketDataService;
         this.consensusEngine = consensusEngine;
         this.dartApiService = dartApiService;
+        this.financialScorer = financialScorer;
         this.kisApiService = kisApiService;
         this.trackRecordService = trackRecordService;
         this.restTemplate = restTemplate;
@@ -425,6 +430,20 @@ public class MultiAgentOrchestrator {
             }
         }
 
+        // ★ Round 2/3 전에 추천 종목의 DART 재무/공시 데이터를 추가 수집
+        //    (Round 1 쿼리 종목 DART 는 별도, 여기서는 Round 1이 선정한 pick 기준 최대 8종목)
+        Set<String> pickCodes = new LinkedHashSet<>();
+        for (StockPick p : preSynthesisPicks) {
+            if (p.code() != null && p.code().length() == 6) pickCodes.add(p.code());
+            if (pickCodes.size() >= 8) break;
+        }
+        // 이미 쿼리 DART 주입된 코드는 중복 방지
+        pickCodes.removeAll(queryCodes);
+        String pickDartText = fetchDartDataForStocks(pickCodes);
+        if (!pickDartText.isEmpty()) {
+            log.info("[Orchestrator] Pick 기반 DART 주입: {}개 종목", pickCodes.size());
+        }
+
         // 실시간 가격 미리 수집 → Synthesis prompt에 주입
         Map<String, String> preSynthesisPrices = new HashMap<>(queryStockPrices);
         if (!preSynthesisPicks.isEmpty()) {
@@ -447,7 +466,8 @@ public class MultiAgentOrchestrator {
                 successResults.size(), preSynthesisPrices.size());
             try {
                 synthesisResult = synthesisEngine.synthesizeWithResult(
-                    successResults, query, mode, today, consensusText, preSynthesisPicks, preSynthesisPrices);
+                    successResults, query, mode, today, consensusText, preSynthesisPicks, preSynthesisPrices,
+                    pickDartText);
             } catch (Exception e) {
                 log.warn("[Orchestrator] Synthesis 오류 (첫 번째 에이전트 결과로 폴백): {}", e.getMessage());
                 synthesisResult = null;
@@ -606,6 +626,52 @@ public class MultiAgentOrchestrator {
             }
         }
 
+        // ★ Phase 3b — 각 stockPick 에 financial score 를 첨부하고,
+        //    최종 confidence-style 스코어에 30% 가중치로 블렌딩.
+        //    AI 스코어(aiScore) 는 StructuredAnalysis 의 합의 스코어(consensus)가 있으면 사용,
+        //    없으면 action 기반 기본치 사용.
+        if (!stockPicks.isEmpty()) {
+            // consensus 종목별 스코어 맵
+            Map<String, Integer> consensusScoreMap = new HashMap<>();
+            if (consensus != null && consensus.stocks() != null) {
+                for (var cs : consensus.stocks()) {
+                    consensusScoreMap.put(cs.code(), cs.consensusScore());
+                }
+            }
+
+            List<StockPick> blended = new ArrayList<>();
+            for (StockPick pick : stockPicks) {
+                FinancialScore fs;
+                try {
+                    fs = financialScorer.score(pick.code());
+                } catch (Exception e) {
+                    log.debug("[Orchestrator] FinancialScorer 실패 ({}): {}", pick.code(), e.getMessage());
+                    fs = FinancialScore.empty();
+                }
+
+                // AI 스코어: 합의 스코어 우선 → 없으면 action 기반 fallback
+                int aiScore = consensusScoreMap.getOrDefault(pick.code(),
+                    estimateAiScoreFromAction(pick.action()));
+                int finalScore = (int) Math.round(0.7 * aiScore + 0.3 * fs.score());
+
+                // financialSummary 는 기존 pick 의 reason 과 별개로 저장.
+                // finalScore 정보는 reason 에 soft-append (UI 하위호환)
+                String reason = pick.reason();
+                String finNote = String.format("[재무:%d/100, 최종:%d]", fs.score(), finalScore);
+                String newReason = (reason == null || reason.isBlank())
+                    ? finNote
+                    : reason + " " + finNote;
+
+                blended.add(new StockPick(
+                    pick.name(), pick.code(), pick.currentPrice(),
+                    pick.targetPrice(), pick.stopLoss(),
+                    pick.action(), newReason,
+                    fs.score(), fs.summary()
+                ));
+            }
+            stockPicks = blended;
+        }
+
         long totalDuration = System.currentTimeMillis() - totalStart;
         log.info("[Orchestrator] Analysis complete: {}ms, {}/{} agents succeeded",
             totalDuration, successResults.size(), availableAgents.size());
@@ -625,6 +691,18 @@ public class MultiAgentOrchestrator {
         }
 
         return response;
+    }
+
+    /** action 문자열 기반 AI 스코어 추정 (consensus 없을 때 폴백) */
+    private static int estimateAiScoreFromAction(String action) {
+        if (action == null) return 50;
+        return switch (action) {
+            case "매수" -> 70;
+            case "주목" -> 55;
+            case "관망" -> 45;
+            case "매도" -> 25;
+            default -> 50;
+        };
     }
 
     /** 한국식 가격 문자열 → long 변환 ("191,100" → 191100, "약 36,000원" → 36000) */

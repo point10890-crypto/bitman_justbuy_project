@@ -36,8 +36,18 @@ public final class StructuredAnalysisParser {
         Long targetPrice,
         Long stopLoss,
         ScenarioSet scenario,
-        List<String> reasons
-    ) {}
+        List<String> reasons,
+        int financialScore,       // 0-100 (DART 기반, 없으면 0)
+        String financialSummary   // 60자 이내 요약 (없으면 "")
+    ) {
+        // 하위 호환 생성자
+        public StructuredStock(String name, String code, String action, double confidence,
+                               Long currentPrice, Long targetPrice, Long stopLoss,
+                               ScenarioSet scenario, List<String> reasons) {
+            this(name, code, action, confidence, currentPrice, targetPrice, stopLoss,
+                scenario, reasons, 0, "");
+        }
+    }
 
     /** Bull/Base/Bear 시나리오 세트 */
     public record ScenarioSet(
@@ -135,12 +145,24 @@ public final class StructuredAnalysisParser {
             }
         }
 
+        int finScore = 0;
+        if (node.has("financialScore") && !node.get("financialScore").isNull()) {
+            int raw = node.get("financialScore").asInt(0);
+            finScore = Math.max(0, Math.min(100, raw));
+        }
+        String finSummary = "";
+        if (node.has("financialSummary") && node.get("financialSummary").isTextual()) {
+            finSummary = node.get("financialSummary").asText("").trim();
+            if (finSummary.length() > 120) finSummary = finSummary.substring(0, 120);
+        }
+
         return new StructuredStock(
             name, code, action, confidence,
             toLongOrNull(node, "currentPrice"),
             toLongOrNull(node, "targetPrice"),
             toLongOrNull(node, "stopLoss"),
-            scenario, reasons
+            scenario, reasons,
+            finScore, finSummary
         );
     }
 

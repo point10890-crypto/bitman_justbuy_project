@@ -38,8 +38,15 @@ public final class AgentRoles {
             - 재무제표 심층: PER, PBR, ROE, 영업이익률, 부채비율, FCF
             - 업종 비교 밸류에이션 (동종 업계 멀티플)
             - 실적 컨센서스 서프라이즈 가능성, 산업 정책/규제 영향
-            - DART 공시 데이터가 입력에 포함되면 반드시 실제 수치 사용
             - 웹 검색으로 최신 실적 발표, 공시, 애널리스트 리포트 수집
+
+            ■ DART 재무/공시 데이터 활용 (필수)
+            - 입력 프롬프트에 "DART 공시 재무 데이터" 블록이 포함되면, 해당 블록의 실제 수치를
+              반드시 분석에 반영할 것. 추정치·학습 데이터보다 DART 수치가 항상 우선입니다.
+            - 영업이익률 / 부채비율 / ROE / 매출 성장률은 DART 블록의 값을 그대로 인용하세요.
+            - 최근 공시 항목(자기주식취득/무상증자/배당/합병 = 호재, 감자/유상증자/전환사채 = 악재)을
+              각 종목의 판단 근거에 명시하세요.
+            - 각 stockPick 의 financialScore / financialSummary 는 DART 블록 기반으로 산출하세요.
 
             [필수 출력]
             - 시장 레짐 판단 + 근거 (Macro 관점)
@@ -79,6 +86,12 @@ public final class AgentRoles {
             - 테마 수명 주기 분석 (초기/성장/과열/소멸)
             - 시장 과잉/과소 반응 판별, 재료 가격 반영도 평가
 
+            ■ DART 재무/공시 데이터 활용 (필수)
+            - 입력 프롬프트에 "DART 공시 재무 데이터" 블록이 포함되면 반드시 활용하세요.
+            - 수급 흐름 + DART 호재/악재 공시(자사주/무상증자/배당 vs 감자/유상증자)를 결합하여
+              "돈이 몰리는 이유" 를 설명하세요.
+            - 각 stockPick 의 financialScore / financialSummary 는 DART 블록 기반으로 산출하세요.
+
             ■ 뉴스 & 이벤트 실시간 수집
             - 최신 뉴스/공시/이벤트 (mk.co.kr, hankyung.com, finance.naver.com 검색)
             - 수집 시각 반드시 명시 (예: "2026-04-03 10:30 KST 기준")
@@ -115,7 +128,9 @@ public final class AgentRoles {
                     "base": { "probability": 0.45, "target": 기준목표가숫자 },
                     "bear": { "probability": 0.20, "target": 약세목표가숫자 }
                   },
-                  "reasons": ["핵심근거1", "핵심근거2", "핵심근거3"]
+                  "reasons": ["핵심근거1", "핵심근거2", "핵심근거3"],
+                  "financialScore": 72,
+                  "financialSummary": "영업이익률 12%·부채비율 85%·ROE 15%·자사주취득 공시"
                 }
               ],
               "marketSentiment": "bullish|neutral|bearish",
@@ -130,7 +145,10 @@ public final class AgentRoles {
             - scenario 확률 합은 반드시 1.0 (=100%)
             - 가격은 쉼표 없는 순수 숫자 (예: 82000)
             - 가격을 모르면 null
-            - reasons는 최소 2개, 최대 5개의 핵심 근거""";
+            - reasons는 최소 2개, 최대 5개의 핵심 근거
+            - financialScore: 0~100 정수. DART 재무/공시 블록 기반으로 산출 (데이터 없으면 0)
+            - financialSummary: 최대 60자 한국어 요약. 영업이익률/부채비율/ROE/매출성장/공시 호재·악재를 압축
+              (데이터 없으면 "재무데이터 없음")""";
 
     /**
      * 에이전트 이름으로 전문화 프롬프트를 조회한다.

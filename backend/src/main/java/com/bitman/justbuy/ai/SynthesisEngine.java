@@ -69,7 +69,12 @@ public class SynthesisEngine {
     }
 
     public AgentResult synthesizeWithResult(List<AgentResult> results, String query, String mode, String today, String consensusText) {
-        return synthesizeWithResult(results, query, mode, today, consensusText, List.of(), Map.of());
+        return synthesizeWithResult(results, query, mode, today, consensusText, List.of(), Map.of(), "");
+    }
+
+    public AgentResult synthesizeWithResult(List<AgentResult> results, String query, String mode, String today,
+                                             String consensusText, List<StockPick> stockPicks, Map<String, String> realPrices) {
+        return synthesizeWithResult(results, query, mode, today, consensusText, stockPicks, realPrices, "");
     }
 
     /**
@@ -78,7 +83,8 @@ public class SynthesisEngine {
      * R3 합성: gpt-4o (웹검색 없이 순수 추론)
      */
     public AgentResult synthesizeWithResult(List<AgentResult> results, String query, String mode, String today,
-                                             String consensusText, List<StockPick> stockPicks, Map<String, String> realPrices) {
+                                             String consensusText, List<StockPick> stockPicks, Map<String, String> realPrices,
+                                             String dartPickText) {
         String synthesisInput = results.stream()
             .map(r -> "=== " + r.agent().toUpperCase() + " 분석 (" + r.model() + ") ===\n" + r.content())
             .collect(Collectors.joining("\n\n---\n\n"));
@@ -144,6 +150,8 @@ public class SynthesisEngine {
             + grokPriority
             + supplyDataRule
             + priceRef
+            + (dartPickText != null && !dartPickText.isBlank()
+                ? "\n\n[DART 재무/공시 데이터 — 추천 종목 기준]\n" + dartPickText + "\n" : "")
             + consensusText + "\n\n"
             + synthesisInput;
 

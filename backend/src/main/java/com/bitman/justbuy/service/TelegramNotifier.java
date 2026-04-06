@@ -129,6 +129,27 @@ public class TelegramNotifier {
             }
         }
 
+        // 재무 요약 — 상위 3개 pick 의 financialScore + summary
+        if (picks != null && !picks.isEmpty()) {
+            java.util.List<StockPick> finTop = picks.stream()
+                .filter(p -> p.financialScore() != null && p.financialScore() > 0
+                    && p.financialSummary() != null && !p.financialSummary().isBlank()
+                    && !"\uC7AC\uBB34\uB370\uC774\uD130 \uC5C6\uC74C".equals(p.financialSummary()))
+                .limit(3)
+                .toList();
+            if (!finTop.isEmpty()) {
+                sb.append("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n");
+                sb.append("\ud83d\udcb0 <b>\uc7ac\ubb34 \uc694\uc57d</b>\n\n");
+                for (int i = 0; i < finTop.size(); i++) {
+                    StockPick p = finTop.get(i);
+                    sb.append(String.format("%d. %s (%s) — %d/100\n",
+                        i + 1, p.name(), p.code(), p.financialScore()));
+                    sb.append("   ").append(p.financialSummary()).append("\n");
+                }
+                sb.append("\n");
+            }
+        }
+
         // 종합 분석 요약 (finalContent — JSON/코드블록 제거)
         if (result.finalContent() != null && !result.finalContent().isEmpty()) {
             sb.append("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n");
