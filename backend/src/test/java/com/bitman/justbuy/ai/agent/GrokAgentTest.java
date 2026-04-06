@@ -65,7 +65,7 @@ class GrokAgentTest {
 
     @Test
     void critiqueModel_isFast() {
-        assertThat(GrokAgent.CRITIQUE_MODEL).isEqualTo("grok-4-1-fast");
+        assertThat(GrokAgent.CRITIQUE_MODEL).isEqualTo("grok-4-1-fast-reasoning");
     }
 
     // ── analyze — Responses API ──────────────────────────────

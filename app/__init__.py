@@ -38,17 +38,52 @@ def create_app(config=None):
     app.json = SafeJSONProvider(app)
 
     # CORS 설정 — 허용 도메인 명시 (origins: * 금지)
-    _allowed_origins = os.getenv('CORS_ORIGINS', ','.join([
-        'http://localhost:3000', 'http://localhost:3001', 'http://localhost:4000',
-        'http://localhost:5173', 'http://127.0.0.1:3000',
-        'https://bitman-justbuy.pages.dev',
-        'https://crop-mens-street-kai.trycloudflare.com',
-    ])).split(',')
+    def _get_allowed_origins() -> list:
+        """Get CORS origins from environment with validation."""
+        if os.getenv('RENDER'):  # Production
+            origins = ['https://bitman-justbuy.pages.dev']  # Only production domain
+            additional = os.getenv('CORS_ORIGINS', '')
+            if additional:
+                origins.extend([o.strip() for o in additional.split(',') if o.strip()])
+        else:  # Development
+            origins = [
+                'http://localhost:3000',
+                'http://localhost:3001',
+                'http://localhost:4000',
+                'http://localhost:5173',
+                'http://127.0.0.1:3000',
+            ]
+
+        # Validate all origins have proper scheme
+        valid_origins = []
+        for origin in origins:
+            if not origin.startswith(('http://', 'https://')):
+                logger.warning(f"Invalid CORS origin (missing scheme): {origin}")
+                continue
+            valid_origins.append(origin)
+
+        return valid_origins
+
+    _allowed_origins = _get_allowed_origins()
     try:
         from flask_cors import CORS
         CORS(app, resources={r"/api/*": {"origins": _allowed_origins}})
     except ImportError:
         logger.warning("flask-cors not installed, CORS disabled")
+
+    # HTTPS 강제 (production only)
+    if os.getenv('RENDER'):  # Production only
+        try:
+            from flask_talisman import Talisman
+            Talisman(app, force_https=True)
+
+            @app.before_request
+            def enforce_https():
+                if request.url.startswith('http://') and not request.host.startswith('localhost'):
+                    from flask import redirect
+                    return redirect(request.url.replace('http://', 'https://', 1), code=301)
+        except ImportError:
+            logger.warning("flask-talisman not installed, HTTPS enforcement disabled")
 
     # 환경변수 로드
     try:
@@ -58,20 +93,68 @@ def create_app(config=None):
         pass
 
     # 기본 설정 — SECRET_KEY 환경변수 필수 (미설정 시 랜덤 생성 + 경고)
-    _secret = os.getenv('SECRET_KEY')
-    if not _secret:
-        _secret = os.urandom(32).hex()
-        logger.warning("SECRET_KEY not set! Generated random key — sessions will NOT survive restarts. "
-                        "Set SECRET_KEY env var for production.")
-    app.config['SECRET_KEY'] = _secret
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(
-        os.path.abspath(os.path.dirname(os.path.dirname(__file__))), 'data', 'users.db'
-    )
-    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    def _get_secret_key() -> str:
+        """Get SECRET_KEY from environment with strict validation."""
+        secret = os.getenv('SECRET_KEY')
+        if not secret:
+            if os.getenv('RENDER'):  # Production environment
+                raise RuntimeError(
+                    "CRITICAL: SECRET_KEY environment variable not set in production. "
+                    "Generate with: python -c 'import secrets; print(secrets.token_urlsafe(32))' "
+                    "and add to Render Dashboard > Environment Variables"
+                )
+            # Development: warn but allow
+            secret = os.urandom(32).hex()
+            logger.error(
+                "⚠️ DEV-ONLY: Using generated SECRET_KEY. "
+                "Set SECRET_KEY env var for persistent sessions. "
+                "Sessions will be LOST on server restart!"
+            )
+        return secret
+
+    app.config['SECRET_KEY'] = _get_secret_key()
 
     # 설정 적용
-    if config:
-        app.config.update(config)
+    from app.config.config import Config
+    app.config.from_object(Config)
+
+    # 환경 검증
+    from app.config.validator import validate_environment
+    valid, errors = validate_environment()
+    if not valid:
+        if os.getenv('RENDER'):  # Fail hard in production
+            for error in errors:
+                logger.critical(error)
+            raise RuntimeError("Configuration validation failed")
+        else:  # Warn in development
+            for error in errors:
+                logger.warning(error)
+
+    # Graceful shutdown handling
+    import signal
+    import time
+    from threading import Event
+
+    shutdown_event = Event()
+
+    def graceful_shutdown(signum, frame):
+        """Handle SIGTERM/SIGINT for graceful shutdown."""
+        logger.info("Shutdown signal received, waiting for requests to complete...")
+        shutdown_event.set()
+        # Give connections 30s to finish
+        time.sleep(30)
+        import sys
+        sys.exit(0)
+
+    if os.name != 'nt':  # Unix only (not Windows)
+        signal.signal(signal.SIGTERM, graceful_shutdown)
+        signal.signal(signal.SIGINT, graceful_shutdown)
+
+    @app.before_request
+    def check_shutdown():
+        if shutdown_event.is_set():
+            from flask import jsonify
+            return jsonify({'error': 'Server is shutting down'}), 503
 
     # Database
     from app.models import db
@@ -93,26 +176,6 @@ def create_app(config=None):
             if not response.headers.get('Cache-Control'):
                 response.headers['Cache-Control'] = 'public, max-age=30'
         return response
-
-    # Health check endpoint
-    @app.route('/api/health')
-    def health_check():
-        import subprocess
-        from flask import jsonify as _jsonify
-        try:
-            git_hash = subprocess.check_output(
-                ['git', 'rev-parse', '--short', 'HEAD'],
-                stderr=subprocess.DEVNULL, timeout=3
-            ).decode().strip()
-        except Exception:
-            git_hash = 'unknown'
-        vcp_exists = os.path.exists(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'signals_log.csv'))
-        return _jsonify({
-            'status': 'ok',
-            'service': 'MarketFlow API',
-            'version': git_hash,
-            'data': {'signals_log': vcp_exists},
-        })
 
     # ── 스케줄러 상태 API ──
     @app.route('/api/scheduler/status')

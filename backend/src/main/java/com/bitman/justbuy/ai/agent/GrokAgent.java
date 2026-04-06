@@ -27,7 +27,7 @@ public class GrokAgent implements AiAgent {
     // R1 분석용: 내부 멀티에이전트 협업 모델 (웹/X 검색 포함)
     static final String ANALYSIS_MODEL = "grok-4.20-multi-agent-0309";
     // R2 교차비판용: 빠르고 저렴한 모델
-    static final String CRITIQUE_MODEL = "grok-4-1-fast";
+    static final String CRITIQUE_MODEL = "grok-4-1-fast-reasoning";
 
     // 한국 금융 신뢰 도메인 — Grok API 최대 5개 제한
     private static final List<String> ALLOWED_DOMAINS = List.of(

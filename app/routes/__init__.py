@@ -9,6 +9,10 @@ def register_blueprints(app):
     from app.routes.common import common_bp
     app.register_blueprint(common_bp, url_prefix='/api')
 
+    # Health check routes
+    from app.routes.health import health_bp
+    app.register_blueprint(health_bp)
+
     # KR Market routes
     from app.routes.kr_market import kr_bp
     app.register_blueprint(kr_bp, url_prefix='/api/kr')

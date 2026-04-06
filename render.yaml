@@ -10,7 +10,7 @@ services:
       - key: PYTHONIOENCODING
         value: utf-8
       - key: AUTH_DISABLED
-        value: "true"
+        value: "false"
       - key: RENDER_EXTERNAL_URL
         value: "https://closing-bet-api.onrender.com"
       # ── Render Dashboard > Environment 에서 직접 설정할 키 ──

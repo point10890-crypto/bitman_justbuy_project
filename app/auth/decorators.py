@@ -2,13 +2,29 @@
 
 import os
 import jwt
-from functools import wraps
+import secrets
+from functools import wraps, lru_cache
 from flask import request, jsonify, current_app
 from app.models import db
 from app.models.user import User
 
+@lru_cache(maxsize=1)
+def get_jwt_secret() -> str:
+    """Get JWT secret from environment with strict validation."""
+    secret = os.getenv('JWT_SECRET')
+    if not secret:
+        raise ValueError(
+            "CRITICAL: JWT_SECRET environment variable must be set. "
+            "Generate with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+        )
+    if len(secret) < 32:
+        raise ValueError(f"JWT_SECRET must be at least 32 characters (got {len(secret)})")
+    if secret == 'bitman-justbuy-secret-key-change-in-production':
+        raise ValueError("Using default JWT_SECRET is not allowed in production")
+    return secret
+
 # JWT 설정
-JWT_SECRET = os.getenv('JWT_SECRET', 'bitman-justbuy-secret-key-change-in-production')
+JWT_SECRET = get_jwt_secret()
 JWT_ALGORITHM = 'HS512'
 TOKEN_EXPIRY = 86400 * 7  # 7 days
 

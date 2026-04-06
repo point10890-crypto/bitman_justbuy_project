@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 텔레그램 봇을 통해 관리자에게 알림을 전송합니다.
+ * 텔레그램 봇을 통해 개인 + 채널 동시 알림을 전송합니다.
  * bitman.telegram.bot-token 설정이 있을 때만 활성화됩니다.
  */
 @Component
@@ -29,37 +29,50 @@ public class TelegramNotifier {
 
     private final String botToken;
     private final String chatId;
+    private final String channelChatId;
     private final RestTemplate restTemplate;
 
     public TelegramNotifier(@Value("${bitman.telegram.bot-token}") String botToken,
-                            @Value("${bitman.telegram.chat-id}") String chatId) {
+                            @Value("${bitman.telegram.chat-id}") String chatId,
+                            @Value("${bitman.telegram.channel-chat-id:}") String channelChatId) {
         this.botToken = botToken;
         this.chatId = chatId;
+        this.channelChatId = channelChatId;
         this.restTemplate = new RestTemplate();
-        log.info("[Telegram] Notifier initialized (chatId={})", chatId);
+        log.info("[Telegram] Notifier initialized (personal={}, channel={})", chatId,
+                channelChatId != null && !channelChatId.isEmpty() ? channelChatId : "none");
     }
 
     public void send(String message) {
+        String text = message.length() > MAX_MESSAGE_LENGTH
+            ? message.substring(0, MAX_MESSAGE_LENGTH) + "\n\n... (생략)"
+            : message;
+
+        // 1) 개인 봇
+        sendTo(chatId, text);
+
+        // 2) 채널 (설정된 경우)
+        if (channelChatId != null && !channelChatId.isEmpty()) {
+            sendTo(channelChatId, text);
+        }
+    }
+
+    private void sendTo(String targetChatId, String text) {
         try {
             String url = String.format(API_URL, botToken);
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
 
-            // 메시지 길이 제한 (텔레그램 최대 4096자)
-            String text = message.length() > MAX_MESSAGE_LENGTH
-                ? message.substring(0, MAX_MESSAGE_LENGTH) + "\n\n... (생략)"
-                : message;
-
             Map<String, Object> body = Map.of(
-                "chat_id", chatId,
+                "chat_id", targetChatId,
                 "text", text,
                 "parse_mode", "HTML"
             );
 
             restTemplate.postForObject(url, new HttpEntity<>(body, headers), String.class);
-            log.debug("[Telegram] Message sent successfully");
+            log.debug("[Telegram] Message sent to {}", targetChatId);
         } catch (Exception e) {
-            log.warn("[Telegram] Failed to send message: {}", e.getMessage());
+            log.warn("[Telegram] Failed to send to {}: {}", targetChatId, e.getMessage());
         }
     }
 
@@ -106,8 +119,8 @@ public class TelegramNotifier {
                 }
 
                 if (pick.reason() != null && !pick.reason().isEmpty()) {
-                    String reason = pick.reason().length() > 80
-                        ? pick.reason().substring(0, 80) + "..."
+                    String reason = pick.reason().length() > 100
+                        ? pick.reason().substring(0, 100) + "..."
                         : pick.reason();
                     sb.append(String.format("   \ud83d\udcdd %s", reason));
                     sb.append("\n");
@@ -116,19 +129,12 @@ public class TelegramNotifier {
             }
         }
 
-        // 종합 분석 요약 (finalContent 앞부분)
+        // 종합 분석 요약 (finalContent — JSON/코드블록 제거)
         if (result.finalContent() != null && !result.finalContent().isEmpty()) {
             sb.append("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n");
             sb.append("\ud83d\udcdd <b>\uc885\ud569 \ubd84\uc11d</b>\n\n");
 
-            // HTML 태그 제거하고 텍스트만 추출
-            String plainContent = result.finalContent()
-                .replaceAll("<[^>]+>", "")
-                .replaceAll("&amp;", "&")
-                .replaceAll("&lt;", "<")
-                .replaceAll("&gt;", ">")
-                .replaceAll("&nbsp;", " ")
-                .trim();
+            String plainContent = stripContent(result.finalContent());
 
             // 남은 여유 공간에 맞춰 자르기
             int remaining = MAX_MESSAGE_LENGTH - sb.length() - 30;
@@ -140,7 +146,30 @@ public class TelegramNotifier {
             }
         }
 
+        sb.append("\n\n\ud83d\udd17 https://api.bit-man.net");
+
         send(sb.toString());
+    }
+
+    /** finalContent에서 JSON 코드블록, HTML 태그, 검증 섹션 제거 */
+    private String stripContent(String content) {
+        return content
+            // markdown 코드블록 제거 (```json:analysis ... ``` 등)
+            .replaceAll("(?s)```[\\w:]*\\s*\\{.*?```", "")
+            .replaceAll("(?s)```[\\w:]*.*?```", "")
+            // HTML 태그 제거
+            .replaceAll("<[^>]+>", "")
+            // 실시간 검증 섹션 제거 (하단 부가 정보)
+            .replaceAll("(?s)---.*?검증.*$", "")
+            .replaceAll("(?s)\ud83d\udce1.*$", "")
+            // HTML 엔티티
+            .replaceAll("&amp;", "&")
+            .replaceAll("&lt;", "<")
+            .replaceAll("&gt;", ">")
+            .replaceAll("&nbsp;", " ")
+            // 연속 줄바꿈 정리
+            .replaceAll("\n{3,}", "\n\n")
+            .trim();
     }
 
     public void sendAnalysisFailed(String mode, String error) {

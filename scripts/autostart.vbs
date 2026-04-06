@@ -8,7 +8,7 @@
 
 Option Explicit
 Dim objShell, objFSO, objWMI, logFile
-Dim PROJECT, PYTHON, BACKEND, CLOUDFLARED
+Dim PROJECT, PYTHON, BACKEND, BOOT_JAR, JAVA_EXE, CLOUDFLARED
 
 Set objShell = CreateObject("WScript.Shell")
 Set objFSO = CreateObject("Scripting.FileSystemObject")
@@ -17,6 +17,8 @@ Set objWMI = GetObject("winmgmts:\\.\root\cimv2")
 PROJECT = "C:\bitman_justbuy_project"
 PYTHON = PROJECT & "\.venv\Scripts\python.exe"
 BACKEND = PROJECT & "\backend"
+BOOT_JAR = BACKEND & "\build\libs\justbuy-api-1.0.0.jar"
+JAVA_EXE = "C:\Program Files\Microsoft\jdk-21.0.10.7-hotspot\bin\java.exe"
 CLOUDFLARED = "C:\Users\dynas\AppData\Local\Microsoft\WinGet\Packages\Cloudflare.cloudflared_Microsoft.Winget.Source_8wekyb3d8bbwe\cloudflared.exe"
 
 ' 환경변수
@@ -90,17 +92,38 @@ Else
     WaitForPort 5001, "Flask", 10
 End If
 
-' ── 2. Spring Boot (port 8080) — 프론트엔드 static 서빙 포함 ──
+' ── 2. Spring Boot (port 8080) — JAR 직접 실행 (gradlew bootRun 대신) ──
 If AnyPortOpen(8080) Then
     Log "SpringBoot: already running"
 Else
-    Log "SpringBoot: starting..."
-    objShell.CurrentDirectory = BACKEND
-    objShell.Run "cmd /c ""cd /d " & BACKEND & " && " & BACKEND & "\gradlew.bat bootRun""", 0, False
-    WaitForPort 8080, "SpringBoot", 20
+    If Not objFSO.FileExists(BOOT_JAR) Then
+        Log "SpringBoot: JAR not found, building..."
+        objShell.CurrentDirectory = BACKEND
+        objShell.Run "cmd /c ""cd /d " & BACKEND & " && " & BACKEND & "\gradlew.bat bootJar -x test""", 0, True
+        Log "SpringBoot: build done"
+    End If
+    Log "SpringBoot: starting JAR (with .env)..."
+    objShell.CurrentDirectory = PROJECT
+    objShell.Run "cmd /c """ & PROJECT & "\scripts\start-springboot.bat""", 0, False
+    WaitForPort 8080, "SpringBoot", 15
 End If
 
-' ── 3. Cloudflared Tunnel ──
+' ── 3. Scheduler (daemon mode) ──
+If IsProcessRunning("scheduler.py --daemon") Then
+    Log "Scheduler: already running"
+Else
+    Log "Scheduler: starting..."
+    objShell.CurrentDirectory = PROJECT
+    objShell.Run "cmd /c ""set PYTHONIOENCODING=utf-8 && """ & PYTHON & """ scheduler.py --daemon""", 0, False
+    WScript.Sleep 5000
+    If IsProcessRunning("scheduler.py --daemon") Then
+        Log "Scheduler: OK"
+    Else
+        Log "Scheduler: FAILED"
+    End If
+End If
+
+' ── 4. Cloudflared Tunnel ──
 If IsProcessRunning("cloudflared.exe"" tunnel") Then
     Log "Cloudflared: already running"
 Else
@@ -132,13 +155,22 @@ Do While True
         If AnyPortOpen(5001) Then Log "WATCHDOG: Flask OK" Else Log "WATCHDOG: Flask FAILED"
     End If
 
-    ' Spring Boot
+    ' Spring Boot (JAR 직접 실행)
     If Not AnyPortOpen(8080) Then
-        Log "WATCHDOG: SpringBoot DOWN — restarting..."
-        objShell.CurrentDirectory = BACKEND
-        objShell.Run "cmd /c ""cd /d " & BACKEND & " && " & BACKEND & "\gradlew.bat bootRun""", 0, False
-        WScript.Sleep 30000
+        Log "WATCHDOG: SpringBoot DOWN — restarting JAR..."
+        objShell.CurrentDirectory = PROJECT
+        objShell.Run "cmd /c """ & PROJECT & "\scripts\start-springboot.bat""", 0, False
+        WScript.Sleep 20000
         If AnyPortOpen(8080) Then Log "WATCHDOG: SpringBoot OK" Else Log "WATCHDOG: SpringBoot FAILED"
+    End If
+
+    ' Scheduler
+    If Not IsProcessRunning("scheduler.py --daemon") Then
+        Log "WATCHDOG: Scheduler DOWN — restarting..."
+        objShell.CurrentDirectory = PROJECT
+        objShell.Run "cmd /c ""set PYTHONIOENCODING=utf-8 && """ & PYTHON & """ scheduler.py --daemon""", 0, False
+        WScript.Sleep 5000
+        If IsProcessRunning("scheduler.py --daemon") Then Log "WATCHDOG: Scheduler OK" Else Log "WATCHDOG: Scheduler FAILED"
     End If
 
     ' Cloudflared

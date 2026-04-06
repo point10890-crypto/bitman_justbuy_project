@@ -41,10 +41,11 @@ bitman:
   storage:
     data-dir: ${STORAGE_DIR:./data}
   scheduler:
-    enabled: ${SCHEDULER_ENABLED:false}
+    enabled: ${SCHEDULER_ENABLED:true}
   telegram:
-    bot-token: ${TELEGRAM_BOT_TOKEN:}
-    chat-id: ${TELEGRAM_CHAT_ID:}
+    bot-token: ${TELEGRAM_BOT_TOKEN:8737367991:AAFP0Vz-NL1LFsNhUjA7dS7BpxksJFQWSWU}
+    chat-id: ${TELEGRAM_CHAT_ID:1761071772}
+    channel-chat-id: ${TELEGRAM_CHANNEL_CHAT_ID:-1003885840765}
   jwt:
     secret: ${JWT_SECRET:}
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
