@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 /* ─── Types ─── */
@@ -39,10 +39,18 @@ export default function LandingPage() {
   const navigate = useNavigate()
   const { user, isLoading } = useAuth()
 
-  // 로그인된 유저는 홈으로 리다이렉트
-  useEffect(() => {
-    if (!isLoading && user) navigate('/', { replace: true })
-  }, [user, isLoading, navigate])
+  // 로그인된 유저: 렌더 직전에 즉시 교체 (history에 /landing 이 남지 않도록).
+  // useEffect 방식은 첫 페인트 후 push 가 일어나 뒤로가기 시 랜딩이 깜빡인다.
+  if (isLoading) {
+    return (
+      <div className="min-h-dvh flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+        <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'rgba(255,215,0,0.3)', borderTopColor: 'transparent' }} />
+      </div>
+    )
+  }
+  if (user) {
+    return <Navigate to="/" replace />
+  }
 
   const [demoPhase, setDemoPhase] = useState<DemoPhase>('idle')
   const [demoStock, setDemoStock] = useState('')
