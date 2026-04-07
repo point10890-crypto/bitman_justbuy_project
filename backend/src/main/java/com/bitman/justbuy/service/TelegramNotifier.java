@@ -84,6 +84,18 @@ public class TelegramNotifier {
         }
     }
 
+    /** 모드 코드 → 한글 라벨 변환 (UI와 통일) */
+    private static String localizeMode(String mode) {
+        if (mode == null) return "분석";
+        return switch (mode) {
+            case "BREAKOUT"       -> "돌파매수";
+            case "FLOW_LEADER"    -> "수급주도";
+            case "CATALYST_BURST" -> "급등재료";
+            case "REVERSAL_EDGE"  -> "반전매수";
+            default -> mode;
+        };
+    }
+
     public void sendAnalysisResult(String mode, AnalysisResponse result) {
         StringBuilder sb = new StringBuilder();
 
@@ -91,7 +103,7 @@ public class TelegramNotifier {
             ? "\u2705" : "\u26a0\ufe0f";
 
         // 헤더
-        sb.append(String.format("%s <b>[%s] \ubd84\uc11d \uc644\ub8cc</b>\n", emoji, mode));
+        sb.append(String.format("%s <b>[%s] \ubd84\uc11d \uc644\ub8cc</b>\n", emoji, localizeMode(mode)));
         sb.append(String.format("\u23f1 %.1f\ucd08 | \ud83e\udd16 %d/%d AI\n",
             result.metadata().totalDurationMs() / 1000.0,
             result.metadata().agentsSucceeded(),
