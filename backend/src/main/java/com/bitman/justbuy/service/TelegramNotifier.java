@@ -57,6 +57,14 @@ public class TelegramNotifier {
         }
     }
 
+    /** 관리자 개인 채팅에만 전송 (구독 승인 요청 등 운영 알림용). */
+    public void sendToAdmin(String message) {
+        String text = message.length() > MAX_MESSAGE_LENGTH
+            ? message.substring(0, MAX_MESSAGE_LENGTH) + "\n\n... (생략)"
+            : message;
+        sendTo(chatId, text);
+    }
+
     private void sendTo(String targetChatId, String text) {
         try {
             String url = String.format(API_URL, botToken);

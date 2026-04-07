@@ -23,10 +23,14 @@ public class SubscriptionService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final org.springframework.beans.factory.ObjectProvider<TelegramNotifier> telegramNotifierProvider;
 
-    public SubscriptionService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+    public SubscriptionService(UserRepository userRepository,
+                               PasswordEncoder passwordEncoder,
+                               org.springframework.beans.factory.ObjectProvider<TelegramNotifier> telegramNotifierProvider) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.telegramNotifierProvider = telegramNotifierProvider;
     }
 
     public UserDto applyForSubscription(UUID userId, String depositorName) {
@@ -52,7 +56,37 @@ public class SubscriptionService {
         log.info("Subscription applied: userId={}, depositor={}, previousStatus={}",
             userId, depositorName, user.getSubscription());
 
+        // 관리자 텔레그램 알림 (실패해도 신청 자체는 성공 처리)
+        try {
+            TelegramNotifier notifier = telegramNotifierProvider.getIfAvailable();
+            if (notifier != null) {
+                long pendingCount = userRepository.findBySubscription(SubscriptionStatus.PENDING).size();
+                String msg = String.format(
+                    "🔔 <b>신규 구독 승인 요청</b>%n%n"
+                    + "👤 이름: %s%n"
+                    + "📧 이메일: %s%n"
+                    + "💳 입금자명: %s%n"
+                    + "🆔 userId: <code>%s</code>%n%n"
+                    + "📋 대기 중: %d건%n"
+                    + "👉 관리자 페이지에서 승인/거절 처리하세요.",
+                    escape(user.getName()),
+                    escape(user.getEmail()),
+                    escape(depositorName),
+                    user.getId(),
+                    pendingCount
+                );
+                notifier.sendToAdmin(msg);
+            }
+        } catch (Exception e) {
+            log.warn("[Subscription] 관리자 텔레그램 알림 실패: {}", e.getMessage());
+        }
+
         return UserDto.from(user);
+    }
+
+    private static String escape(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     public List<UserDto> getPendingSubscriptions() {
