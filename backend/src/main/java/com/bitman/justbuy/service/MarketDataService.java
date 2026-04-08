@@ -139,23 +139,37 @@ public class MarketDataService {
         return text.toString();
     }
 
-    /** 오늘 KOSPI+KOSDAQ 상승률 상위 20종목 */
-    private String fetchDynamicGainers(NumberFormat fmt) {
-        List<JsonNode> stocks = new ArrayList<>();
-        // KOSPI 상승률 상위
+    /**
+     * KOSPI+KOSDAQ 시총 상위 200종목 스냅샷 (페이지 캐시).
+     * 네이버 모바일 /api/index/{KOSPI|KOSDAQ}/stocks?rankType=... 가 2026-04-08 부로 404.
+     * 대안: /api/stocks/marketValue/{market}?page=N&pageSize=100 (살아있음).
+     * 응답에 fluctuationsRatio / accumulatedTradingVolume / accumulatedTradingValue 가 모두 포함되어
+     * 클라이언트 단에서 정렬하여 상승률·거래량 랭킹을 만든다.
+     */
+    private List<JsonNode> fetchMarketSnapshot() {
+        List<JsonNode> all = new ArrayList<>();
         for (String market : List.of("KOSPI", "KOSDAQ")) {
-            JsonNode data = fetchJson("https://m.stock.naver.com/api/index/" + market
-                + "/stocks?pageSize=20&pageNo=1&rankType=FLUCTUATIONS_RATIO");
-            if (data != null) {
-                JsonNode arr = data.isArray() ? data
-                    : data.has("stocks") ? data.get("stocks")
-                    : data.has("result") ? data.get("result") : null;
-                if (arr != null && arr.isArray()) {
-                    for (JsonNode s : arr) stocks.add(s);
-                }
+            for (int page = 1; page <= 2; page++) {
+                JsonNode data = fetchJson("https://m.stock.naver.com/api/stocks/marketValue/"
+                    + market + "?page=" + page + "&pageSize=100");
+                if (data == null) continue;
+                JsonNode arr = data.has("stocks") ? data.get("stocks") : null;
+                if (arr == null || !arr.isArray()) continue;
+                for (JsonNode s : arr) all.add(s);
             }
         }
+        return all;
+    }
+
+    /** 오늘 KOSPI+KOSDAQ 상승률 상위 25종목 */
+    private String fetchDynamicGainers(NumberFormat fmt) {
+        List<JsonNode> stocks = new ArrayList<>(fetchMarketSnapshot());
         if (stocks.isEmpty()) return "";
+
+        // 상승률 desc 정렬 (시총 풀 200개 중 상위 25개)
+        stocks.sort((a, b) -> Double.compare(
+            parseNumber(b, "fluctuationsRatio"),
+            parseNumber(a, "fluctuationsRatio")));
 
         StringBuilder sb = new StringBuilder();
         sb.append("\uD83D\uDCC8 \uc0c1\uc2b9\ub960 \uc0c1\uc704 \uc885\ubaa9 (KOSPI+KOSDAQ \ud569\uc0b0)\n");
@@ -180,20 +194,13 @@ public class MarketDataService {
 
     /** 오늘 KOSPI+KOSDAQ 거래량 상위 20종목 */
     private String fetchDynamicVolume(NumberFormat fmt) {
-        List<JsonNode> stocks = new ArrayList<>();
-        for (String market : List.of("KOSPI", "KOSDAQ")) {
-            JsonNode data = fetchJson("https://m.stock.naver.com/api/index/" + market
-                + "/stocks?pageSize=20&pageNo=1&rankType=ACCUMULATE_TRADING_VOLUME");
-            if (data != null) {
-                JsonNode arr = data.isArray() ? data
-                    : data.has("stocks") ? data.get("stocks")
-                    : data.has("result") ? data.get("result") : null;
-                if (arr != null && arr.isArray()) {
-                    for (JsonNode s : arr) stocks.add(s);
-                }
-            }
-        }
+        List<JsonNode> stocks = new ArrayList<>(fetchMarketSnapshot());
         if (stocks.isEmpty()) return "";
+
+        // 거래량 desc 정렬 (시총 풀 200개 중 상위 20개)
+        stocks.sort((a, b) -> Long.compare(
+            (long) parseNumber(b, "accumulatedTradingVolume"),
+            (long) parseNumber(a, "accumulatedTradingVolume")));
 
         StringBuilder sb = new StringBuilder();
         sb.append("\uD83D\uDCB0 \uac70\ub798\ub7c9 \uc0c1\uc704 \uc885\ubaa9\n");
@@ -271,60 +278,8 @@ public class MarketDataService {
         }
     }
 
-    /** 주요 종목의 수급 데이터를 프롬프트 텍스트로 포맷 */
-    public String fetchInvestorDataText() {
-        NumberFormat fmt = NumberFormat.getInstance(Locale.KOREA);
-        StringBuilder text = new StringBuilder();
-        text.append("\n\uD83D\uDC65 \uD22C\uC790\uC790\uBCC4 \uB9E4\uB9E4\uB3D9\uD5A5 (\uC8FC\uC694 \uC885\uBAA9)\n");
-
-        int count = 0;
-        for (String code : TOP_STOCK_CODES.subList(0, Math.min(10, TOP_STOCK_CODES.size()))) {
-            InvestorFlow flow = fetchInvestorData(code);
-            if (flow == null) continue;
-
-            // 종목명 조회
-            JsonNode stock = fetchJson("https://m.stock.naver.com/api/stock/" + code + "/basic");
-            String name = stock != null ? stock.path("stockName").asText(code) : code;
-
-            String sign = flow.foreignNet >= 0 ? "+" : "";
-            String iSign = flow.institutionNet >= 0 ? "+" : "";
-            String pSign = flow.individualNet >= 0 ? "+" : "";
-
-            text.append("  ").append(name).append("(").append(code).append("): ")
-                .append("\uC678\uAD6D\uC778 ").append(sign).append(fmt.format(flow.foreignNet))
-                .append(" | \uAE30\uAD00 ").append(iSign).append(fmt.format(flow.institutionNet))
-                .append(" | \uAC1C\uC778 ").append(pSign).append(fmt.format(flow.individualNet))
-                .append("\n");
-            count++;
-        }
-
-        return count > 0 ? text.append("\n").toString() : "";
-    }
-
-    /** ETF 편입 정보 */
-    public record ETFInclusion(String etfName, String etfCode) {}
-
-    /** 종목의 ETF 편입 현황 조회 */
-    public List<ETFInclusion> fetchETFInclusion(String code) {
-        try {
-            JsonNode data = fetchJson("https://m.stock.naver.com/api/stock/" + code + "/etfItem");
-            if (data == null) return List.of();
-
-            JsonNode items = data.has("etfs") ? data.get("etfs")
-                : data.has("result") ? data.get("result") : data;
-            if (!items.isArray()) return List.of();
-
-            List<ETFInclusion> result = new ArrayList<>();
-            for (int i = 0; i < Math.min(5, items.size()); i++) {
-                JsonNode item = items.get(i);
-                String name = item.path("stockName").asText(item.path("name").asText(""));
-                String etfCode = item.path("stockCode").asText(item.path("code").asText(""));
-                if (!name.isEmpty()) result.add(new ETFInclusion(name, etfCode));
-            }
-            return result;
-        } catch (Exception e) {
-            log.debug("ETF inclusion fetch failed for {}: {}", code, e.getMessage());
-            return List.of();
-        }
-    }
+    // 2026-04-08 dead-code 제거:
+    //   - public String fetchInvestorDataText()  : 호출처 0건 (grep 검증)
+    //   - record ETFInclusion + fetchETFInclusion(String) : 호출처 0건
+    // 필요해지면 git history 에서 복원 가능 (커밋 해시 참조).
 }

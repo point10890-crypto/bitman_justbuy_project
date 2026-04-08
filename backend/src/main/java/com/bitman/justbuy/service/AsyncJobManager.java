@@ -3,6 +3,7 @@ package com.bitman.justbuy.service;
 import com.bitman.justbuy.dto.AnalysisResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -66,5 +67,20 @@ public class AsyncJobManager {
     private void cleanup() {
         Instant cutoff = Instant.now().minusMillis(JOB_TTL_MS);
         jobs.entrySet().removeIf(e -> e.getValue().createdAt().isBefore(cutoff));
+    }
+
+    /**
+     * 주기적 정리. 기존에는 createJob() 호출 때만 cleanup() 이 돌아서,
+     * 새 job 이 생성되지 않으면 orphan(만료된 RUNNING/COMPLETE) 이 영원히 남아 메모리가 새고 있었다.
+     * 10분마다 강제 정리한다.
+     */
+    @Scheduled(fixedDelay = 600_000L, initialDelay = 600_000L)
+    public void periodicCleanup() {
+        int before = jobs.size();
+        cleanup();
+        int after = jobs.size();
+        if (before != after) {
+            log.debug("[AsyncJob] periodic cleanup removed {} expired jobs ({} -> {})", before - after, before, after);
+        }
     }
 }

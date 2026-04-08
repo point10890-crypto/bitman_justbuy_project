@@ -127,14 +127,19 @@ public class PrecomputeScheduler {
         try {
             AnalysisResponse result = analysisService.runLiveAnalysis(query, mode);
             if (result.updatedAt() != null) lastRunTimes.put(mode, result.updatedAt());
+
+            // metadata 가 null 일 수 있는 경로(폴백 응답 등)를 NPE 없이 처리
+            var meta = result.metadata();
+            long durationMs = meta != null ? meta.totalDurationMs() : (System.currentTimeMillis() - startMs);
+            int agentsUsed = meta != null ? meta.agentsUsed() : 0;
+            int agentsSucceeded = meta != null ? meta.agentsSucceeded() : 0;
+            int picks = result.stockPicks() != null ? result.stockPicks().size() : 0;
+
             log.info("[Scheduler] ✅ {} 완료 ({}ms, {}/{} agents)",
-                mode, result.metadata().totalDurationMs(),
-                result.metadata().agentsSucceeded(), result.metadata().agentsUsed());
+                mode, durationMs, agentsSucceeded, agentsUsed);
 
             com.bitman.justbuy.controller.MonitorController.recordAnalysis(
-                mode, true, result.metadata().totalDurationMs(),
-                result.metadata().agentsUsed(), result.metadata().agentsSucceeded(),
-                result.stockPicks() != null ? result.stockPicks().size() : 0, null);
+                mode, true, durationMs, agentsUsed, agentsSucceeded, picks, null);
 
             if (telegramNotifier != null) {
                 telegramNotifier.sendAnalysisResult(mode, result);

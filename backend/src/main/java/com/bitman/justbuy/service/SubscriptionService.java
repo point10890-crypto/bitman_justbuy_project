@@ -281,11 +281,17 @@ public class SubscriptionService {
     }
 
     /** 관리자: 회원 검색 (이름 또는 이메일) */
+    /** 관리자 회원검색. 결과는 50건으로 캡 (응답 폭발/정보 노출 방지). */
+    private static final int USER_SEARCH_LIMIT = 50;
+
     public List<UserDto> searchUsers(String query) {
-        String q = query.toLowerCase().trim();
+        if (query == null) return List.of();
+        String q = query.trim().toLowerCase();
+        if (q.isEmpty()) return List.of();
         return userRepository.findAll().stream()
-            .filter(u -> u.getName().toLowerCase().contains(q)
-                      || u.getEmail().toLowerCase().contains(q))
+            .filter(u -> (u.getName() != null && u.getName().toLowerCase().contains(q))
+                      || (u.getEmail() != null && u.getEmail().toLowerCase().contains(q)))
+            .limit(USER_SEARCH_LIMIT)
             .map(UserDto::from)
             .toList();
     }

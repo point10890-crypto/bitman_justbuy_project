@@ -117,10 +117,21 @@ public class AnalysisService {
 
         try {
             AnalysisResponse result = orchestrator.runAnalysis(query, mode);
-            saveAnalysis(mode, result);
-            liveCache.put(key, new CachedResult(result, System.currentTimeMillis()));
-            // 만료된 캐시 정리
-            liveCache.entrySet().removeIf(e -> e.getValue().isExpired());
+
+            // 방어 로직: 빈 결과(에이전트 0/0 또는 모든 에이전트 실패)는 캐시하지 않는다.
+            // 외부 데이터 소스 장애·API 키 만료 등으로 빈 결과가 생기면, 다음 요청에서 즉시 재시도하도록 fresh 캐시 저장을 막는다.
+            int agentsUsed = result.metadata() != null ? result.metadata().agentsUsed() : 0;
+            int agentsSucceeded = result.metadata() != null ? result.metadata().agentsSucceeded() : 0;
+            int picks = result.stockPicks() != null ? result.stockPicks().size() : 0;
+            if (agentsUsed == 0 || agentsSucceeded == 0 || picks == 0) {
+                log.warn("[Cache] {} 빈 결과 — 캐시 저장 건너뜀 (agents={}/{}, picks={})",
+                    mode, agentsSucceeded, agentsUsed, picks);
+            } else {
+                saveAnalysis(mode, result);
+                liveCache.put(key, new CachedResult(result, System.currentTimeMillis()));
+                // 만료된 캐시 정리
+                liveCache.entrySet().removeIf(e -> e.getValue().isExpired());
+            }
             return result;
         } finally {
             runningAnalyses.remove(key);

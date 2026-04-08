@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 
 /**
  * 모니터링 API — 서비스 헬스체크 + 상태 대시보드
@@ -32,7 +33,10 @@ public class MonitorController {
     private final TrackRecordService trackRecordService;
 
     // 분석 실행 로그 (인메모리, 최근 50건)
-    private static final List<Map<String, Object>> analysisLogs = Collections.synchronizedList(new ArrayList<>());
+    // ConcurrentLinkedDeque 로 lock-free thread safety + addFirst/removeLast 로 bounded ring 구현.
+    // 과거 synchronizedList(ArrayList) 는 add(0,..)/size()+remove() 가 atomic 하지 않고
+    // iterator 사용 시 외부 synchronized block 이 필요해 race condition 위험이 있었다.
+    private static final ConcurrentLinkedDeque<Map<String, Object>> analysisLogs = new ConcurrentLinkedDeque<>();
     private static final int MAX_LOGS = 50;
 
     // 에이전트별 파싱 성공/실패 카운터: int[0] = success, int[1] = failure
@@ -77,9 +81,11 @@ public class MonitorController {
         entry.put("stocksFound", stocksFound);
         if (error != null) entry.put("error", error);
 
-        analysisLogs.add(0, entry);
+        analysisLogs.addFirst(entry);
+        // bounded ring: 50건 초과분은 가장 오래된 항목부터 제거.
+        // size() 는 O(n) 이지만 50 항목 수준이라 무시 가능.
         while (analysisLogs.size() > MAX_LOGS) {
-            analysisLogs.remove(analysisLogs.size() - 1);
+            analysisLogs.pollLast();
         }
     }
 
@@ -203,6 +209,7 @@ public class MonitorController {
     /** GET /api/monitor/logs — 분석 실행 로그 */
     @GetMapping("/logs")
     public List<Map<String, Object>> getLogs() {
+        // ConcurrentLinkedDeque 의 iterator 는 weakly consistent (snapshot 아님) — copy 로 안전하게 노출.
         return new ArrayList<>(analysisLogs);
     }
 

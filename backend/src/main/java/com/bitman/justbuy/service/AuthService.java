@@ -43,14 +43,14 @@ public class AuthService {
     public void ensureAdminExistsOnStartup() {
         if (adminEmail == null || adminEmail.isBlank()) return;
 
-        String defaultPassword = System.getenv("ADMIN_DEFAULT_PASSWORD");
-        if (defaultPassword == null || defaultPassword.isBlank()) {
-            defaultPassword = "Admin1234";
-            log.warn("ADMIN_DEFAULT_PASSWORD not set, using default. Change in production!");
-        }
-
         var existing = userRepository.findByEmail(adminEmail.trim());
         if (existing.isEmpty()) {
+            // 계정이 없을 때만 ADMIN_DEFAULT_PASSWORD 사용해 부트스트랩.
+            String defaultPassword = System.getenv("ADMIN_DEFAULT_PASSWORD");
+            if (defaultPassword == null || defaultPassword.isBlank()) {
+                defaultPassword = "Admin1234";
+                log.warn("ADMIN_DEFAULT_PASSWORD not set — bootstrapping admin with weak default. Change immediately after first login!");
+            }
             var admin = new User(adminEmail.trim(), "Admin", passwordEncoder.encode(defaultPassword));
             admin.setRole(Role.ADMIN);
             admin.setSubscription(SubscriptionStatus.PRO);
@@ -58,14 +58,23 @@ public class AuthService {
             userRepository.save(admin);
             log.info("Admin account created: {}", adminEmail.trim());
         } else {
-            // 기존 admin 비밀번호를 ADMIN_DEFAULT_PASSWORD로 동기화
+            // 계정이 이미 존재하면 비밀번호는 절대 건드리지 않음 (재시작마다 reset 되던 버그 수정).
+            // role/subscription 만 보장.
             var admin = existing.get();
-            admin.setPasswordHash(passwordEncoder.encode(defaultPassword));
-            admin.setRole(Role.ADMIN);
-            admin.setSubscription(SubscriptionStatus.PRO);
-            admin.setSubscriptionEndDate(null);
-            userRepository.save(admin);
-            log.debug("Admin password synced for configured admin account");
+            boolean changed = false;
+            if (admin.getRole() != Role.ADMIN) {
+                admin.setRole(Role.ADMIN);
+                changed = true;
+            }
+            if (admin.getSubscription() != SubscriptionStatus.PRO) {
+                admin.setSubscription(SubscriptionStatus.PRO);
+                admin.setSubscriptionEndDate(null);
+                changed = true;
+            }
+            if (changed) {
+                userRepository.save(admin);
+                log.info("Admin role/subscription re-applied for {}", adminEmail.trim());
+            }
         }
     }
 
