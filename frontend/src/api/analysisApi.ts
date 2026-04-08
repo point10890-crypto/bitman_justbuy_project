@@ -17,6 +17,10 @@ export interface StockPick {
   stopLoss?: string
   action: '매수' | '매도' | '관망' | '주목'
   reason?: string
+  /** DART 기반 재무 점수 0-100 (없으면 0) */
+  financialScore?: number
+  /** 재무 요약 (60자 이내) */
+  financialSummary?: string
 }
 
 /** 에이전트 간 합의 결과 */

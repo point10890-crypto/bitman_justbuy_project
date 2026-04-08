@@ -34,7 +34,6 @@ export default function FeedbackWidget({ mode, analysisId, stockPicks }: Feedbac
       rating,
       comment: comment.trim() || undefined,
       helpfulStocks: selectedStocks.size > 0 ? Array.from(selectedStocks) : undefined,
-      timestamp: new Date().toISOString(),
     }
 
     try {
