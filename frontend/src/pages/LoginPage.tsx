@@ -39,7 +39,10 @@ export default function LoginPage() {
       setLoading(true)
       await login(email.trim(), password, rememberMe)
       const stored = localStorage.getItem('bitman_auth_user') || sessionStorage.getItem('bitman_auth_user')
-      const userData = stored ? JSON.parse(stored) : null
+      let userData: { role?: string; subscription?: string } | null = null
+      if (stored) {
+        try { userData = JSON.parse(stored) } catch { userData = null }
+      }
       if (userData?.role === 'ADMIN') {
         navigate('/', { replace: true })
       } else if (userData?.subscription === 'pro') {

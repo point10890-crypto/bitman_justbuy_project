@@ -44,10 +44,12 @@ export function usePWAInstall() {
       }
     }
 
-    window.addEventListener('appinstalled', () => {
+    const onInstalled = () => {
       setIsInstalled(true)
       _deferredPrompt = null
-    })
+    }
+    window.addEventListener('appinstalled', onInstalled)
+    return () => window.removeEventListener('appinstalled', onInstalled)
   }, [])
 
   // "설치" 배너 클릭 → 무조건 가이드 모달 표시

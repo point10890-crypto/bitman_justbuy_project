@@ -28,9 +28,12 @@ function LiveStockPickCards({ picks }: { picks: StockPickItem[] }) {
   useEffect(() => {
     const codes = picks.map(p => p.code).filter(Boolean)
     if (codes.length === 0) return
+    let cancelled = false
     fetchStockPrices(codes).then(prices => {
+      if (cancelled) return
       if (Object.keys(prices).length > 0) setLivePrices(prices)
     })
+    return () => { cancelled = true }
   }, [picks])
 
   const actionMap: Record<string, { bg: string; border: string; color: string; icon: string; label: string }> = {

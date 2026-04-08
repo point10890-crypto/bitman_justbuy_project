@@ -25,7 +25,7 @@ export function useMarketData() {
       setData(result)
       setLastUpdated(new Date())
     } catch (err) {
-      console.warn('[MarketData] API 호출 실패, 폴백 데이터 사용:', err)
+      if (import.meta.env.DEV) console.warn('[MarketData] API 호출 실패, 폴백 데이터 사용:', err)
       setError(err instanceof Error ? err.message : 'Unknown error')
       // 폴백 데이터 유지 (이전 데이터가 있으면 그대로)
     } finally {

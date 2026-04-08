@@ -106,9 +106,12 @@ function AnalysisResultView({ result }: { result: AnalysisResult }) {
   useEffect(() => {
     const codes = result.stockPicks?.map(p => p.code).filter(Boolean) || []
     if (codes.length === 0) return
+    let cancelled = false
     fetchStockPrices(codes).then(prices => {
+      if (cancelled) return
       if (Object.keys(prices).length > 0) setLivePrices(prices)
     })
+    return () => { cancelled = true }
   }, [result.stockPicks])
 
   // 본문 텍스트에서 AI 할루시네이션 가격을 실시간 가격으로 교정
@@ -229,9 +232,12 @@ function StockPickCards({ picks }: { picks: StockPick[] }) {
   useEffect(() => {
     const codes = picks.map(p => p.code).filter(Boolean)
     if (codes.length === 0) return
+    let cancelled = false
     fetchStockPrices(codes).then(prices => {
+      if (cancelled) return
       if (Object.keys(prices).length > 0) setLivePrices(prices)
     })
+    return () => { cancelled = true }
   }, [picks])
 
   const actionMap: Record<string, { bg: string; border: string; color: string; icon: string; label: string }> = {

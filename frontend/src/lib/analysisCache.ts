@@ -87,20 +87,3 @@ export function setCache(query: string, mode: string | undefined, data: Analysis
 export function clearAllCache() {
   localStorage.removeItem(CACHE_KEY)
 }
-
-/** 캐시 통계 */
-export function getCacheStats(): { count: number; oldestAge: string } {
-  const cache = loadCache()
-  const entries = Object.values(cache)
-  if (entries.length === 0) return { count: 0, oldestAge: '-' }
-
-  const oldest = Math.min(...entries.map(e => e.timestamp))
-  const ageMs = Date.now() - oldest
-  const hours = Math.floor(ageMs / (60 * 60 * 1000))
-  const mins = Math.floor((ageMs % (60 * 60 * 1000)) / (60 * 1000))
-
-  return {
-    count: entries.length,
-    oldestAge: hours > 0 ? `${hours}시간 ${mins}분` : `${mins}분`,
-  }
-}
