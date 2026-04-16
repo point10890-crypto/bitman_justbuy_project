@@ -26,6 +26,7 @@ public class JwtService {
 
     private final SecretKey key;
     private final long expirationMs;
+    private static final long REMEMBER_ME_EXPIRATION_MS = 30L * 24 * 60 * 60 * 1000; // 30일
 
     public JwtService(JwtProperties props) {
         String secret = props.secret();
@@ -69,13 +70,18 @@ public class JwtService {
     }
 
     public String generateToken(UUID userId, String email, String role) {
+        return generateToken(userId, email, role, false);
+    }
+
+    public String generateToken(UUID userId, String email, String role, boolean rememberMe) {
         var now = new Date();
+        long expMs = rememberMe ? REMEMBER_ME_EXPIRATION_MS : expirationMs;
         return Jwts.builder()
                 .subject(userId.toString())
                 .claim("email", email)
                 .claim("role", role)
                 .issuedAt(now)
-                .expiration(new Date(now.getTime() + expirationMs))
+                .expiration(new Date(now.getTime() + expMs))
                 .signWith(key)
                 .compact();
     }

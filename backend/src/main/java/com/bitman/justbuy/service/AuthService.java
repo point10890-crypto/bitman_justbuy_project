@@ -27,16 +27,19 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final org.springframework.beans.factory.ObjectProvider<TelegramNotifier> telegramNotifierProvider;
 
     @Value("${bitman.admin.email:}")
     private String adminEmail;
 
     public AuthService(UserRepository userRepository,
                        PasswordEncoder passwordEncoder,
-                       JwtService jwtService) {
+                       JwtService jwtService,
+                       org.springframework.beans.factory.ObjectProvider<TelegramNotifier> telegramNotifierProvider) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.telegramNotifierProvider = telegramNotifierProvider;
     }
 
     @PostConstruct
@@ -101,10 +104,39 @@ public class AuthService {
         user = userRepository.save(user);
         log.info("User registered: {}", user.getEmail());
 
+        // 관리자 텔레그램 알림 (실패해도 가입 자체는 성공 처리)
+        try {
+            TelegramNotifier notifier = telegramNotifierProvider.getIfAvailable();
+            if (notifier != null) {
+                long totalUsers = userRepository.count();
+                String msg = String.format(
+                    "🆕 <b>[JUST BUY] 신규 회원가입</b>%n%n"
+                    + "👤 이름: %s%n"
+                    + "📧 이메일: %s%n"
+                    + "🛡 권한: %s%n"
+                    + "🆔 userId: <code>%s</code>%n%n"
+                    + "📊 전체 회원: %d명",
+                    escape(user.getName()),
+                    escape(user.getEmail()),
+                    user.getRole().name(),
+                    user.getId(),
+                    totalUsers
+                );
+                notifier.sendToAdmin(msg);
+            }
+        } catch (Exception e) {
+            log.warn("[Auth] 관리자 텔레그램 알림 실패: {}", e.getMessage());
+        }
+
         var token = jwtService.generateToken(
             user.getId(), user.getEmail(), user.getRole().name());
 
         return new AuthResponse(token, UserDto.from(user));
+    }
+
+    private static String escape(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     public AuthResponse login(AuthRequest request) {
@@ -118,7 +150,7 @@ public class AuthService {
         ensureAdminPro(user);
 
         var token = jwtService.generateToken(
-            user.getId(), user.getEmail(), user.getRole().name());
+            user.getId(), user.getEmail(), user.getRole().name(), request.rememberMe());
 
         return new AuthResponse(token, UserDto.from(user));
     }

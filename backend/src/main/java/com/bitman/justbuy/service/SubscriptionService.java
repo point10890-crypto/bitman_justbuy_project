@@ -62,7 +62,7 @@ public class SubscriptionService {
             if (notifier != null) {
                 long pendingCount = userRepository.findBySubscription(SubscriptionStatus.PENDING).size();
                 String msg = String.format(
-                    "🔔 <b>신규 구독 승인 요청</b>%n%n"
+                    "🔔 <b>[JUST BUY] 신규 구독 승인 요청</b>%n%n"
                     + "👤 이름: %s%n"
                     + "📧 이메일: %s%n"
                     + "💳 입금자명: %s%n"
@@ -256,17 +256,49 @@ public class SubscriptionService {
      */
     @Scheduled(cron = "0 0 0 * * *", zone = "Asia/Seoul")
     public void expireSubscriptions() {
-        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
-        List<User> expired = userRepository.findExpiredProUsers(today);
+        LocalDate today;
+        List<User> expired;
+        try {
+            today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+            expired = userRepository.findExpiredProUsers(today);
+        } catch (Exception e) {
+            log.error("[Subscription] 만료 대상 조회 실패 — cron skipped: {}", e.getMessage(), e);
+            return;
+        }
         if (expired.isEmpty()) return;
 
+        int ok = 0;
+        int failed = 0;
         for (User user : expired) {
-            user.setSubscription(SubscriptionStatus.FREE);
-            user.setSubscriptionEndDate(null);
-            userRepository.save(user);
-            log.info("[Subscription] 만료 처리: userId={}, email={}", user.getId(), user.getEmail());
+            try {
+                user.setSubscription(SubscriptionStatus.FREE);
+                user.setSubscriptionEndDate(null);
+                userRepository.save(user);
+                log.info("[Subscription] 만료 처리: userId={}, email={}", user.getId(), user.getEmail());
+                ok++;
+            } catch (Exception e) {
+                // 단일 유저 실패가 전체 배치를 중단시키지 않도록 격리
+                failed++;
+                log.error("[Subscription] 만료 처리 실패 userId={}, email={}: {}",
+                    user.getId(), user.getEmail(), e.getMessage(), e);
+            }
         }
-        log.info("[Subscription] 구독 만료 일괄 처리 완료: {}명 FREE 전환", expired.size());
+        log.info("[Subscription] 구독 만료 일괄 처리 완료: 성공 {}명, 실패 {}명 (대상 {}명)",
+            ok, failed, expired.size());
+
+        // 실패가 있으면 관리자에게 텔레그램 알림 (사일런트 실패 방지)
+        if (failed > 0) {
+            try {
+                TelegramNotifier notifier = telegramNotifierProvider.getIfAvailable();
+                if (notifier != null) {
+                    notifier.sendToAdmin(String.format(
+                        "⚠️ <b>구독 만료 배치 부분 실패</b>%n%n"
+                        + "성공: %d명 / 실패: %d명 (대상 %d명)%n"
+                        + "로그를 확인해주세요.",
+                        ok, failed, expired.size()));
+                }
+            } catch (Exception ignore) { /* 알림 실패는 조용히 무시 */ }
+        }
     }
 
     /**

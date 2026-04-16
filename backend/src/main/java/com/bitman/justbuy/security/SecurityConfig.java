@@ -71,7 +71,14 @@ public class SecurityConfig {
 
                 // Swagger/OpenAPI
                 .requestMatchers(new AntPathRequestMatcher("/swagger-ui/**")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/swagger-ui.html")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/v3/api-docs/**")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/v3/api-docs")).permitAll()
+
+                // Actuator — health/info만 public, 나머지는 management.exposure.include에서 차단됨
+                .requestMatchers(new AntPathRequestMatcher("/actuator/health")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/actuator/health/**")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/actuator/info")).permitAll()
 
                 // Monitor: ping은 public, health/logs는 관리자 전용
                 .requestMatchers(new AntPathRequestMatcher("/api/monitor/ping")).permitAll()

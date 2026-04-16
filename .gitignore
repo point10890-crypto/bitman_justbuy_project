@@ -1,6 +1,19 @@
 # Environment & Secrets
 .env
+.env.*
+!.env.example
+!frontend/.env.development
+!frontend/.env.production
+backend/.env
+backend/.env.*
+**/secrets/
 *.pem
+*.key
+*.p12
+*.pfx
+.jwt-secret
+*credentials*.json
+!google-credentials.example.json
 
 # Python
 __pycache__/

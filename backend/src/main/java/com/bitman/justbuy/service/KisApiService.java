@@ -142,22 +142,54 @@ public class KisApiService {
             } catch (Exception ignored) {}
         }
 
-        try {
-            String token = getAccessToken();
-            if (token == null) return Map.of();
+        String token = getAccessToken();
+        if (token == null) return Map.of();
 
-            String url = KIS_BASE + "/uapi/domestic-stock/v1/quotations/inquire-price"
-                + "?FID_COND_MRKT_DIV_CODE=J"
-                + "&FID_INPUT_ISCD=" + stockCode;
+        String url = KIS_BASE + "/uapi/domestic-stock/v1/quotations/inquire-price"
+            + "?FID_COND_MRKT_DIV_CODE=J"
+            + "&FID_INPUT_ISCD=" + stockCode;
+        HttpHeaders headers = buildHeaders("FHKST01010100");
 
-            HttpHeaders headers = buildHeaders("FHKST01010100");
-            ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
-            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
-                log.warn("[KIS] 현재가 HTTP 에러: {} ({})", resp.getStatusCode(), stockCode);
+        // KIS 레이트리밋(EGW00201)은 초당 호출 제한 초과 시 일시적 500을 리턴 → 짧은 백오프로 재시도
+        // 최대 3회 시도 (0.3s, 0.6s 백오프)
+        String responseBody = null;
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                ResponseEntity<String> resp = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+                if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
+                    log.warn("[KIS] 현재가 HTTP 에러: {} ({}) — attempt {}/{}",
+                        resp.getStatusCode(), stockCode, attempt, MAX_RETRIES);
+                    if (attempt < MAX_RETRIES) { sleepBackoff(attempt); continue; }
+                    return Map.of();
+                }
+                responseBody = resp.getBody();
+                break;
+            } catch (org.springframework.web.client.HttpStatusCodeException hse) {
+                // EGW00201(초당 거래건수 초과)은 500으로 내려올 수 있음 → 본문으로 판별
+                String body = hse.getResponseBodyAsString();
+                boolean isRateLimit = body != null
+                    && (body.contains("EGW00201") || body.contains("초당") || body.contains("rate"));
+                if (isRateLimit && attempt < MAX_RETRIES) {
+                    log.info("[KIS] 현재가 rate-limit ({}) — retry {}/{} after backoff",
+                        stockCode, attempt, MAX_RETRIES);
+                    sleepBackoff(attempt);
+                    continue;
+                }
+                log.warn("[KIS] 현재가 HTTP {} ({}): {}", hse.getStatusCode(), stockCode,
+                    body != null && body.length() > 200 ? body.substring(0, 200) : body);
+                return Map.of();
+            } catch (Exception e) {
+                log.warn("[KIS] 현재가 조회 실패 ({}) attempt {}/{}: {}",
+                    stockCode, attempt, MAX_RETRIES, e.getMessage());
+                if (attempt < MAX_RETRIES) { sleepBackoff(attempt); continue; }
                 return Map.of();
             }
-            JsonNode output = objectMapper.readTree(resp.getBody()).path("output");
+        }
+        if (responseBody == null) return Map.of();
 
+        try {
+            JsonNode output = objectMapper.readTree(responseBody).path("output");
             Map<String, String> result = new LinkedHashMap<>();
             result.put("현재가", output.path("stck_prpr").asText(""));
             result.put("전일대비", output.path("prdy_vrss").asText(""));
@@ -175,11 +207,22 @@ public class KisApiService {
 
             cache.put(cacheKey, new CachedEntry(objectMapper.writeValueAsString(result),
                 Instant.now().plus(10, ChronoUnit.MINUTES)));
-
             return result;
         } catch (Exception e) {
-            log.warn("[KIS] 현재가 조회 실패 ({}): {}", stockCode, e.getMessage());
+            log.warn("[KIS] 현재가 파싱 실패 ({}): {}", stockCode, e.getMessage());
             return Map.of();
+        }
+    }
+
+    private static final int MAX_RETRIES = 3;
+    private static final long BASE_BACKOFF_MS = 300L;
+
+    private static void sleepBackoff(int attempt) {
+        try {
+            // 지수 백오프 (attempt 1 → 300ms, 2 → 600ms)
+            Thread.sleep(BASE_BACKOFF_MS * attempt);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
         }
     }
 

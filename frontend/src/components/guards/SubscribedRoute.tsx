@@ -1,5 +1,5 @@
 import { Navigate, useLocation } from 'react-router-dom'
-import { useAuth } from '../../contexts/AuthContext'
+import { useAuth, getStoredToken } from '../../contexts/AuthContext'
 import type { ReactNode } from 'react'
 
 export default function SubscribedRoute({ children }: { children: ReactNode }) {
@@ -15,6 +15,14 @@ export default function SubscribedRoute({ children }: { children: ReactNode }) {
   }
 
   if (!user) {
+    // 토큰이 있으면 로그인 직후 state 반영 대기 중 — 스피너 표시 (landing 리다이렉트 방지)
+    if (getStoredToken()) {
+      return (
+        <div className="min-h-dvh flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+          <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'rgba(255,215,0,0.3)', borderTopColor: 'transparent' }} />
+        </div>
+      )
+    }
     if (location.pathname === '/') {
       return <Navigate to="/landing" replace />
     }

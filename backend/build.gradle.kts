@@ -20,11 +20,13 @@ repositories {
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-cache")
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("com.github.ben-manes.caffeine:caffeine:3.1.8")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
 
-    // API Documentation
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
+    // API Documentation — 2.8.0 is compatible with Spring Framework 6.2.x
+    // (2.6.0 broke on Spring 6.2 due to ControllerAdviceBean(Object) constructor removal)
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.0")
 
     // Security + JWT
     implementation("org.springframework.boot:spring-boot-starter-security")

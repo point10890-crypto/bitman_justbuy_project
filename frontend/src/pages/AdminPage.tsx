@@ -61,6 +61,11 @@ export default function AdminPage() {
   const [monitorLoading, setMonitorLoading] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(false)
 
+  // ─── 빠른 액션 확인 모달 ───
+  const [confirmAction, setConfirmAction] = useState<{
+    userId: string; userName: string; type: 'grant' | 'approve' | 'reject' | 'revoke'
+  } | null>(null)
+
   useEffect(() => { loadData() }, [])
 
   const loadData = async () => {
@@ -117,6 +122,43 @@ export default function AdminPage() {
     try {
       const updated = await revokeSubscription(token, userId)
       setAllUsers(prev => prev.map(u => u.id === userId ? updated : u))
+    } catch (e) { showToast('처리 실패: ' + (e instanceof Error ? e.message : '오류')) }
+    finally { setActionId(null) }
+  }
+
+  // ─── 빠른 액션 실행 (확인 모달에서 호출) ───
+  const executeQuickAction = async () => {
+    if (!confirmAction) return
+    const { userId, type } = confirmAction
+    setConfirmAction(null)
+    switch (type) {
+      case 'approve': await handleApprove(userId); break
+      case 'reject': await handleReject(userId); break
+      case 'revoke': await handleRevoke(userId); break
+      case 'grant': await handleGrantPro(userId); break
+    }
+    showToast(
+      type === 'grant' ? 'PRO 구독이 부여되었습니다.' :
+      type === 'approve' ? '구독이 승인되었습니다.' :
+      type === 'reject' ? '구독이 거절되었습니다.' :
+      '구독이 해제되었습니다.',
+      'success'
+    )
+  }
+
+  // FREE → PRO 직접 부여 (adminUpdateUser 사용)
+  const handleGrantPro = async (userId: string) => {
+    const token = getStoredToken()
+    if (!token) return
+    setActionId(userId)
+    try {
+      const user = allUsers.find(u => u.id === userId)
+      if (!user) return
+      const updated = await adminUpdateUser(token, userId, {
+        name: user.name, email: user.email, subscription: 'PRO',
+      })
+      setAllUsers(prev => prev.map(u => u.id === userId ? updated : u))
+      if (selectedUser?.id === userId) setSelectedUser(updated)
     } catch (e) { showToast('처리 실패: ' + (e instanceof Error ? e.message : '오류')) }
     finally { setActionId(null) }
   }
@@ -300,6 +342,50 @@ export default function AdminPage() {
       {toast && (
         <div style={{ position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 9999, padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#fff', backgroundColor: toast.type === 'error' ? '#D32F2F' : '#00C853', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
           {toast.msg}
+        </div>
+      )}
+      {/* 확인 모달 */}
+      {confirmAction && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+            onClick={() => setConfirmAction(null)} />
+          <div style={{
+            position: 'relative', width: '90%', maxWidth: 360, padding: 24, borderRadius: 16,
+            backgroundColor: 'rgba(20,20,25,0.98)', border: '1px solid var(--border-subtle)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+          }}>
+            <p className="text-[14px] font-bold text-center mb-1" style={{ color: 'var(--text-primary)' }}>
+              {confirmAction.type === 'grant' ? 'PRO 구독 부여' :
+               confirmAction.type === 'approve' ? '구독 승인' :
+               confirmAction.type === 'reject' ? '구독 거절' : '구독 해제'}
+            </p>
+            <p className="text-[12px] text-center mb-5" style={{ color: 'var(--text-muted)' }}>
+              <span className="font-bold" style={{ color: 'var(--text-primary)' }}>{confirmAction.userName}</span>
+              {confirmAction.type === 'grant' && ' 님에게 PRO 구독을 부여합니다.'}
+              {confirmAction.type === 'approve' && ' 님의 구독 신청을 승인합니다.'}
+              {confirmAction.type === 'reject' && ' 님의 구독 신청을 거절합니다.'}
+              {confirmAction.type === 'revoke' && ' 님의 PRO 구독을 해제합니다.'}
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmAction(null)}
+                className="flex-1 py-2.5 rounded-xl text-[12px] font-bold"
+                style={{ backgroundColor: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)' }}>
+                취소
+              </button>
+              <button onClick={executeQuickAction}
+                className="flex-1 py-2.5 rounded-xl text-[12px] font-bold transition-all duration-150"
+                style={{
+                  backgroundColor: confirmAction.type === 'reject' || confirmAction.type === 'revoke'
+                    ? 'rgba(255,23,68,0.15)' : 'rgba(124,77,255,0.15)',
+                  color: confirmAction.type === 'reject' || confirmAction.type === 'revoke'
+                    ? '#FF1744' : '#7C4DFF',
+                  border: `1px solid ${confirmAction.type === 'reject' || confirmAction.type === 'revoke'
+                    ? 'rgba(255,23,68,0.3)' : 'rgba(124,77,255,0.3)'}`,
+                }}>
+                확인
+              </button>
+            </div>
+          </div>
         </div>
       )}
       <div className="flex flex-col gap-4" style={{ maxWidth: '480px', margin: '0 auto', width: '100%' }}>
@@ -699,9 +785,8 @@ export default function AdminPage() {
                       </p>
                     </GlassCard>
                   ) : filteredUsers.map(u => (
-                    <button
+                    <div
                       key={u.id}
-                      onClick={() => handleSelectUser(u)}
                       className="w-full text-left transition-all duration-150 rounded-2xl"
                       style={{
                         padding: '14px 16px',
@@ -712,38 +797,90 @@ export default function AdminPage() {
                       onMouseEnter={e => { if (selectedUser?.id !== u.id) e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)' }}
                       onMouseLeave={e => { if (selectedUser?.id !== u.id) e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.03)' }}
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{
-                            background: u.role === 'ADMIN'
-                              ? 'linear-gradient(135deg, rgba(255,215,0,0.25), rgba(255,152,0,0.15))'
-                              : 'linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04))',
-                            border: u.role === 'ADMIN'
-                              ? '1.5px solid rgba(255,215,0,0.4)'
-                              : '1.5px solid var(--border-subtle)',
-                          }}>
-                            <span className="font-black text-[14px]" style={{
-                              color: u.role === 'ADMIN' ? '#FFD700' : 'var(--text-secondary)',
-                            }}>{u.name.charAt(0).toUpperCase()}</span>
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[13px] font-bold" style={{ color: 'var(--text-primary)' }}>{u.name}</span>
-                              {u.role === 'ADMIN' && (
-                                <span className="text-[7px] font-black px-1.5 py-0.5 rounded-full" style={{
-                                  backgroundColor: 'rgba(255,215,0,0.15)', color: '#FFD700', border: '1px solid rgba(255,215,0,0.3)',
-                                }}>ADMIN</span>
-                              )}
+                      <button onClick={() => handleSelectUser(u)} className="w-full text-left">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{
+                              background: u.role === 'ADMIN'
+                                ? 'linear-gradient(135deg, rgba(255,215,0,0.25), rgba(255,152,0,0.15))'
+                                : 'linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04))',
+                              border: u.role === 'ADMIN'
+                                ? '1.5px solid rgba(255,215,0,0.4)'
+                                : '1.5px solid var(--border-subtle)',
+                            }}>
+                              <span className="font-black text-[14px]" style={{
+                                color: u.role === 'ADMIN' ? '#FFD700' : 'var(--text-secondary)',
+                              }}>{u.name.charAt(0).toUpperCase()}</span>
                             </div>
-                            <span className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>{u.email}</span>
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[13px] font-bold" style={{ color: 'var(--text-primary)' }}>{u.name}</span>
+                                {u.role === 'ADMIN' && (
+                                  <span className="text-[7px] font-black px-1.5 py-0.5 rounded-full" style={{
+                                    backgroundColor: 'rgba(255,215,0,0.15)', color: '#FFD700', border: '1px solid rgba(255,215,0,0.3)',
+                                  }}>ADMIN</span>
+                                )}
+                              </div>
+                              <span className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>{u.email}</span>
+                            </div>
+                          </div>
+                          <div className="text-right flex flex-col items-end gap-1">
+                            {subBadge(u.subscription)}
+                            <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>{fmt(u.createdAt)}</span>
                           </div>
                         </div>
-                        <div className="text-right flex flex-col items-end gap-1">
-                          {subBadge(u.subscription)}
-                          <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>{fmt(u.createdAt)}</span>
+                      </button>
+
+                      {/* 구독 관리 인라인 버튼 (ADMIN 제외) */}
+                      {u.role !== 'ADMIN' && (
+                        <div className="flex gap-1.5 mt-2 pt-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                          {u.subscription === 'FREE' && (
+                            <button
+                              disabled={actionId === u.id}
+                              onClick={e => { e.stopPropagation(); setConfirmAction({ userId: u.id, userName: u.name, type: 'grant' }) }}
+                              className="flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-150"
+                              style={{ backgroundColor: 'rgba(124,77,255,0.1)', color: '#7C4DFF', border: '1px solid rgba(124,77,255,0.25)' }}
+                              onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(124,77,255,0.2)' }}
+                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(124,77,255,0.1)' }}>
+                              {actionId === u.id ? '...' : 'PRO 부여'}
+                            </button>
+                          )}
+                          {u.subscription === 'PENDING' && (
+                            <>
+                              <button
+                                disabled={actionId === u.id}
+                                onClick={e => { e.stopPropagation(); setConfirmAction({ userId: u.id, userName: u.name, type: 'approve' }) }}
+                                className="flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-150"
+                                style={{ backgroundColor: 'rgba(0,200,83,0.1)', color: '#00C853', border: '1px solid rgba(0,200,83,0.25)' }}
+                                onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(0,200,83,0.2)' }}
+                                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(0,200,83,0.1)' }}>
+                                {actionId === u.id ? '...' : '승인'}
+                              </button>
+                              <button
+                                disabled={actionId === u.id}
+                                onClick={e => { e.stopPropagation(); setConfirmAction({ userId: u.id, userName: u.name, type: 'reject' }) }}
+                                className="flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-150"
+                                style={{ backgroundColor: 'rgba(255,23,68,0.08)', color: '#FF1744', border: '1px solid rgba(255,23,68,0.2)' }}
+                                onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(255,23,68,0.15)' }}
+                                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(255,23,68,0.08)' }}>
+                                {actionId === u.id ? '...' : '거절'}
+                              </button>
+                            </>
+                          )}
+                          {u.subscription === 'PRO' && (
+                            <button
+                              disabled={actionId === u.id}
+                              onClick={e => { e.stopPropagation(); setConfirmAction({ userId: u.id, userName: u.name, type: 'revoke' }) }}
+                              className="flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-150"
+                              style={{ backgroundColor: 'rgba(255,23,68,0.08)', color: '#FF1744', border: '1px solid rgba(255,23,68,0.2)' }}
+                              onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(255,23,68,0.15)' }}
+                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(255,23,68,0.08)' }}>
+                              {actionId === u.id ? '...' : 'PRO 해제'}
+                            </button>
+                          )}
                         </div>
-                      </div>
-                    </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
@@ -836,10 +973,10 @@ export default function AdminPage() {
                         </div>
                         <div className="flex flex-col gap-2">
                           {(systemStatus.cache || [
-                            { mode: '오늘뭐사', status: 'missing' },
-                            { mode: '스윙매매', status: 'missing' },
-                            { mode: '종가매매', status: 'missing' },
-                            { mode: '수급분석', status: 'missing' },
+                            { mode: 'BREAKOUT', status: 'missing' },
+                            { mode: 'FLOW_LEADER', status: 'missing' },
+                            { mode: 'CATALYST_BURST', status: 'missing' },
+                            { mode: 'REVERSAL_EDGE', status: 'missing' },
                           ]).map((c: any) => {
                             const statusColor = c.status === 'valid' ? '#00C853' : c.status === 'expired' ? '#FF9800' : '#FF1744'
                             const statusLabel = c.status === 'valid' ? '유효' : c.status === 'expired' ? '만료됨' : '없음'

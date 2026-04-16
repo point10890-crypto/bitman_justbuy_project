@@ -25,8 +25,6 @@ export function useAnalysis() {
 
       // 프리컴퓨트 모드: 서버 캐시 먼저 확인 → 없으면 라이브 폴백
       const PRECOMPUTED_MODES = new Set(['BREAKOUT', 'FLOW_LEADER', 'CATALYST_BURST', 'REVERSAL_EDGE'])
-      // 라이브 전용 모드: 프리컴퓨트 확인 안 함
-      const LIVE_ONLY_MODES = new Set(['분석해줘', '수급분석'])
 
       if (mode && PRECOMPUTED_MODES.has(mode)) {
         // 컨셉 모드 — 프리컴퓨트 우선, 없으면 라이브 폴백
@@ -48,30 +46,8 @@ export function useAnalysis() {
         } catch {
           // 프리컴퓨트 실패 → 라이브 폴백
         }
-      } else if (mode && !LIVE_ONLY_MODES.has(mode)) {
-        // 사이드 메뉴 모드 (오늘뭐사, 스윙매매, 종가매매) — 프리컴퓨트 전용
-        const cached = getCached(query, effectiveMode)
-        const precomputed = await fetchPrecomputed(mode, token)
-
-        if (precomputed && precomputed.metadata.agentsSucceeded > 0) {
-          const serverTime = new Date(precomputed.updatedAt).getTime()
-          const cachedTime = cached ? new Date(cached.updatedAt).getTime() : 0
-          if (serverTime > cachedTime || !cached) {
-            setResult({ ...precomputed, isPrecomputed: true })
-            setCache(query, effectiveMode, precomputed)
-            addHistory(query, mode, precomputed.content)
-          } else {
-            setResult({ ...cached, isPrecomputed: true })
-          }
-          return
-        }
-        if (cached && cached.metadata.agentsSucceeded > 0) {
-          setResult({ ...cached, isPrecomputed: true })
-          return
-        }
-        throw new Error('예약 분석 준비 중입니다. 잠시 후 다시 시도해 주세요.')
       } else {
-        // 라이브 전용 모드 (분석해줘, 수급분석): 클라이언트 캐시 우선
+        // 라이브 모드 (분석해줘, 수급분석): 클라이언트 캐시 우선
         const cached = getCached(query, effectiveMode)
         if (cached && cached.metadata.agentsSucceeded > 0) {
           setResult({ ...cached, isPrecomputed: false })

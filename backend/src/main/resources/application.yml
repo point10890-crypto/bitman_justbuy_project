@@ -54,3 +54,14 @@ bitman:
     base-url: ${FLASK_BASE_URL:http://localhost:5001}
   admin:
     email: ${ADMIN_EMAIL:admin@bitman.net}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true

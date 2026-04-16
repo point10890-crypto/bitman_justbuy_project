@@ -48,11 +48,11 @@ export async function registerUser(name: string, email: string, password: string
   return res.json()
 }
 
-export async function loginUser(email: string, password: string): Promise<AuthResponse> {
+export async function loginUser(email: string, password: string, rememberMe?: boolean): Promise<AuthResponse> {
   const res = await fetch(`${API_BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, rememberMe: !!rememberMe }),
   })
   if (!res.ok) await handleError(res)
   return res.json()

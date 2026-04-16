@@ -34,19 +34,31 @@ public class TelegramNotifier {
 
     public TelegramNotifier(@Value("${bitman.telegram.bot-token}") String botToken,
                             @Value("${bitman.telegram.chat-id}") String chatId,
-                            @Value("${bitman.telegram.channel-chat-id:}") String channelChatId) {
+                            @Value("${bitman.telegram.channel-chat-id:}") String channelChatId,
+                            RestTemplate restTemplate) {
         this.botToken = botToken;
         this.chatId = chatId;
         this.channelChatId = channelChatId;
-        this.restTemplate = new RestTemplate();
+        // AppConfig#restTemplate에 설정된 타임아웃(connect 10s / read 120s)을 적용하기 위해
+        // 인젝션된 빈을 사용. 자체 `new RestTemplate()`은 timeout 미설정 → Telegram API 행 시 스케줄러 스레드 영구 블록 위험.
+        this.restTemplate = restTemplate;
         log.info("[Telegram] Notifier initialized (personal={}, channel={})", chatId,
                 channelChatId != null && !channelChatId.isEmpty() ? channelChatId : "none");
     }
 
     public void send(String message) {
-        String text = message.length() > MAX_MESSAGE_LENGTH
-            ? message.substring(0, MAX_MESSAGE_LENGTH) + "\n\n... (생략)"
-            : message;
+        String footer = "\n\n\ud83d\udd17 https://api.bit-man.net";
+        String text;
+        if (message.length() > MAX_MESSAGE_LENGTH) {
+            // footer가 이미 포함되어 있으면 제거 후 잘라서 다시 붙이기
+            String body = message.endsWith(footer)
+                ? message.substring(0, message.length() - footer.length())
+                : message;
+            int maxBody = MAX_MESSAGE_LENGTH - footer.length() - 15; // "... (생략)" 여유
+            text = (body.length() > maxBody ? body.substring(0, maxBody) + "\n\n... (생략)" : body) + footer;
+        } else {
+            text = message;
+        }
 
         // 1) 개인 봇
         sendTo(chatId, text);
@@ -66,6 +78,10 @@ public class TelegramNotifier {
     }
 
     private void sendTo(String targetChatId, String text) {
+        if (botToken == null || botToken.isBlank()) {
+            log.warn("[Telegram] botToken empty — cannot send to {} (check TELEGRAM_BOT_TOKEN env)", targetChatId);
+            return;
+        }
         try {
             String url = String.format(API_URL, botToken);
             HttpHeaders headers = new HttpHeaders();
@@ -77,8 +93,17 @@ public class TelegramNotifier {
                 "parse_mode", "HTML"
             );
 
-            restTemplate.postForObject(url, new HttpEntity<>(body, headers), String.class);
-            log.debug("[Telegram] Message sent to {}", targetChatId);
+            String resp = restTemplate.postForObject(url, new HttpEntity<>(body, headers), String.class);
+            // Telegram returns HTTP 200 even when ok=false for some cases — inspect body
+            if (resp != null && resp.contains("\"ok\":false")) {
+                log.warn("[Telegram] API rejected send to {}: {}", targetChatId,
+                    resp.length() > 300 ? resp.substring(0, 300) : resp);
+            } else {
+                log.info("[Telegram] ✉ sent to {} ({} chars)", targetChatId, text.length());
+            }
+        } catch (org.springframework.web.client.HttpStatusCodeException hse) {
+            log.warn("[Telegram] HTTP {} sending to {}: {}",
+                hse.getStatusCode(), targetChatId, hse.getResponseBodyAsString());
         } catch (Exception e) {
             log.warn("[Telegram] Failed to send to {}: {}", targetChatId, e.getMessage());
         }
@@ -97,17 +122,26 @@ public class TelegramNotifier {
     }
 
     public void sendAnalysisResult(String mode, AnalysisResponse result) {
+        log.info("[Telegram] sendAnalysisResult called: mode={}, metadata={}, picks={}",
+            mode,
+            result.metadata() != null,
+            result.stockPicks() != null ? result.stockPicks().size() : 0);
         StringBuilder sb = new StringBuilder();
 
-        String emoji = result.metadata().agentsSucceeded() == result.metadata().agentsUsed()
-            ? "\u2705" : "\u26a0\ufe0f";
+        // metadata 가 null 인 폴백 응답 경로에서도 안전하게 처리
+        var meta = result.metadata();
+        int agentsUsed = meta != null ? meta.agentsUsed() : 0;
+        int agentsSucceeded = meta != null ? meta.agentsSucceeded() : 0;
+        long totalDurationMs = meta != null ? meta.totalDurationMs() : 0L;
+
+        String emoji = (agentsUsed > 0 && agentsSucceeded == agentsUsed) ? "\u2705" : "\u26a0\ufe0f";
 
         // 헤더
         sb.append(String.format("%s <b>[%s] \ubd84\uc11d \uc644\ub8cc</b>\n", emoji, localizeMode(mode)));
         sb.append(String.format("\u23f1 %.1f\ucd08 | \ud83e\udd16 %d/%d AI\n",
-            result.metadata().totalDurationMs() / 1000.0,
-            result.metadata().agentsSucceeded(),
-            result.metadata().agentsUsed()));
+            totalDurationMs / 1000.0,
+            agentsSucceeded,
+            agentsUsed));
         sb.append("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n");
 
         // 추천 종목 리스트
@@ -195,9 +229,8 @@ public class TelegramNotifier {
     /** finalContent에서 JSON 코드블록, HTML 태그, 검증 섹션 제거 */
     private String stripContent(String content) {
         return content
-            // markdown 코드블록 제거 (```json:analysis ... ``` 등)
-            .replaceAll("(?s)```[\\w:]*\\s*\\{.*?```", "")
-            .replaceAll("(?s)```[\\w:]*.*?```", "")
+            // markdown 코드블록 제거 — backtick 3개로 감싼 모든 블록 (json:analysis, json 등)
+            .replaceAll("(?s)```[\\w:]*\\s*[\\s\\S]*?```", "")
             // HTML 태그 제거
             .replaceAll("<[^>]+>", "")
             // 실시간 검증 섹션 제거 (하단 부가 정보)
@@ -219,7 +252,8 @@ public class TelegramNotifier {
             + "\ud83d\udea8 \uc624\ub958: %s",
             mode, error != null ? error : "unknown"
         );
-        send(msg);
+        // 시스템 메시지 → 관리자 개인에게만 (채널 발송 X)
+        sendToAdmin(msg);
     }
 
     public void sendStartupComplete(int success, int total) {
@@ -229,6 +263,7 @@ public class TelegramNotifier {
             + "\ud83d\udd17 JustBuy API \uc11c\ube44\uc2a4 \uc2dc\uc791",
             success, total
         );
-        send(msg);
+        // 시스템 메시지 → 관리자 개인에게만 (채널 발송 X)
+        sendToAdmin(msg);
     }
 }

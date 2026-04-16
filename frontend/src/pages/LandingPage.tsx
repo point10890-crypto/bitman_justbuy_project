@@ -307,9 +307,9 @@ export default function LandingPage() {
 
           <div className="l-template-grid">
             {[
-              { num: '01', title: '오늘뭐사', schedule: '매일 08:00', desc: '당일 매매에 최적화된 추천 종목을 제공합니다' },
-              { num: '02', title: '스윙매매', schedule: '3일마다 07:00', desc: '3~10일 보유 전략의 스윙 후보를 선별합니다' },
-              { num: '03', title: '종가매매', schedule: '매일 15:10', desc: '종가 매수 → 시초가 매도 전략을 분석합니다' },
+              { num: '01', title: '돌파매수', schedule: '매시 50분 갱신', desc: '기술적 돌파 후보를 매시 업데이트합니다' },
+              { num: '02', title: '수급주도', schedule: '매시 50분 갱신', desc: '외국인·기관 수급 주도 종목을 포착합니다' },
+              { num: '03', title: '급등재료', schedule: '매시 50분 갱신', desc: '재료·이벤트 드리븐 급등 후보를 분석합니다' },
               { num: '04', title: '수급분석', schedule: '매일 10:00 · 14:00', desc: '외인·기관 수급 교차 분석으로 주도주를 포착합니다' },
             ].map(mode => (
               <div key={mode.num} className="l-mode-card l-animate-on-scroll">

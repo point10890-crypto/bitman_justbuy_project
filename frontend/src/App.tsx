@@ -137,40 +137,7 @@ function App() {
               </div>
 
               <div className="quick-grid">
-                <button className="quick-card animate-slide-up" style={{ backgroundImage: 'linear-gradient(135deg, rgba(0,200,83,0.1) 0%, rgba(0,200,83,0.02) 100%)', animationDelay: '0s', animationFillMode: 'backwards' }} onClick={() => handleCardClick('오늘뭐사', '오늘 뭐 살까? 당일 매매 추천')}>
-                  <span className="text-lg">📈</span>
-                  <div>
-                    <div className="flex items-baseline gap-1">
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--text-primary)' }}>오늘</span>
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-bull)' }}>뭐사?</span>
-                    </div>
-                    <span className="text-[9.5px]" style={{ color: 'var(--text-secondary)' }}>당일 종가·시초가 매매</span>
-                  </div>
-                </button>
-
-                <button className="quick-card animate-slide-up" style={{ backgroundImage: 'linear-gradient(135deg, rgba(66,165,245,0.1) 0%, rgba(66,165,245,0.02) 100%)', animationDelay: '0.05s', animationFillMode: 'backwards' }} onClick={() => handleCardClick('스윙매매', '스윙매매 후보 종목 분석')}>
-                  <span className="text-lg">⚡</span>
-                  <div>
-                    <div className="flex items-baseline gap-1">
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--text-primary)' }}>스윙매매</span>
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-neutral)' }}>뭐사?</span>
-                    </div>
-                    <span className="text-[9.5px]" style={{ color: 'var(--text-secondary)' }}>3일~3주 스윙 후보</span>
-                  </div>
-                </button>
-
-                <button className="quick-card animate-slide-up" style={{ backgroundImage: 'linear-gradient(135deg, rgba(124,77,255,0.1) 0%, rgba(124,77,255,0.02) 100%)', animationDelay: '0.1s', animationFillMode: 'backwards' }} onClick={() => handleCardClick('종가매매', '종가매매 후보 종목 분석')}>
-                  <span className="text-lg">💎</span>
-                  <div>
-                    <div className="flex items-baseline gap-1">
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--text-primary)' }}>종가매매</span>
-                      <span className="font-bold text-[13px]" style={{ color: 'var(--color-grade-s)' }}>뭐사?</span>
-                    </div>
-                    <span className="text-[9.5px]" style={{ color: 'var(--text-secondary)' }}>종가·시초가 단타 매매</span>
-                  </div>
-                </button>
-
-                <button className="quick-card animate-slide-up" style={{ backgroundImage: 'linear-gradient(135deg, rgba(255,152,0,0.1) 0%, rgba(255,152,0,0.02) 100%)', animationDelay: '0.15s', animationFillMode: 'backwards' }} onClick={() => handleCardClick('수급분석', '오늘 수급 현황 분석')}>
+                <button className="quick-card animate-slide-up" style={{ backgroundImage: 'linear-gradient(135deg, rgba(255,152,0,0.1) 0%, rgba(255,152,0,0.02) 100%)', animationDelay: '0s', animationFillMode: 'backwards' }} onClick={() => handleCardClick('수급분석', '오늘 수급 현황 분석')}>
                   <span className="text-lg">🔍</span>
                   <div>
                     <div className="flex items-baseline gap-1">

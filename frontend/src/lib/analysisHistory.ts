@@ -81,27 +81,27 @@ export function addHistory(query: string, mode: string | undefined, content: str
 const SAMPLE_HISTORY: HistoryEntry[] = [
   {
     id: 'sample-1',
-    query: '오늘 매수 추천 종목 분석',
-    mode: '오늘뭐사',
+    query: '기술적 돌파 매수 후보 분석',
+    mode: 'BREAKOUT',
     timestamp: Date.now() - 2 * 60 * 60 * 1000,
     verdict: '강세',
-    summary: '📊 5대 AI 합의 종합 리포트 | 오늘의 매수 추천 종목을 분석합니다. 시장 전반적으로 상승 모멘텀이...',
+    summary: '📊 5대 AI 합의 종합 리포트 | 기술적 돌파 후보 종목을 분석합니다. 시장 전반적으로 상승 모멘텀이...',
   },
   {
     id: 'sample-2',
-    query: '종가매매 후보 종목 분석',
-    mode: '종가매매',
+    query: '외국인·기관 수급 주도 종목 분석',
+    mode: 'FLOW_LEADER',
     timestamp: Date.now() - 5 * 60 * 60 * 1000,
     verdict: '기준',
-    summary: '💎 종가·시초가 단타 매매 후보를 분석합니다. 금일 거래량 상위 종목 중 기술적 지표 기반 매매...',
+    summary: '💎 외인·기관 수급 주도 종목을 분석합니다. 금일 거래량 상위 종목 중 수급 집중 흐름을 포착...',
   },
   {
     id: 'sample-3',
-    query: '스윙매매 후보 종목 분석',
-    mode: '스윙매매',
+    query: '재료/이벤트 드리븐 급등 후보 분석',
+    mode: 'CATALYST_BURST',
     timestamp: Date.now() - 8 * 60 * 60 * 1000,
     verdict: '강세',
-    summary: '⚡ 3일~3주 스윙 트레이딩 후보 종목을 선별합니다. 최근 수급 동향과 기술적 패턴을 종합 분석...',
+    summary: '⚡ 재료·이벤트 기반 급등 후보를 선별합니다. 최근 공시·뉴스·테마 흐름과 기술적 패턴을 종합 분석...',
   },
 ]
 

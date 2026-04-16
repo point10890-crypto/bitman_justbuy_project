@@ -50,7 +50,7 @@ class SynthesisEngineTest {
         AgentResult r1 = successResult("chatgpt", "GPT 분석", "gpt-4o-search-preview");
         AgentResult r2 = successResult("grok", "Grok 분석", "grok-4");
 
-        engine.synthesizeWithResult(List.of(r1, r2), "오늘 뭐 사", "오늘뭐사", "2026-04-03");
+        engine.synthesizeWithResult(List.of(r1, r2), "기술적 돌파", "BREAKOUT", "2026-04-03");
 
         verify(chatGptAgent).synthesize(anyString(), anyString());
         verify(chatGptAgent, never()).analyze(anyString(), anyString());

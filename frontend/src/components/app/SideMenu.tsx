@@ -34,21 +34,6 @@ export function SideMenu({ menuClosing, onClose, onHome, onAnalyze, onFocusSearc
             <div><div>홈</div><div className="menu-item-desc">메인 대시보드</div></div>
           </button>
 
-          <button className="menu-item" onClick={() => { onClose(); onAnalyze('오늘뭐사', '오늘 뭐 살까? 당일 매매 추천') }}>
-            <div className="menu-item-icon" style={{ background: 'rgba(0,200,83,0.1)' }}>📈</div>
-            <div><div>오늘 뭐사?</div><div className="menu-item-desc">당일 매매 추천 · 오전 8시/12시 갱신</div></div>
-          </button>
-
-          <button className="menu-item" onClick={() => { onClose(); onAnalyze('스윙매매', '스윙매매 후보 종목 분석') }}>
-            <div className="menu-item-icon" style={{ background: 'rgba(66,165,245,0.1)' }}>⚡</div>
-            <div><div>스윙매매</div><div className="menu-item-desc">3일~3주 스윙 후보 · 3일 간격 갱신</div></div>
-          </button>
-
-          <button className="menu-item" onClick={() => { onClose(); onAnalyze('종가매매', '종가매매 후보 종목 분석') }}>
-            <div className="menu-item-icon" style={{ background: 'rgba(124,77,255,0.1)' }}>💎</div>
-            <div><div>종가매매</div><div className="menu-item-desc">종가·시초가 단타 · 오후 3시 갱신</div></div>
-          </button>
-
           <button className="menu-item" onClick={() => { onClose(); onAnalyze('수급분석', '오늘 수급 현황 분석') }}>
             <div className="menu-item-icon" style={{ background: 'rgba(255,152,0,0.1)' }}>🔍</div>
             <div><div>수급 분석</div><div className="menu-item-desc">외인·기관 수급 · 10시/12시/2시 갱신</div></div>

@@ -38,12 +38,6 @@
   "screenshots": [],
   "shortcuts": [
     {
-      "name": "오늘 뭐사?",
-      "short_name": "오늘뭐사",
-      "url": "/?mode=오늘뭐사",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
-    },
-    {
       "name": "분석해줘",
       "short_name": "분석",
       "url": "/?mode=분석해줘",

@@ -114,7 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const login = async (email: string, password: string, rememberMe?: boolean) => {
-    const res = await loginUser(email, password)
+    const res = await loginUser(email, password, rememberMe)
     // 로그인 유지 설정 저장 (항상 localStorage에)
     if (rememberMe) {
       localStorage.setItem(REMEMBER_KEY, '1')
