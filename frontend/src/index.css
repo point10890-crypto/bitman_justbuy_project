@@ -509,18 +509,19 @@ body {
 /* 종목 인라인 하이라이트 */
 .stock-inline {
   display: inline;
+  font-size: 0.95rem;
   font-weight: 800;
   color: #FFD700;
 }
 .stock-code-inline {
   font-family: 'SF Mono', 'Fira Code', monospace;
-  font-size: 0.68rem;
+  font-size: 0.82rem;
   font-weight: 700;
-  padding: 0.08rem 0.25rem;
+  padding: 0.12rem 0.32rem;
   border-radius: 3px;
   background: rgba(255, 215, 0, 0.12);
   color: #FFD700;
-  margin: 0 0.12rem;
+  margin: 0 0.16rem;
 }
 
 /* 종목 카드 */
