@@ -1,5 +1,15 @@
 # KR Market Package - Claude Code 자율 운영 가이드
-# v2.7.0 (Spring Boot Backend Migration)
+# v2.8.0 (Spring Boot Primary / Flask Legacy)
+
+## 0. 현 운영 구조 요약 (2026-04-21 기준)
+
+- **프라이머리 백엔드**: Spring Boot 8080 (`backend/`, 패키지 `com.bitman.justbuy`).
+  auth, admin, subscription, analysis, market, monitor, feedback 및 Summary Dashboard(us/kr/crypto) 모두 구현됨.
+- **Legacy 백엔드**: Flask 5001 (`flask_app.py`, 패키지 `app/`) — marketflow(KR 종가베팅 V2, US market, crypto) 데이터 파이프라인 전용.
+  Spring Boot가 일부 라이브 연산에서 Flask로 폴백하는 경로만 남아 있음.
+- **외부 진입**: `cloudflared` 터널 → Spring Boot 8080 (Flask로는 직접 라우팅하지 않음).
+- **프론트엔드**: Vite + React (포트 3000 dev / Cloudflare Pages prod). dev 환경에서는 `/api/*` Vite 프록시로 8080에 바인딩 (yahoo만 예외).
+- **SPRING_BOOT_URL**: 더 이상 "3개 엔드포인트 전용 분기" 의미가 아니라, 사실상 전체 `/api/*`의 기본 타겟.
 
 ## 1. 환경 설정 (절대 고정 - 변경 금지)
 
@@ -48,7 +58,7 @@ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_placeholder
 
 > **중요**: `NEXT_PUBLIC_API_URL`이 설정되면 클라이언트가 `/api/*` → Next.js rewrite → 백엔드로 요청.
 > 비어있으면 `/api/data/*` 정적 스냅샷 모드 (Vercel 배포용).
-> Summary 대시보드 3개 엔드포인트는 Spring Boot(8080)으로, 나머지는 Flask(5001)로 라우팅.
+> 현행: 거의 모든 `/api/*`가 Spring Boot(8080)으로 라우팅됨. Flask(5001)는 marketflow 데이터 파이프라인 및 일부 라이브 연산 폴백 용도로만 유지.
 
 ---
 
@@ -72,10 +82,10 @@ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_placeholder
 ├── backend/                  # === Spring Boot API (Java 21, Gradle) ===
 │   ├── build.gradle.kts      # Spring Boot 3.4.3 + Caffeine
 │   ├── gradlew / gradlew.bat # Gradle wrapper
-│   └── src/main/java/com/bitman/marketflow/
-│       ├── MarketFlowApplication.java     # 진입점 (포트 8080)
+│   └── src/main/java/com/bitman/justbuy/
+│       ├── JustBuyApplication.java        # 진입점 (포트 8080)
 │       ├── config/            # AppConfig, CacheConfig, JacksonConfig
-│       ├── controller/        # UsMarket, KrMarket, Crypto 컨트롤러
+│       ├── controller/        # auth, admin, subscription, analysis, market, monitor, feedback, us/kr/crypto
 │       ├── service/           # 비즈니스 로직 (Flask 폴백 포함)
 │       └── util/              # JsonFileReader (30s TTL 캐시)
 │
@@ -684,22 +694,37 @@ Investing.com ProPicks 분석 결과(적극 매수/매수/중립/매도/적극 �
 
 ## 14. 변경 이력
 
-### v2.7.0 (2026-03-03) — Spring Boot Backend Migration (Phase 1)
+### v2.8.0 (2026-04-21) — Dev Proxy Alignment + Doc Accuracy Pass
+**Vite dev 프록시 규칙 보강 (`frontend/vite.config.ts`):**
+- 누락된 3개 경로 추가: `/api/feedback`, `/api/monitor`, `/api/market` → `http://localhost:8080`
+- 기존 `/api/yahoo`, `/api/analysis`, `/api/health`, `/api/auth`, `/api/subscription`, `/api/admin`과 함께 Spring Boot에 바인딩
+
+**배포 스크립트 정비 (`frontend/package.json`):**
+- `"deploy": "npm run build && wrangler pages deploy dist --project-name bitman-justbuy --branch production"` 추가
+- GitHub 자동배포 없음 → wrangler 수동 푸시로 Cloudflare Pages (bitman-justbuy.pages.dev) 배포
+
+**문서 정정 (CLAUDE.md):**
+- 최상단 "현 운영 구조 요약" 섹션 신설 (cloudflared → 8080 Spring Boot, Flask는 marketflow 전용)
+- v2.7.0의 "3개 Summary 엔드포인트만 Spring Boot" 기술 → 현 상태(auth/admin/subscription/analysis/market/monitor/feedback/us/kr/crypto 전부 Spring Boot)로 정정
+- 패키지 경로 `com.bitman.marketflow` → `com.bitman.justbuy` 치환, 진입점 `MarketFlowApplication` → `JustBuyApplication`
+- `SPRING_BOOT_URL` 주석 현실화 (전체 `/api/*` 기본 타겟)
+
+### v2.7.0 (2026-03-03) — Spring Boot Backend Migration
 **Spring Boot 프로젝트 생성:**
 - `backend/` 디렉토리에 Spring Boot 3.4.3 + Java 21 + Gradle (Kotlin DSL) 프로젝트 생성
-- 3개 Summary Dashboard 엔드포인트 구현: `/api/us/market-briefing`, `/api/kr/market-gate`, `/api/crypto/dominance`
+- 초기에는 3개 Summary Dashboard 엔드포인트만 이식: `/api/us/market-briefing`, `/api/kr/market-gate`, `/api/crypto/dominance`
 - US market-briefing: JSON 파일 직접 읽기 (Flask 로직 완전 이식)
 - KR market-gate, Crypto dominance: Flask(5001) 폴백 방식 (라이브 연산은 Flask 유지)
 - Caffeine 30초 TTL 캐시 (Flask `_CACHE_TTL=30` 동일)
 - NaN/Infinity → null 변환 커스텀 Jackson 시리얼라이저
 
-**프론트엔드 라우팅 분기:**
+**프론트엔드 라우팅 분기 (당시):**
 - `next.config.ts`: Summary 3개 엔드포인트 → Spring Boot(8080), 나머지 → Flask(5001)
 - `.env.local`: `SPRING_BOOT_URL=http://localhost:8080` 추가
 
-**아키텍처 전환 전략:**
-- Phase 1 (현재): Summary 3개 엔드포인트만 Spring Boot
-- Phase 2+: 추가 엔드포인트 점진적 마이그레이션, Flask 폴백 제거
+**아키텍처 전환 진행도:**
+- v2.7.0 시점: Summary 3개 엔드포인트부터 이식 시작
+- v2.8.0 시점(현재): auth/admin/subscription/analysis/market/monitor/feedback 포함 사실상 전체 엔드포인트 Spring Boot 이전 완료. Flask는 marketflow 데이터 파이프라인 및 폴백 전용.
 
 ### v2.6.0 (2026-02-27) — Codebase Cleanup + Scoring Fix
 **Dead Code 제거 (~4.5GB):**

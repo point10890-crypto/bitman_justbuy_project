@@ -21,6 +21,18 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/yahoo/, ''),
       },
+      '/api/feedback': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/api/monitor': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/api/market': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
       '/api/analysis': {
         target: 'http://localhost:8080',
         changeOrigin: true,
