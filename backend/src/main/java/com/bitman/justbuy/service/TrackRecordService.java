@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -16,6 +17,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 @Service
+@Transactional(readOnly = true)
 public class TrackRecordService {
 
     private static final Logger log = LoggerFactory.getLogger(TrackRecordService.class);
@@ -29,6 +31,7 @@ public class TrackRecordService {
     }
 
     /** 분석 완료 시 추천 종목을 DB에 기록 */
+    @Transactional
     public void recordAnalysis(AnalysisResponse response) {
         if (response == null || response.stockPicks() == null || response.stockPicks().isEmpty()) return;
 
@@ -68,6 +71,7 @@ public class TrackRecordService {
 
     /** 매일 16:00 KST에 미완료 레코드의 현재가 업데이트 */
     @Scheduled(cron = "0 0 16 * * MON-FRI", zone = "Asia/Seoul")
+    @Transactional
     public void updatePrices() {
         List<AnalysisTrackRecord> tracking = repository.findByStatus(TrackStatus.TRACKING);
         if (tracking.isEmpty()) return;

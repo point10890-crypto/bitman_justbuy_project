@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -17,6 +18,7 @@ import java.util.Map;
 import java.util.UUID;
 
 @Service
+@Transactional(readOnly = true)
 public class SubscriptionService {
 
     private static final Logger log = LoggerFactory.getLogger(SubscriptionService.class);
@@ -33,6 +35,7 @@ public class SubscriptionService {
         this.telegramNotifierProvider = telegramNotifierProvider;
     }
 
+    @Transactional
     public UserDto applyForSubscription(UUID userId, String depositorName) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
@@ -96,6 +99,7 @@ public class SubscriptionService {
             .toList();
     }
 
+    @Transactional
     public UserDto approveSubscription(UUID userId) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
@@ -112,6 +116,7 @@ public class SubscriptionService {
         return UserDto.from(user);
     }
 
+    @Transactional
     public UserDto rejectSubscription(UUID userId) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
@@ -135,6 +140,7 @@ public class SubscriptionService {
             .toList();
     }
 
+    @Transactional
     public UserDto revokeSubscription(UUID userId) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
@@ -154,6 +160,7 @@ public class SubscriptionService {
     // ─── 관리자 회원관리 ───
 
     /** 관리자: 회원 정보 수정 (이름, 이메일, 구독상태) */
+    @Transactional
     public UserDto adminUpdateUser(UUID userId, String name, String email, String subscription) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
@@ -192,6 +199,7 @@ public class SubscriptionService {
         return UserDto.from(user);
     }
 
+    @Transactional
     public void adminResetPassword(UUID userId, String newPassword) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
@@ -255,6 +263,7 @@ public class SubscriptionService {
      * PrecomputeScheduler와 별개로 항상 활성화.
      */
     @Scheduled(cron = "0 0 0 * * *", zone = "Asia/Seoul")
+    @Transactional
     public void expireSubscriptions() {
         LocalDate today;
         List<User> expired;

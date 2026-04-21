@@ -16,10 +16,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
 
 @Service
+@Transactional(readOnly = true)
 public class AuthService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
@@ -43,16 +45,24 @@ public class AuthService {
     }
 
     @PostConstruct
+    @Transactional
     public void ensureAdminExistsOnStartup() {
         if (adminEmail == null || adminEmail.isBlank()) return;
 
         var existing = userRepository.findByEmail(adminEmail.trim());
         if (existing.isEmpty()) {
             // 계정이 없을 때만 ADMIN_DEFAULT_PASSWORD 사용해 부트스트랩.
+            // 환경변수 미설정 시: 예측 불가능한 랜덤 비밀번호를 1회 생성해 로그에 출력.
+            // (하드코딩 폴백 'Admin1234' 제거 — 평문 유출 리스크 차단)
             String defaultPassword = System.getenv("ADMIN_DEFAULT_PASSWORD");
             if (defaultPassword == null || defaultPassword.isBlank()) {
-                defaultPassword = "Admin1234";
-                log.warn("ADMIN_DEFAULT_PASSWORD not set — bootstrapping admin with weak default. Change immediately after first login!");
+                defaultPassword = UUID.randomUUID().toString().replace("-", "") + "!A1";
+                log.warn("===============================================================");
+                log.warn("ADMIN_DEFAULT_PASSWORD env var NOT SET.");
+                log.warn("Generated one-time random admin password for {}:", adminEmail.trim());
+                log.warn("  {}", defaultPassword);
+                log.warn("SAVE THIS NOW — it will NOT be logged again. Then set ADMIN_DEFAULT_PASSWORD in .env and restart, or change via admin UI.");
+                log.warn("===============================================================");
             }
             var admin = new User(adminEmail.trim(), "Admin", passwordEncoder.encode(defaultPassword));
             admin.setRole(Role.ADMIN);
@@ -81,6 +91,7 @@ public class AuthService {
         }
     }
 
+    @Transactional
     public AuthResponse register(RegisterRequest request) {
         if (userRepository.existsByEmail(request.email())) {
             throw new IllegalArgumentException("이미 등록된 이메일입니다.");
@@ -139,6 +150,7 @@ public class AuthService {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
+    @Transactional
     public AuthResponse login(AuthRequest request) {
         var user = userRepository.findByEmail(request.email())
             .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."));
@@ -155,6 +167,7 @@ public class AuthService {
         return new AuthResponse(token, UserDto.from(user));
     }
 
+    @Transactional
     public UserDto getCurrentUser(UUID userId) {
         var user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
@@ -181,6 +194,7 @@ public class AuthService {
         }
     }
 
+    @Transactional
     public UserDto updateProfile(UUID userId, String name) {
         var user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
@@ -190,6 +204,7 @@ public class AuthService {
         return UserDto.from(user);
     }
 
+    @Transactional
     public void changePassword(UUID userId, String currentPassword, String newPassword) {
         var user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
