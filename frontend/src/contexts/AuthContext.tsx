@@ -37,14 +37,24 @@ const TOKEN_KEY = 'bitman_token'
 const USER_KEY = 'bitman_auth_user'
 const REMEMBER_KEY = 'bitman_remember'
 
+function isSubscriptionExpired(endDate?: string | null): boolean {
+  if (!endDate) return false
+  const expiryDate = new Date(endDate)
+  const now = new Date()
+  return now > expiryDate
+}
+
 function dtoToUser(dto: UserDto): User {
+  // PRO 플랜이 만료되었는지 확인
+  const isExpired = dto.subscription.toLowerCase() === 'pro' && isSubscriptionExpired(dto.subscriptionEndDate)
+
   return {
     id: dto.id,
     email: dto.email,
     name: dto.name,
     role: dto.role,
-    // ADMIN은 무기한 PRO 고정
-    subscription: dto.role === 'ADMIN' ? 'pro' : dto.subscription.toLowerCase() as User['subscription'],
+    // ADMIN은 무기한 PRO 고정, 일반 유저는 만료 여부 확인
+    subscription: dto.role === 'ADMIN' ? 'pro' : isExpired ? 'free' : dto.subscription.toLowerCase() as User['subscription'],
     subscriptionEndDate: dto.subscriptionEndDate ?? undefined,
     depositorName: dto.depositorName ?? undefined,
     createdAt: dto.createdAt,
@@ -113,23 +123,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setIsLoading(false))
   }, [])
 
+  // authApi에서 401 수신 시 전역 로그아웃 처리
+  useEffect(() => {
+    const onUnauthorized = () => {
+      setUser(null)
+      clearAuth()
+      localStorage.removeItem(REMEMBER_KEY)
+      // 현재 경로가 로그인/랜딩이 아닐 때만 이동 (무한 리다이렉트 방지)
+      const path = window.location.pathname
+      if (path !== '/login' && path !== '/landing' && path !== '/register') {
+        window.location.href = '/login'
+      }
+    }
+    window.addEventListener('auth:unauthorized', onUnauthorized)
+    return () => window.removeEventListener('auth:unauthorized', onUnauthorized)
+  }, [])
+
   const login = async (email: string, password: string, rememberMe?: boolean) => {
     const res = await loginUser(email, password, rememberMe)
     // 로그인 유지 설정 저장 (항상 localStorage에)
     if (rememberMe) {
       localStorage.setItem(REMEMBER_KEY, '1')
+      // localStorage에만 저장 (브라우저 종료 후에도 유지)
+      localStorage.setItem(TOKEN_KEY, res.token)
+      localStorage.setItem(USER_KEY, JSON.stringify(res.user))
     } else {
       localStorage.removeItem(REMEMBER_KEY)
+      // sessionStorage에만 저장 (브라우저 종료 시 삭제)
+      sessionStorage.setItem(TOKEN_KEY, res.token)
+      sessionStorage.setItem(USER_KEY, JSON.stringify(res.user))
     }
+    const u = dtoToUser(res.user)
+    setUser(u)
+  }
+
+  const register = async (name: string, email: string, password: string) => {
+    const res = await registerUser(name, email, password)
+    // 가입 후 자동 로그인: 토큰과 사용자 정보 저장
     setToken(res.token)
     const u = dtoToUser(res.user)
     setUser(u)
     setUserData(JSON.stringify(u))
-  }
-
-  const register = async (name: string, email: string, password: string) => {
-    await registerUser(name, email, password)
-    // 가입 후 로그인 페이지로 이동하도록 토큰 저장 안 함
   }
 
   const logout = () => {
