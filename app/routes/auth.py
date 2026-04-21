@@ -1,4 +1,17 @@
-"""Authentication routes — 회원가입, 로그인, 프로필, 구독 요청"""
+"""Authentication routes — 회원가입, 로그인, 프로필, 구독 요청
+
+⛔⛔⛔ DEPRECATED (v2.7.0+) — DO NOT USE ⛔⛔⛔
+This blueprint is NOT registered in app/routes/__init__.py.
+All auth endpoints were migrated to Spring Boot:
+  backend/src/main/java/com/bitman/justbuy/controller/AuthController.java
+
+Production routing:
+  api.bit-man.net (cloudflared) → localhost:8080 (Spring Boot) ONLY
+  Flask (5001) is shared with marketflow and NEVER receives JUST BUY auth traffic.
+
+This file is kept for historical reference. Remove after Spring Boot migration is
+verified stable for one release cycle.
+"""
 
 import os
 from datetime import datetime, timezone
@@ -40,16 +53,20 @@ def register():
 
     # 첫 번째 유저는 자동으로 admin + approved + pro
     if User.query.count() == 0:
+        from datetime import datetime, timezone, timedelta
         user.role = 'admin'
         user.status = 'approved'
         user.tier = 'pro'
+        # Admin은 무기한 pro (subscription_end_date는 1년 후로 설정, 갱신 가능)
+        end_date = datetime.now(timezone.utc) + timedelta(days=365)
+        user.subscription_end_date = end_date.strftime('%Y-%m-%d')
     else:
         user.status = 'pending'
 
     db.session.add(user)
     db.session.commit()
 
-    token = generate_token(user.id)
+    token = generate_token(user.id, user.email, user.role)
     return jsonify({'user': user.to_dict(), 'token': token}), 201
 
 
@@ -73,7 +90,7 @@ def login():
     user.last_login_at = datetime.now(timezone.utc)
     db.session.commit()
 
-    token = generate_token(user.id)
+    token = generate_token(user.id, user.email, user.role)
     return jsonify({'user': user.to_dict(), 'token': token})
 
 
@@ -81,6 +98,51 @@ def login():
 @login_required
 def me():
     return jsonify({'user': request.current_user.to_dict()})
+
+
+@auth_bp.route('/me/profile', methods=['PUT'])
+@login_required
+def update_me_profile():
+    """프로필 수정 (이름 변경)"""
+    user = request.current_user
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    if name:
+        user.name = name
+        db.session.commit()
+
+    return jsonify({'user': user.to_dict()})
+
+
+@auth_bp.route('/me/password', methods=['PUT'])
+@login_required
+def change_me_password():
+    """비밀번호 변경"""
+    user = request.current_user
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    data = request.get_json() or {}
+    current_password = data.get('currentPassword') or ''
+    new_password = data.get('newPassword') or ''
+
+    if not current_password or not new_password:
+        return jsonify({'error': 'currentPassword and newPassword are required'}), 400
+
+    # 현재 비밀번호 확인
+    if not user.check_password(current_password):
+        return jsonify({'error': 'Current password is incorrect'}), 401
+
+    if len(new_password) < 6:
+        return jsonify({'error': 'New password must be at least 6 characters'}), 400
+
+    user.set_password(new_password)
+    db.session.commit()
+
+    return jsonify({'message': 'Password changed successfully'})
 
 
 # ═══════════════════════════════════════════════════════
@@ -163,6 +225,48 @@ def subscription_status():
     })
 
 
+@auth_bp.route('/subscription/apply', methods=['POST'])
+@login_required
+def apply_subscription():
+    """구독 신청 (입금자명 저장 + 구독 요청 생성)"""
+    user = request.current_user
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    data = request.get_json() or {}
+    depositor_name = (data.get('depositorName') or '').strip()
+
+    if not depositor_name:
+        return jsonify({'error': 'depositorName is required'}), 400
+
+    # 입금자명 저장
+    user.depositor_name = depositor_name
+
+    # 이미 pending/approved가 아닌 경우만 새 구독 요청 생성
+    # (이미 pending이면 그냥 inputName만 업데이트)
+    if user.status not in ('pending', 'approved'):
+        user.status = 'pending'
+
+    # FREE → PRO 구독 요청 생성 (아직 없는 경우만)
+    existing = SubscriptionRequest.query.filter_by(
+        user_id=user.id,
+        status='pending'
+    ).first()
+
+    if not existing and user.tier == 'free':
+        sub_request = SubscriptionRequest(
+            user_id=user.id,
+            request_type='upgrade',
+            from_tier=user.tier,
+            to_tier='pro',
+        )
+        db.session.add(sub_request)
+
+    db.session.commit()
+
+    return jsonify({'user': user.to_dict()}), 201
+
+
 # ═══════════════════════════════════════════════════════
 #  레거시 호환 API (X-Admin-Secret 헤더)
 # ═══════════════════════════════════════════════════════
@@ -170,6 +274,7 @@ def subscription_status():
 @auth_bp.route('/admin/set-tier', methods=['POST'])
 def admin_set_tier_legacy():
     """유저 tier 변경 (레거시 — X-Admin-Secret 헤더)"""
+    from datetime import datetime, timezone, timedelta
     secret = request.headers.get('X-Admin-Secret', '')
     if not ADMIN_SECRET or secret != ADMIN_SECRET:
         return jsonify({'error': 'Admin access denied'}), 403
@@ -190,6 +295,14 @@ def admin_set_tier_legacy():
 
     old_tier = user.tier
     user.tier = tier
+
+    # Pro tier로 변경 시 subscription_end_date 설정 (1개월)
+    if tier == 'pro':
+        end_date = datetime.now(timezone.utc) + timedelta(days=30)
+        user.subscription_end_date = end_date.strftime('%Y-%m-%d')
+    elif tier == 'free':
+        user.subscription_end_date = None
+
     db.session.commit()
 
     return jsonify({

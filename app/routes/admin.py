@@ -1,4 +1,18 @@
-"""Admin API routes — 관리자 전용 엔드포인트"""
+"""Admin API routes — 관리자 전용 엔드포인트
+
+⛔⛔⛔ DEPRECATED (v2.7.0+) — DO NOT USE ⛔⛔⛔
+This blueprint is NOT registered in app/routes/__init__.py.
+All admin endpoints were migrated to Spring Boot:
+  backend/src/main/java/com/bitman/justbuy/controller/AdminController.java
+  backend/src/main/java/com/bitman/justbuy/controller/SubscriptionController.java
+
+Production routing:
+  api.bit-man.net (cloudflared) → localhost:8080 (Spring Boot) ONLY
+  Flask (5001) is shared with marketflow and NEVER receives JUST BUY admin traffic.
+
+Note: app/utils/subscription.py is still imported by app/__init__.py
+(subscription_expiry_monitor background thread) so it is NOT deleted.
+"""
 
 import os
 from datetime import datetime, timezone
@@ -74,6 +88,7 @@ def set_role(user_id):
 @admin_required
 def set_tier(user_id):
     """유저 구독 tier 변경 (free ↔ pro ↔ premium)"""
+    from datetime import timedelta
     user = db.session.get(User, user_id)
     if not user:
         return jsonify({'error': 'User not found'}), 404
@@ -85,6 +100,15 @@ def set_tier(user_id):
 
     old_tier = user.tier
     user.tier = tier
+
+    # Pro tier로 변경 시 subscription_end_date 설정 (1개월)
+    if tier == 'pro':
+        end_date = datetime.now(timezone.utc) + timedelta(days=30)
+        user.subscription_end_date = end_date.strftime('%Y-%m-%d')
+    elif tier == 'free':
+        # Free로 변경 시 subscription_end_date 초기화
+        user.subscription_end_date = None
+
     db.session.commit()
 
     return jsonify({
@@ -152,10 +176,29 @@ def list_subscriptions():
     return jsonify({'requests': [r.to_dict() for r in reqs]})
 
 
+@admin_bp.route('/subscriptions/pending')
+@admin_required
+def list_pending_subscriptions():
+    """대기 중인 구독 요청 목록"""
+    reqs = SubscriptionRequest.query.filter_by(status='pending').order_by(
+        SubscriptionRequest.created_at.desc()
+    ).all()
+    # 프론트엔드 호환성: User 리스트로 반환
+    users = []
+    for req in reqs:
+        user = db.session.get(User, req.user_id)
+        if user:
+            user_data = user.to_dict()
+            user_data['_pending_subscription'] = req.to_dict()
+            users.append(user_data)
+    return jsonify(users)
+
+
 @admin_bp.route('/subscriptions/<int:req_id>/approve', methods=['PUT'])
 @admin_required
 def approve_subscription(req_id):
     """구독 요청 승인"""
+    from datetime import timedelta
     sub_req = db.session.get(SubscriptionRequest, req_id)
     if not sub_req:
         return jsonify({'error': 'Request not found'}), 404
@@ -175,6 +218,13 @@ def approve_subscription(req_id):
         user.tier = sub_req.to_tier
         if user.status == 'pending':
             user.status = 'approved'
+
+        # Pro tier로 변경 시 subscription_end_date 설정 (1개월)
+        if sub_req.to_tier == 'pro':
+            end_date = datetime.now(timezone.utc) + timedelta(days=30)
+            user.subscription_end_date = end_date.strftime('%Y-%m-%d')
+        elif sub_req.to_tier == 'free':
+            user.subscription_end_date = None
 
     db.session.commit()
 
@@ -208,3 +258,25 @@ def reject_subscription(req_id):
         'message': 'Subscription request rejected',
         'request': sub_req.to_dict(),
     })
+
+
+# ═══════════════════════════════════════════════════════
+#  구독 만료 알림
+# ═══════════════════════════════════════════════════════
+
+@admin_bp.route('/subscriptions/check-expiring', methods=['POST'])
+@admin_required
+def check_expiring_subscriptions():
+    """만료 3일 이내 사용자에게 알림 발송"""
+    from app.utils.subscription import check_expiring_subscriptions
+    result = check_expiring_subscriptions()
+    return jsonify(result)
+
+
+@admin_bp.route('/users/<int:user_id>/notify-expiring', methods=['POST'])
+@admin_required
+def notify_user_expiring(user_id):
+    """특정 사용자에게 만료 알림 발송"""
+    from app.utils.subscription import notify_user_expiring_soon
+    result = notify_user_expiring_soon(user_id)
+    return jsonify(result), 200 if result['success'] else 400

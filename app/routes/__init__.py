@@ -25,16 +25,17 @@ def register_blueprints(app):
     from app.routes.crypto import crypto_bp
     app.register_blueprint(crypto_bp, url_prefix='/api/crypto')
 
-    # Auth routes
-    from app.routes.auth import auth_bp
-    app.register_blueprint(auth_bp, url_prefix='/api/auth')
-
-    # Admin routes
-    from app.routes.admin import admin_bp
-    app.register_blueprint(admin_bp, url_prefix='/api/admin')
+    # ⛔ DEPRECATED (v2.7.0+): Auth/Admin blueprints migrated to Spring Boot (backend/).
+    # Production cloudflared tunnel (api.bit-man.net) routes to localhost:8080 only.
+    # Flask (5001) serves marketflow project; JUST BUY auth/admin is dead code.
+    # See: backend/src/main/java/com/bitman/justbuy/controller/{Auth,Admin,Subscription}Controller.java
+    # from app.routes.auth import auth_bp
+    # app.register_blueprint(auth_bp, url_prefix='/api/auth')
+    # from app.routes.admin import admin_bp
+    # app.register_blueprint(admin_bp, url_prefix='/api/admin')
 
     # Stripe routes
     from app.routes.stripe_routes import stripe_bp
     app.register_blueprint(stripe_bp, url_prefix='/api/stripe')
 
-    print("[OK] Blueprints registered (KR + US + Crypto + Auth + Admin + Stripe)")
+    print("[OK] Blueprints registered (KR + US + Crypto + Stripe) — Auth/Admin migrated to Spring Boot")
