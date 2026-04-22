@@ -35,6 +35,11 @@ export default function MyPage() {
 
   const initial = user.name.charAt(0).toUpperCase()
 
+  // PRO 플랜 만료 여부 확인
+  const isProExpired = user.subscription === 'pro' && user.subscriptionEndDate
+    ? new Date() > new Date(user.subscriptionEndDate)
+    : false
+
   const openEdit = (mode: EditMode) => {
     setEditMode(mode)
     if (mode === 'profile') {
@@ -134,9 +139,13 @@ export default function MyPage() {
               {user.subscription === 'pro' ? (
                 <>
                   <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
-                    구독 종료일: <span className="font-bold" style={{ color: '#FFD700' }}>{user.subscriptionEndDate || '무기한'}</span>
+                    구독 종료일: <span className="font-bold" style={{ color: isProExpired ? 'var(--color-bear)' : '#FFD700' }}>
+                      {user.subscriptionEndDate || '무기한'}
+                    </span>
                   </p>
-                  <p className="text-[11px]" style={{ color: 'var(--color-bull)' }}>PRO 구독이 활성화되어 있습니다.</p>
+                  <p className="text-[11px]" style={{ color: isProExpired ? 'var(--color-bear)' : 'var(--color-bull)' }}>
+                    {isProExpired ? '⚠️ 구독이 만료되었습니다. 구독을 갱신해주세요.' : 'PRO 구독이 활성화되어 있습니다.'}
+                  </p>
                 </>
               ) : user.subscription === 'pending' ? (
                 <>
@@ -311,7 +320,7 @@ export default function MyPage() {
               border: '1px solid rgba(255,23,68,0.15)',
               color: 'var(--color-bear)',
             }}
-            onClick={() => { logout(); navigate('/login', { replace: true }) }}
+            onClick={() => { logout(); navigate('/landing', { replace: true }) }}
             onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(255,23,68,0.1)' }}
             onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(255,23,68,0.06)' }}
           >

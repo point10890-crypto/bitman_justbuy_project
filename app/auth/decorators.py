@@ -63,9 +63,9 @@ def _get_current_user():
     if payload is None:
         return None
     try:
-        user_id = payload['sub']
+        user_id = int(payload['sub'])
         return db.session.get(User, user_id)
-    except (KeyError, ValueError):
+    except (KeyError, ValueError, TypeError):
         return None
 
 
@@ -125,7 +125,7 @@ def approved_required(f):
 
 
 def pro_required(f):
-    """Pro 구독 유저 전용 — 승인 + Pro tier"""
+    """Pro 구독 유저 전용 — 승인 + Pro tier + 미만료"""
     @wraps(f)
     def decorated(*args, **kwargs):
         if _auth_disabled():
@@ -138,6 +138,23 @@ def pro_required(f):
             return jsonify({'error': 'Account not approved'}), 403
         if user.tier not in ('pro', 'premium') and not user.is_admin:
             return jsonify({'error': 'Pro subscription required'}), 403
+
+        # Admin은 구독 만료 검증 안함 (무기한)
+        if not user.is_admin:
+            # subscription_end_date가 있고, 오늘보다 이전 날짜이면 만료
+            if user.subscription_end_date:
+                from datetime import datetime
+                try:
+                    end_date = datetime.fromisoformat(user.subscription_end_date)
+                    today = datetime.now()
+                    if today > end_date:
+                        return jsonify({
+                            'error': 'Pro subscription expired',
+                            'subscription_end_date': user.subscription_end_date
+                        }), 403
+                except (ValueError, TypeError):
+                    return jsonify({'error': 'Invalid subscription end date'}), 500
+
         request.current_user = user
         return f(*args, **kwargs)
     return decorated

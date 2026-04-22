@@ -163,6 +163,24 @@ def create_app(config=None):
         from app.models.user import User  # noqa: F401
         db.create_all()
 
+        # ⭐ 서버 시작 시 만료된 PRO 회원 자동으로 FREE로 변환
+        from datetime import datetime
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        expired_pros = User.query.filter(
+            User.tier == 'pro',
+            User.subscription_end_date.isnot(None),
+            User.subscription_end_date < today_str,
+            User.role != 'admin'  # Admin은 제외 (무기한)
+        ).all()
+
+        if expired_pros:
+            logger.warning(f"⭐ Found {len(expired_pros)} expired PRO users — auto-downgrading to FREE")
+            for user in expired_pros:
+                logger.info(f"  → {user.email} (expired: {user.subscription_end_date})")
+                user.tier = 'free'
+            db.session.commit()
+            logger.info(f"✓ Auto-downgraded {len(expired_pros)} users to FREE tier")
+
     # Blueprint 등록
     from app.routes import register_blueprints
     register_blueprints(app)
@@ -300,5 +318,40 @@ def create_app(config=None):
             print("[OK] Cloud scheduler started in background thread")
         except Exception as e:
             print(f"[WARN] Cloud scheduler failed to start: {e}")
+
+    # ── 구독 만료 3일 전 알림 자동 체크 ──
+    import threading
+    import time
+    from datetime import datetime
+
+    def subscription_expiry_monitor():
+        """매일 자동으로 만료 3일 전 구독 알림 체크"""
+        def _monitor():
+            last_check = None
+            while True:
+                try:
+                    now = datetime.now()
+                    # 매일 10:00 (KST 기준)에 실행
+                    if last_check is None or (now.hour == 10 and last_check.date() != now.date()):
+                        with app.app_context():
+                            from app.utils.subscription import check_expiring_subscriptions
+                            result = check_expiring_subscriptions()
+                            if result['total'] > 0:
+                                logger.warning(f"⭐ Subscription expiry check: {result['notified']} notified, {result['failed']} failed")
+                            last_check = now
+                    time.sleep(300)  # 5분마다 확인
+                except Exception as e:
+                    logger.error(f"Subscription monitor error: {e}")
+                    time.sleep(300)
+
+        thread = threading.Thread(target=_monitor, daemon=True, name='subscription-monitor')
+        thread.start()
+        return thread
+
+    try:
+        subscription_expiry_monitor()
+        print("[OK] Subscription expiry monitor started in background thread")
+    except Exception as e:
+        print(f"[WARN] Subscription monitor failed to start: {e}")
 
     return app

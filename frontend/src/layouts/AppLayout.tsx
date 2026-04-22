@@ -182,7 +182,7 @@ export default function AppLayout() {
 
               <div className="h-px mx-5 my-1" style={{ backgroundColor: 'var(--border-subtle)' }} />
 
-              <button className="menu-item" onClick={() => { closeMenu(); logout(); navigate('/login', { replace: true }) }}>
+              <button className="menu-item" onClick={() => { closeMenu(); logout(); navigate('/landing', { replace: true }) }}>
                 <div className="menu-item-icon" style={{ background: 'rgba(255,23,68,0.1)' }}>🚪</div>
                 <div><div>로그아웃</div><div className="menu-item-desc">계정에서 로그아웃</div></div>
               </button>
@@ -314,6 +314,7 @@ export default function AppLayout() {
           <NavItem icon="🏠" label="홈" active={currentPath === '/'} onClick={() => navigate('/')} />
           <NavItem icon="📊" label="수급" active={currentPath === '/supply'} onClick={() => navigate('/supply')} />
           <NavItem icon="👤" label="마이" active={currentPath === '/my'} onClick={() => navigate('/my')} />
+          <NavItem icon="💬" label="문의" onClick={() => window.open('https://open.kakao.com/o/sJVLbWUe', '_blank')} />
         </div>
       </nav>
     </div>

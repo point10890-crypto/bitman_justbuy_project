@@ -1,6 +1,7 @@
 """Health check endpoint for monitoring."""
 
 from flask import Blueprint, jsonify
+from sqlalchemy import text
 import os
 from datetime import datetime
 
@@ -19,7 +20,7 @@ def health_check():
     # Check database
     try:
         from app.models import db
-        db.session.execute('SELECT 1')
+        db.session.execute(text('SELECT 1'))
         status['database'] = 'ok'
     except Exception as e:
         status['database'] = f'error: {str(e)}'

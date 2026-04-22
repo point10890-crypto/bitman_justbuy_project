@@ -31,7 +31,6 @@ function Checkbox({ checked, onChange, label, error, muted }: {
           backgroundColor: checked ? '#FFD700' : 'transparent',
           border: checked ? 'none' : `1.5px solid ${error ? 'var(--color-bear)' : 'var(--border-default)'}`,
           boxShadow: checked ? '0 2px 8px rgba(255,215,0,0.25)' : 'none',
-          transform: checked ? 'scale(1)' : 'scale(1)',
         }}
       >
         {checked && (
@@ -50,14 +49,126 @@ function Checkbox({ checked, onChange, label, error, muted }: {
   )
 }
 
+// 가입 완료 후 온보딩 단계 안내 화면
+function SuccessScreen() {
+  const steps = [
+    { icon: '✅', label: '회원가입', done: true },
+    { icon: '💳', label: '구독 신청', current: true },
+    { icon: '🚀', label: '서비스 시작', done: false },
+  ]
+  return (
+    <div className="min-h-dvh flex flex-col" style={{ backgroundColor: 'var(--bg-primary)' }}>
+      <PageHeader showBack={false} />
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6 animate-slide-up">
+        {/* 완료 아이콘 */}
+        <div
+          className="w-20 h-20 rounded-full flex items-center justify-center"
+          style={{
+            background: 'linear-gradient(135deg, rgba(0,200,83,0.25), rgba(0,200,83,0.1))',
+            border: '2px solid var(--color-bull)',
+            boxShadow: '0 0 40px rgba(0,200,83,0.2)',
+          }}
+        >
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-bull)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 6L9 17l-5-5"/>
+          </svg>
+        </div>
+
+        {/* 환영 문구 */}
+        <div className="text-center">
+          <h2 className="font-black text-[22px] mb-1.5" style={{ color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>
+            BitMan에 오신 걸 환영합니다!
+          </h2>
+          <p className="text-[13px]" style={{ color: 'var(--text-secondary)' }}>
+            ChatGPT × Grok AI가 지금 이 순간도 분석 중입니다
+          </p>
+        </div>
+
+        {/* 3단계 온보딩 스텝 */}
+        <div
+          className="w-full rounded-2xl"
+          style={{
+            maxWidth: '320px',
+            padding: '16px 20px',
+            backgroundColor: 'rgba(255,255,255,0.04)',
+            border: '1px solid var(--border-subtle)',
+          }}
+        >
+          <p className="text-[11px] font-bold mb-3 text-center" style={{ color: 'var(--text-muted)' }}>시작까지 2단계 남았습니다</p>
+          <div className="flex items-center justify-between">
+            {steps.map((step, i) => (
+              <div key={i} className="flex flex-col items-center gap-1.5 flex-1">
+                {/* 스텝 원 */}
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-[18px] transition-all duration-300"
+                  style={{
+                    backgroundColor: step.done
+                      ? 'rgba(0,200,83,0.15)'
+                      : step.current
+                        ? 'rgba(255,215,0,0.15)'
+                        : 'rgba(255,255,255,0.05)',
+                    border: step.done
+                      ? '1.5px solid rgba(0,200,83,0.4)'
+                      : step.current
+                        ? '1.5px solid rgba(255,215,0,0.4)'
+                        : '1.5px solid var(--border-subtle)',
+                    boxShadow: step.current ? '0 0 16px rgba(255,215,0,0.2)' : 'none',
+                  }}
+                >
+                  {step.icon}
+                </div>
+                <span
+                  className="text-[10px] font-bold"
+                  style={{
+                    color: step.done
+                      ? 'var(--color-bull)'
+                      : step.current
+                        ? '#FFD700'
+                        : 'var(--text-muted)',
+                  }}
+                >
+                  {step.label}
+                </span>
+                {/* 연결선 */}
+                {i < steps.length - 1 && (
+                  <div
+                    className="absolute"
+                    style={{
+                      width: '60px', height: '1.5px',
+                      backgroundColor: step.done ? 'rgba(0,200,83,0.4)' : 'var(--border-subtle)',
+                      top: '20px', left: 'calc(50% + 20px)',
+                      position: 'absolute',
+                    }}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 진행 바 */}
+        <div className="flex flex-col items-center gap-2 w-full" style={{ maxWidth: '320px' }}>
+          <p className="text-[12px] font-medium" style={{ color: 'var(--text-secondary)' }}>구독 신청 페이지로 이동합니다...</p>
+          <div className="w-full h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--bg-elevated)' }}>
+            <div className="h-full rounded-full" style={{
+              backgroundColor: 'var(--color-bull)',
+              animation: 'progress-fill 1.5s ease-out forwards',
+            }} />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function RegisterPage() {
   const navigate = useNavigate()
   const { register, user, isLoading } = useAuth()
 
-  // 이미 로그인된 유저는 홈으로 리다이렉트
   useEffect(() => {
     if (!isLoading && user) navigate('/', { replace: true })
   }, [user, isLoading, navigate])
+
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -95,7 +206,8 @@ export default function RegisterPage() {
       setLoading(true)
       await register(name.trim(), email.trim(), password)
       setSuccess(true)
-      setTimeout(() => navigate('/login', { replace: true }), 1500)
+      window.history.replaceState(null, '', window.location.href)
+      setTimeout(() => navigate('/subscribe', { replace: true }), 1800)
     } catch (err) {
       setGlobalError(err instanceof Error ? err.message : '회원가입에 실패했습니다.')
     } finally {
@@ -110,37 +222,7 @@ export default function RegisterPage() {
     setAgreeMarketing(next)
   }
 
-  if (success) {
-    return (
-      <div className="min-h-dvh flex flex-col" style={{ backgroundColor: 'var(--bg-primary)' }}>
-        <PageHeader showBack={false} />
-        <div className="flex-1 flex flex-col items-center justify-center gap-5 px-6 animate-slide-up">
-          <div
-            className="w-20 h-20 rounded-full flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(135deg, rgba(0,200,83,0.25), rgba(0,200,83,0.1))',
-              border: '2px solid var(--color-bull)',
-              boxShadow: '0 0 40px rgba(0,200,83,0.2)',
-            }}
-          >
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-bull)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 6L9 17l-5-5"/>
-            </svg>
-          </div>
-          <div className="text-center">
-            <h2 className="font-black text-xl mb-2" style={{ color: 'var(--text-primary)' }}>회원가입 완료!</h2>
-            <p className="text-[14px] font-medium" style={{ color: 'var(--text-secondary)' }}>로그인 페이지로 이동합니다...</p>
-          </div>
-          <div className="w-32 h-1 rounded-full overflow-hidden mt-2" style={{ backgroundColor: 'var(--bg-elevated)' }}>
-            <div className="h-full rounded-full" style={{
-              backgroundColor: 'var(--color-bull)',
-              animation: 'progress-fill 1.5s ease-out forwards',
-            }} />
-          </div>
-        </div>
-      </div>
-    )
-  }
+  if (success) return <SuccessScreen />
 
   return (
     <div className="min-h-dvh flex flex-col" style={{ backgroundColor: 'var(--bg-primary)' }}>
@@ -169,7 +251,6 @@ export default function RegisterPage() {
               </div>
             )}
 
-            {/* Inputs */}
             <FormInput
               label="이름"
               type="text"
@@ -206,7 +287,6 @@ export default function RegisterPage() {
                 delay={0}
                 icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>}
               />
-              {/* Password strength */}
               {password && (
                 <div className="flex items-center gap-2.5 mt-2.5 px-0.5">
                   <div className="flex gap-1.5 flex-1">
@@ -238,7 +318,7 @@ export default function RegisterPage() {
               icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>}
             />
 
-            {/* Agreement checkboxes */}
+            {/* Agreement */}
             <div className="flex flex-col gap-1 mt-1 animate-slide-up" style={{ animationDelay: '0.3s', animationFillMode: 'backwards' }}>
               <div className="pb-2 mb-1" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                 <Checkbox checked={allAgreed} onChange={handleAgreeAll} label="전체 동의" />
@@ -248,12 +328,10 @@ export default function RegisterPage() {
               <Checkbox checked={agreeMarketing} onChange={setAgreeMarketing} label="[선택] 마케팅 수신에 동의합니다" muted />
             </div>
 
-            {/* Submit */}
             <div className="mt-1">
               <GoldButton type="submit" loading={loading} delay={0.35}>회원가입</GoldButton>
             </div>
 
-            {/* Security badge */}
             <div className="flex items-center justify-center gap-1.5 animate-slide-up" style={{ animationDelay: '0.5s', animationFillMode: 'backwards' }}>
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', opacity: 0.6 }}>
                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
@@ -263,7 +341,6 @@ export default function RegisterPage() {
           </form>
         </GlassCard>
 
-        {/* Bottom link */}
         <div className="flex justify-center items-center gap-2 mt-5 text-[13px] animate-slide-up" style={{ animationDelay: '0.5s', animationFillMode: 'backwards' }}>
           <span style={{ color: 'var(--text-muted)' }}>이미 계정이 있으신가요?</span>
           <Link
@@ -278,7 +355,6 @@ export default function RegisterPage() {
         </div>
       </div>
 
-      {/* Footer */}
       <div className="text-center px-4" style={{ paddingBottom: 'max(16px, env(safe-area-inset-bottom))' }}>
         <p className="text-[10px]" style={{ color: 'var(--text-muted)', opacity: 0.5 }}>
           본 정보는 투자자문이 아니며, 투자 판단의 책임은 본인에게 있습니다.

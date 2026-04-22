@@ -43,6 +43,10 @@ export default function LoginPage() {
       if (stored) {
         try { userData = JSON.parse(stored) } catch { userData = null }
       }
+
+      // 히스토리 스택 정리: 로그인 후 뒤로 가기로 로그인 페이지 진입 방지
+      window.history.replaceState(null, '', window.location.href)
+
       if (userData?.role === 'ADMIN') {
         navigate('/', { replace: true })
       } else if (userData?.subscription === 'pro') {

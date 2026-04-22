@@ -313,12 +313,51 @@ export default function AdminPage() {
     )
   }
 
-  // 검색 필터링
+  // 검색 필터링 + 만료일 정렬 (가장 가까운 순)
   const filteredUsers = useMemo(() => {
-    if (!searchQuery.trim()) return allUsers
+    let result = allUsers
+
+    // 검색 필터링
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      result = result.filter(u =>
+        u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+      )
+    }
+
+    // ⭐ 정렬: 만료일 순 (가장 가까운 순)
+    // 1. 만료된 사용자 먼저
+    // 2. 남은 기간 적은 순
+    // 3. 만료일 없는 사용자 (FREE 등) 마지막
+    return result.sort((a, b) => {
+      const aHasEnd = a.subscriptionEndDate && a.subscription === 'PRO'
+      const bHasEnd = b.subscriptionEndDate && b.subscription === 'PRO'
+
+      if (!aHasEnd && !bHasEnd) return 0  // 둘 다 만료일 없음
+      if (!aHasEnd) return 1              // a가 없으면 뒤로
+      if (!bHasEnd) return -1             // b가 없으면 a가 앞으로
+
+      const aEnd = new Date(a.subscriptionEndDate!)
+      const bEnd = new Date(b.subscriptionEndDate!)
+      return aEnd.getTime() - bEnd.getTime()  // 오름차순 (가까운 순)
+    })
+  }, [searchQuery, allUsers])
+
+  // ⭐ subscriptions 탭 검색 필터링
+  const filteredPendingUsers = useMemo(() => {
+    if (!searchQuery.trim()) return pendingUsers
+    const q = searchQuery.toLowerCase()
+    return pendingUsers.filter(u =>
+      u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+    )
+  }, [searchQuery, pendingUsers])
+
+  const filteredProUsers = useMemo(() => {
+    if (!searchQuery.trim()) return allUsers.filter(u => u.subscription === 'PRO')
     const q = searchQuery.toLowerCase()
     return allUsers.filter(u =>
-      u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+      u.subscription === 'PRO' &&
+      (u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
     )
   }, [searchQuery, allUsers])
 
@@ -481,20 +520,49 @@ export default function AdminPage() {
               {/* ===== 구독 승인/해제 탭 ===== */}
               {tab === 'subscriptions' && (
                 <div className="flex flex-col gap-3 animate-slide-up" style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}>
+                  {/* ⭐ 검색 입력창 */}
+                  <div className="flex items-center gap-2" style={{
+                    padding: '10px 14px', borderRadius: '12px',
+                    backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border-default)',
+                  }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                      style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
+                      <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
+                    </svg>
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      placeholder="승인 대기 또는 PRO 구독자 검색..."
+                      className="flex-1 bg-transparent text-[12px] outline-none"
+                      style={{ color: 'var(--text-primary)' }}
+                    />
+                    {searchQuery && (
+                      <button onClick={() => setSearchQuery('')}
+                        className="text-[10px] font-medium px-2 py-0.5 rounded-lg"
+                        style={{ color: 'var(--text-muted)', backgroundColor: 'rgba(255,255,255,0.05)' }}>
+                        초기화
+                      </button>
+                    )}
+                  </div>
+
                   <div className="flex items-center gap-2 mt-1">
                     <span className="text-sm">⏳</span>
                     <span className="text-[13px] font-bold" style={{ color: 'var(--text-primary)' }}>승인 대기</span>
                     <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full" style={{
                       backgroundColor: pendingCount > 0 ? 'rgba(255,152,0,0.12)' : 'rgba(255,255,255,0.05)',
                       color: pendingCount > 0 ? '#FF9800' : 'var(--text-muted)',
-                    }}>{pendingCount}건</span>
+                    }}>{pendingCount}건{searchQuery && ` / ${filteredPendingUsers.length}건`}</span>
                   </div>
 
-                  {pendingUsers.length === 0 ? (
+                  {filteredPendingUsers.length === 0 ? (
                     <GlassCard>
-                      <p className="text-center text-[12px] py-4" style={{ color: 'var(--text-muted)' }}>대기 중인 신청이 없습니다</p>
+                      <p className="text-center text-[12px] py-4" style={{ color: 'var(--text-muted)' }}>
+                        {searchQuery ? '검색 결과가 없습니다' : '대기 중인 신청이 없습니다'}
+                      </p>
                     </GlassCard>
-                  ) : pendingUsers.map(u => (
+                  ) : filteredPendingUsers.map(u => (
                     <GlassCard key={u.id}>
                       <div className="flex items-start justify-between mb-2">
                         <div className="flex items-center gap-2">
@@ -541,14 +609,16 @@ export default function AdminPage() {
                     <span className="text-[13px] font-bold" style={{ color: 'var(--text-primary)' }}>PRO 구독자</span>
                     <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full" style={{
                       backgroundColor: 'rgba(124,77,255,0.12)', color: '#7C4DFF',
-                    }}>{proUsers}명</span>
+                    }}>{proUsers}명{searchQuery && ` / ${filteredProUsers.length}명`}</span>
                   </div>
 
-                  {allUsers.filter(u => u.subscription === 'PRO').length === 0 ? (
+                  {filteredProUsers.length === 0 ? (
                     <GlassCard>
-                      <p className="text-center text-[12px] py-4" style={{ color: 'var(--text-muted)' }}>PRO 구독자가 없습니다</p>
+                      <p className="text-center text-[12px] py-4" style={{ color: 'var(--text-muted)' }}>
+                        {searchQuery ? '검색 결과가 없습니다' : 'PRO 구독자가 없습니다'}
+                      </p>
                     </GlassCard>
-                  ) : allUsers.filter(u => u.subscription === 'PRO').map(u => (
+                  ) : filteredProUsers.map(u => (
                     <GlassCard key={u.id}>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -659,17 +729,54 @@ export default function AdminPage() {
 
                         {/* 정보 요약 */}
                         <div className="rounded-lg p-2.5" style={{ backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)' }}>
-                          {[
-                            { k: '가입일', v: fmt(selectedUser.createdAt) },
-                            { k: '구독', v: selectedUser.subscription },
-                            { k: '만료일', v: selectedUser.subscriptionEndDate || '—' },
-                            { k: '입금자명', v: selectedUser.depositorName || '—' },
-                          ].map(r => (
-                            <div key={r.k} className="flex justify-between text-[10px] py-0.5">
-                              <span style={{ color: 'var(--text-muted)' }}>{r.k}</span>
-                              <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{r.v}</span>
-                            </div>
-                          ))}
+                          {(() => {
+                            const items: Array<{ k: string; v: string; color?: string }> = [
+                              { k: '가입일', v: fmt(selectedUser.createdAt) },
+                              { k: '구독', v: selectedUser.subscription },
+                            ]
+
+                            // ⭐ PRO 부여일 (승인일)
+                            if (selectedUser.subscription === 'PRO' && selectedUser.subscriptionApprovedAt) {
+                              items.push({ k: 'PRO부여일', v: fmt(selectedUser.subscriptionApprovedAt) })
+                            }
+
+                            // ⭐ 만료일 + 남은 기간
+                            if (selectedUser.subscriptionEndDate) {
+                              const endDate = new Date(selectedUser.subscriptionEndDate)
+                              const now = new Date()
+                              const daysLeft = Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+                              const isExpired = daysLeft < 0
+
+                              items.push({
+                                k: '만료일',
+                                v: fmt(selectedUser.subscriptionEndDate),
+                                color: isExpired ? '#FF6B6B' : daysLeft < 7 ? '#FFD93D' : 'var(--text-secondary)'
+                              })
+
+                              if (!isExpired) {
+                                items.push({
+                                  k: '남은기간',
+                                  v: `${daysLeft}일`,
+                                  color: daysLeft < 7 ? '#FFD93D' : 'var(--text-secondary)'
+                                })
+                              } else {
+                                items.push({
+                                  k: '상태',
+                                  v: `❌ ${Math.abs(daysLeft)}일 전 만료`,
+                                  color: '#FF6B6B'
+                                })
+                              }
+                            }
+
+                            items.push({ k: '입금자명', v: selectedUser.depositorName || '—' })
+
+                            return items.map(r => (
+                              <div key={r.k} className="flex justify-between text-[10px] py-0.5">
+                                <span style={{ color: 'var(--text-muted)' }}>{r.k}</span>
+                                <span className="font-medium" style={{ color: r.color || 'var(--text-secondary)' }}>{r.v}</span>
+                              </div>
+                            ))
+                          })()}
                         </div>
 
                         {/* 성공/에러 메시지 */}
@@ -824,9 +931,24 @@ export default function AdminPage() {
                               <span className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>{u.email}</span>
                             </div>
                           </div>
-                          <div className="text-right flex flex-col items-end gap-1">
+                          <div className="text-right flex flex-col items-end gap-0.5">
                             {subBadge(u.subscription)}
                             <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>{fmt(u.createdAt)}</span>
+
+                            {/* ⭐ PRO 사용자: 만료일 + 남은 기간 */}
+                            {u.subscription === 'PRO' && u.subscriptionEndDate && (() => {
+                              const endDate = new Date(u.subscriptionEndDate)
+                              const now = new Date()
+                              const daysLeft = Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+                              const isExpired = daysLeft < 0
+                              const color = isExpired ? '#FF6B6B' : daysLeft < 7 ? '#FFD93D' : 'var(--text-secondary)'
+
+                              return (
+                                <span className="text-[9px] font-medium" style={{ color }}>
+                                  {isExpired ? `❌ ${Math.abs(daysLeft)}일 전 만료` : `${daysLeft}일 남음`}
+                                </span>
+                              )
+                            })()}
                           </div>
                         </div>
                       </button>
