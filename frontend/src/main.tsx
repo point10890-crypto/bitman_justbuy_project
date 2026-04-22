@@ -12,6 +12,7 @@ import SubscribePage from './pages/SubscribePage'
 import ProtectedRoute from './components/guards/ProtectedRoute'
 import SubscribedRoute from './components/guards/SubscribedRoute'
 import AdminRoute from './components/guards/AdminRoute'
+import PublicOnlyRoute from './components/guards/PublicOnlyRoute'
 import AdminPage from './pages/AdminPage'
 import LandingPage from './pages/LandingPage'
 import './index.css'
@@ -44,10 +45,10 @@ createRoot(document.getElementById('root')!).render(
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          {/* 공개 라우트 (독립 전체화면) */}
-          <Route path="/landing" element={<LandingPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/login" element={<LoginPage />} />
+          {/* 공개 라우트 — 로그인 상태면 즉시 replace 리다이렉트 (히스토리에 남지 않음) */}
+          <Route path="/landing"  element={<PublicOnlyRoute><LandingPage /></PublicOnlyRoute>} />
+          <Route path="/register" element={<PublicOnlyRoute><RegisterPage /></PublicOnlyRoute>} />
+          <Route path="/login"    element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
 
           {/* 로그인 필수 (독립 전체화면) */}
           <Route path="/subscribe" element={

@@ -1,40 +1,40 @@
 {
-  "timestamp": "2026-04-21T12:00:45.503326",
+  "timestamp": "2026-04-22T16:01:05.780646",
   "predictions": {
     "BTC": {
-      "current_price": 75594.96,
-      "bullish_probability": 26.2,
-      "bearish_probability": 73.8,
+      "current_price": 78004.16,
+      "bullish_probability": 18.8,
+      "bearish_probability": 81.2,
       "confidence_level": "High",
       "key_drivers": [
         {
-          "feature": "btc_rsi_14",
-          "impact": 0.1336,
-          "value": 55.62,
+          "feature": "btc_return_20d",
+          "impact": 0.1405,
+          "value": 16.62,
           "direction": "bullish"
         },
         {
-          "feature": "btc_return_20d",
-          "impact": 0.1329,
-          "value": 11.04,
+          "feature": "btc_rsi_14",
+          "impact": 0.112,
+          "value": 64.98,
           "direction": "bullish"
         },
         {
           "feature": "btc_bb_position",
-          "impact": 0.1131,
-          "value": 0.5,
+          "impact": 0.1072,
+          "value": 0.89,
           "direction": "bearish"
         },
         {
           "feature": "btc_return_5d",
-          "impact": 0.1081,
-          "value": 0.59,
+          "impact": 0.1071,
+          "value": 1.14,
           "direction": "bullish"
         },
         {
           "feature": "eth_btc_relative_5d",
-          "impact": 0.1045,
-          "value": -2.33,
+          "impact": 0.0993,
+          "value": -2.3,
           "direction": "bearish"
         }
       ]
@@ -45,28 +45,28 @@
     "ensemble_models": [
       {
         "name": "GradientBoosting",
-        "accuracy": 69.1,
-        "bullish": 24.0
+        "accuracy": 68.4,
+        "bullish": 14.6
       },
       {
         "name": "RandomForest",
-        "accuracy": 72.7,
-        "bullish": 25.8
+        "accuracy": 72.8,
+        "bullish": 19.4
       },
       {
         "name": "HistGradientBoosting",
-        "accuracy": 67.2,
-        "bullish": 29.1
+        "accuracy": 67.8,
+        "bullish": 11.1
       },
       {
         "name": "LogisticRegression",
-        "accuracy": 70.6,
-        "bullish": 25.9
+        "accuracy": 65.9,
+        "bullish": 30.1
       }
     ],
-    "training_accuracy": 70.9,
+    "training_accuracy": 70.3,
     "training_samples": 1395,
-    "last_trained": "2026-04-14T00:01:16.662852"
+    "last_trained": "2026-04-22T04:01:14.912355"
   },
   "disclaimer": "Statistical model prediction. Not investment advice. Investment decisions are your own responsibility."
 }

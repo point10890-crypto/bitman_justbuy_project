@@ -1,10 +1,10 @@
 {
-  "timestamp": 1776740456.1375992,
+  "timestamp": 1776841300.4552932,
   "versions": {
     "daily_prices.csv": 1771481711.6233265,
-    "daily_report.json": 1776665445.4409914,
+    "daily_report.json": 1776838439.917516,
     "jongga_v2_latest.json": 1772525845.1461556,
-    "kr_ai_analysis.json": 1776665445.4291523,
-    "signals_log.csv": 1776699751.603421
+    "kr_ai_analysis.json": 1776838439.8982732,
+    "signals_log.csv": 1776838439.4227836
   }
 }

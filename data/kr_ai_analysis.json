@@ -2,20 +2,6 @@
   "market_indices": {},
   "signals": [
     {
-      "ticker": "006400",
-      "name": "삼성SDI",
-      "score": 82.76000000000003,
-      "contraction_ratio": 0.483,
-      "foreign_5d": 308651,
-      "inst_5d": 141461,
-      "entry_price": 404000.0,
-      "current_price": 404000.0,
-      "return_pct": 0,
-      "signal_date": "2026-04-20",
-      "market": "KOSPI",
-      "status": "OPEN"
-    },
-    {
       "ticker": "003620",
       "name": "KG모빌리티",
       "score": 82.76000000000003,
@@ -38,6 +24,20 @@
       "inst_5d": 59165,
       "entry_price": 1290.0,
       "current_price": 1290.0,
+      "return_pct": 0,
+      "signal_date": "2026-04-20",
+      "market": "KOSPI",
+      "status": "OPEN"
+    },
+    {
+      "ticker": "006400",
+      "name": "삼성SDI",
+      "score": 82.76000000000003,
+      "contraction_ratio": 0.483,
+      "foreign_5d": 308651,
+      "inst_5d": 141461,
+      "entry_price": 404000.0,
+      "current_price": 404000.0,
       "return_pct": 0,
       "signal_date": "2026-04-20",
       "market": "KOSPI",
@@ -72,6 +72,20 @@
       "status": "OPEN"
     },
     {
+      "ticker": "373220",
+      "name": "LG에너지솔루션",
+      "score": 81.5,
+      "contraction_ratio": 0.447,
+      "foreign_5d": 124945,
+      "inst_5d": 138925,
+      "entry_price": 403000.0,
+      "current_price": 403000.0,
+      "return_pct": 0,
+      "signal_date": "2026-04-21",
+      "market": "KOSPI",
+      "status": "OPEN"
+    },
+    {
       "ticker": "317330",
       "name": "덕산테코피아",
       "score": 81.0,
@@ -100,6 +114,20 @@
       "status": "OPEN"
     },
     {
+      "ticker": "033160",
+      "name": "엠케이전자",
+      "score": 80.7,
+      "contraction_ratio": 0.598,
+      "foreign_5d": 368263,
+      "inst_5d": 208394,
+      "entry_price": 10330.0,
+      "current_price": 10330.0,
+      "return_pct": 0,
+      "signal_date": "2026-04-21",
+      "market": "KOSDAQ",
+      "status": "OPEN"
+    },
+    {
       "ticker": "093370",
       "name": "후성",
       "score": 80.6,
@@ -114,20 +142,6 @@
       "status": "OPEN"
     },
     {
-      "ticker": "021050",
-      "name": "서원",
-      "score": 80.5,
-      "contraction_ratio": 0.783,
-      "foreign_5d": 622683,
-      "inst_5d": 106352,
-      "entry_price": 1255.0,
-      "current_price": 1255.0,
-      "return_pct": 0,
-      "signal_date": "2026-04-20",
-      "market": "KOSPI",
-      "status": "OPEN"
-    },
-    {
       "ticker": "336260",
       "name": "두산퓨얼셀",
       "score": 80.5,
@@ -136,6 +150,20 @@
       "inst_5d": 748587,
       "entry_price": 36600.0,
       "current_price": 36600.0,
+      "return_pct": 0,
+      "signal_date": "2026-04-20",
+      "market": "KOSPI",
+      "status": "OPEN"
+    },
+    {
+      "ticker": "021050",
+      "name": "서원",
+      "score": 80.5,
+      "contraction_ratio": 0.783,
+      "foreign_5d": 622683,
+      "inst_5d": 106352,
+      "entry_price": 1255.0,
+      "current_price": 1255.0,
       "return_pct": 0,
       "signal_date": "2026-04-20",
       "market": "KOSPI",
@@ -156,17 +184,31 @@
       "status": "OPEN"
     },
     {
-      "ticker": "373220",
-      "name": "LG에너지솔루션",
-      "score": 78.3,
-      "contraction_ratio": 0.447,
-      "foreign_5d": 135637,
-      "inst_5d": 5800,
-      "entry_price": 403000.0,
-      "current_price": 403000.0,
+      "ticker": "446540",
+      "name": "메가터치",
+      "score": 79.2,
+      "contraction_ratio": 0.314,
+      "foreign_5d": 942505,
+      "inst_5d": 37364,
+      "entry_price": 4220.0,
+      "current_price": 4220.0,
       "return_pct": 0,
-      "signal_date": "2026-04-16",
-      "market": "KOSPI",
+      "signal_date": "2026-04-21",
+      "market": "KOSDAQ",
+      "status": "OPEN"
+    },
+    {
+      "ticker": "095610",
+      "name": "테스",
+      "score": 78.6,
+      "contraction_ratio": 0.354,
+      "foreign_5d": 177841,
+      "inst_5d": -145105,
+      "entry_price": 71400.0,
+      "current_price": 71400.0,
+      "return_pct": 0,
+      "signal_date": "2026-04-22",
+      "market": "KOSDAQ",
       "status": "OPEN"
     },
     {
@@ -238,51 +280,9 @@
       "signal_date": "2026-04-20",
       "market": "KOSDAQ",
       "status": "OPEN"
-    },
-    {
-      "ticker": "072130",
-      "name": "유엔젤",
-      "score": 77.3,
-      "contraction_ratio": 0.609,
-      "foreign_5d": 196099,
-      "inst_5d": -2657,
-      "entry_price": 4700.0,
-      "current_price": 4700.0,
-      "return_pct": 0,
-      "signal_date": "2026-04-19",
-      "market": "KOSPI",
-      "status": "OPEN"
-    },
-    {
-      "ticker": "053050",
-      "name": "지에스이",
-      "score": 77.3,
-      "contraction_ratio": 0.301,
-      "foreign_5d": 57668,
-      "inst_5d": 0,
-      "entry_price": 2415.0,
-      "current_price": 2415.0,
-      "return_pct": 0,
-      "signal_date": "2026-04-20",
-      "market": "KOSDAQ",
-      "status": "OPEN"
-    },
-    {
-      "ticker": "001390",
-      "name": "KG케미칼",
-      "score": 77.1,
-      "contraction_ratio": 0.449,
-      "foreign_5d": 507443,
-      "inst_5d": -10511,
-      "entry_price": 5970.0,
-      "current_price": 5970.0,
-      "return_pct": 0,
-      "signal_date": "2026-04-20",
-      "market": "KOSPI",
-      "status": "OPEN"
     }
   ],
   "api_status": "ok",
-  "generated_at": "2026-04-20T15:10:45.429136",
-  "signal_date": "2026-04-20"
+  "generated_at": "2026-04-22T15:13:59.894990",
+  "signal_date": "2026-04-22"
 }

@@ -141,8 +141,17 @@ public class PrecomputeScheduler {
             com.bitman.justbuy.controller.MonitorController.recordAnalysis(
                 mode, true, durationMs, agentsUsed, agentsSucceeded, picks, null);
 
-            if (telegramNotifier != null) {
+            // 텔레그램 발송 조건 3가지 동시 충족 시에만 발송:
+            // 1) picks > 0  — 빈 분석 결과 발송 방지
+            // 2) agentsSucceeded > 0  — 모든 AI 실패 시 발송 방지
+            // 3) 장 시간(09:00~15:59 KST)  — 서버 재시작/장외 자동 분석 발송 방지
+            int kstHour = ZonedDateTime.now(ZoneId.of("Asia/Seoul")).getHour();
+            boolean isMarketHours = kstHour >= 9 && kstHour < 16;
+            if (telegramNotifier != null && picks > 0 && agentsSucceeded > 0 && isMarketHours) {
                 telegramNotifier.sendAnalysisResult(mode, result);
+            } else {
+                log.info("[Scheduler] {} 텔레그램 Skip — picks={}, agents={}/{}, marketHours={}({}시)",
+                    mode, picks, agentsSucceeded, agentsUsed, isMarketHours, kstHour);
             }
         } catch (Exception e) {
             log.error("[Scheduler] ❌ {} 실패: {}", mode, e.getMessage());
