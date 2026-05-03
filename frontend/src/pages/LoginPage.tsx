@@ -37,19 +37,14 @@ export default function LoginPage() {
 
     try {
       setLoading(true)
-      await login(email.trim(), password, rememberMe)
-      const stored = localStorage.getItem('bitman_auth_user') || sessionStorage.getItem('bitman_auth_user')
-      let userData: { role?: string; subscription?: string } | null = null
-      if (stored) {
-        try { userData = JSON.parse(stored) } catch { userData = null }
-      }
+      const loggedInUser = await login(email.trim(), password, rememberMe)
 
       // 히스토리 스택 정리: 로그인 후 뒤로 가기로 로그인 페이지 진입 방지
       window.history.replaceState(null, '', window.location.href)
 
-      if (userData?.role === 'ADMIN') {
+      if (loggedInUser.role === 'ADMIN') {
         navigate('/', { replace: true })
-      } else if (userData?.subscription === 'pro') {
+      } else if (loggedInUser.subscription === 'pro') {
         navigate('/', { replace: true })
       } else {
         navigate('/subscribe', { replace: true })

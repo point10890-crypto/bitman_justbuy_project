@@ -22,7 +22,7 @@ interface AuthContextType {
   user: User | null
   isGuest: boolean
   isLoading: boolean
-  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<User>
   register: (name: string, email: string, password: string) => Promise<void>
   logout: () => void
   applySubscription: (depositorName: string) => Promise<void>
@@ -61,17 +61,12 @@ function dtoToUser(dto: UserDto): User {
   }
 }
 
-/** 로그인 유지 여부에 따라 localStorage 또는 sessionStorage 사용 */
-function getStorage(): Storage {
-  return localStorage.getItem(REMEMBER_KEY) === '1' ? localStorage : sessionStorage
-}
-
 function setToken(token: string) {
-  getStorage().setItem(TOKEN_KEY, token)
+  localStorage.setItem(TOKEN_KEY, token)
 }
 
 function setUserData(user: string) {
-  getStorage().setItem(USER_KEY, user)
+  localStorage.setItem(USER_KEY, user)
 }
 
 function clearAuth() {
@@ -85,8 +80,23 @@ export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY)
 }
 
+function getStoredUser(): User | null {
+  const raw = localStorage.getItem(USER_KEY) || sessionStorage.getItem(USER_KEY)
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as User | UserDto
+    const subscription = (parsed as { subscription?: string }).subscription
+    if (subscription && subscription === subscription.toUpperCase()) {
+      return dtoToUser(parsed as UserDto)
+    }
+    return parsed as User
+  } catch {
+    return null
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
+  const [user, setUser] = useState<User | null>(() => getStoredUser())
   const [isLoading, setIsLoading] = useState(true)
 
   // 앱 시작 시 저장된 토큰으로 사용자 정보 복원
@@ -105,6 +115,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const token = getStoredToken()
+    const cachedUser = getStoredUser()
+    if (cachedUser) setUser(cachedUser)
     if (!token) {
       setIsLoading(false)
       return
@@ -141,20 +153,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string, rememberMe?: boolean) => {
     const res = await loginUser(email, password, rememberMe)
-    // 로그인 유지 설정 저장 (항상 localStorage에)
-    if (rememberMe) {
-      localStorage.setItem(REMEMBER_KEY, '1')
-      // localStorage에만 저장 (브라우저 종료 후에도 유지)
-      localStorage.setItem(TOKEN_KEY, res.token)
-      localStorage.setItem(USER_KEY, JSON.stringify(res.user))
-    } else {
-      localStorage.removeItem(REMEMBER_KEY)
-      // sessionStorage에만 저장 (브라우저 종료 시 삭제)
-      sessionStorage.setItem(TOKEN_KEY, res.token)
-      sessionStorage.setItem(USER_KEY, JSON.stringify(res.user))
-    }
     const u = dtoToUser(res.user)
+    // Keep auth until the user explicitly logs out, and store the normalized
+    // user shape used by route guards.
+    localStorage.setItem(REMEMBER_KEY, rememberMe ? '1' : '0')
+    setToken(res.token)
+    setUserData(JSON.stringify(u))
+    sessionStorage.removeItem(TOKEN_KEY)
+    sessionStorage.removeItem(USER_KEY)
     setUser(u)
+    return u
   }
 
   const register = async (name: string, email: string, password: string) => {
