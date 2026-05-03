@@ -13,7 +13,7 @@ This document is the source of truth for keeping JustBuy and MarketFlow separate
 | Local dev root | `C:\bitman_justbuy_project` | Do not use this repo for MarketFlow deployment |
 | Runtime port | `8080` | `5001` |
 | Public API host | `api.bit-man.net` | `marketflow-api.bit-man.net` |
-| Primary domain | None | `bitman.net`, `www.bitman.net` |
+| Primary domain | None. JustBuy must not use `bitman.net`. | `bitman.net`, `www.bitman.net` |
 | Runtime process | `java -jar justbuy-api-1.0.0.jar` | `.venv\Scripts\python.exe flask_app.py` and scheduler tasks |
 | Data ownership | `C:\bitman_justbuy\backend\data` | `C:\bitman_marketfloww\data` and MarketFlow output folders |
 
@@ -26,6 +26,21 @@ This document is the source of truth for keeping JustBuy and MarketFlow separate
 5. A JustBuy deployment must never modify `C:\bitman_marketfloww`.
 6. A MarketFlow deployment must never modify `C:\bitman_justbuy`.
 7. If a script contains both roots, treat it as suspicious and review it before running.
+8. Cloudflared config files must not contain `bitman.net` or `www.bitman.net` pointing at port `8080`.
+9. MiniPC root folders should contain visible marker files:
+   - `C:\bitman_justbuy\SERVICE-OWNER.txt`
+   - `C:\bitman_marketfloww\SERVICE-OWNER.txt`
+10. `api.bitman.net` is not a JustBuy host. Do not use it in JustBuy frontend, backend, tunnel, or deployment config.
+
+## Domain Truth Table
+
+| Host | Owner | Expected target |
+| --- | --- | --- |
+| `api.bit-man.net` | JustBuy | MiniPC `localhost:8080` |
+| `api.bitman.net` | Not JustBuy | Must not return `justbuy-api` |
+| `marketflow-api.bit-man.net` | MarketFlow | MiniPC `localhost:5001` |
+| `bitman.net` | MarketFlow | MarketFlow service domain |
+| `www.bitman.net` | MarketFlow | MarketFlow service domain |
 
 ## MiniPC Folder Layout
 
@@ -33,37 +48,42 @@ This document is the source of truth for keeping JustBuy and MarketFlow separate
 
 ```text
 C:\bitman_justbuy
-├── backend
-│   ├── justbuy-api-1.0.0.jar
-│   ├── .env
-│   ├── data
-│   │   ├── justbuy-db.mv.db
-│   │   └── .jwt-secret
-│   └── logs
-├── scripts
-│   ├── start-springboot.bat
-│   ├── backup-h2.ps1
-│   └── autostart.vbs
-└── backups
++-- backend
+|   +-- justbuy-api-1.0.0.jar
+|   +-- .env
+|   +-- data
+|   |   +-- justbuy-db.mv.db
+|   |   +-- .jwt-secret
+|   +-- logs
++-- scripts
+|   +-- start-springboot.bat
+|   +-- backup-h2.ps1
+|   +-- autostart.vbs
++-- backups
++-- SERVICE-OWNER.txt
 ```
 
 ### MarketFlow
 
 ```text
 C:\bitman_marketfloww
-├── app
-├── backend
-├── data
-├── deploy
-├── frontend-react
-├── logs
-├── scripts
-└── .venv
++-- app
++-- backend
++-- data
++-- deploy
++-- frontend-react
++-- logs
++-- scripts
++-- .venv
++-- SERVICE-OWNER.txt
 ```
 
 ## Cloudflared Ingress Boundary
 
-The MiniPC Cloudflare tunnel config must follow this shape:
+The MiniPC Cloudflare tunnel config files must follow this shape:
+
+- `C:\Users\dynas\.cloudflared\config.yml`
+- `C:\ProgramData\Cloudflare\config.yml`
 
 ```yaml
 ingress:
@@ -77,11 +97,15 @@ ingress:
 Forbidden JustBuy ingress examples:
 
 ```yaml
+- hostname: api.bitman.net
+  service: http://localhost:8080
 - hostname: bitman.net
   service: http://localhost:8080
 - hostname: www.bitman.net
   service: http://localhost:8080
 ```
+
+If a future Cloudflare setup needs `bitman.net`, it belongs to MarketFlow only. Put it in a MarketFlow-owned tunnel/config and point it at the MarketFlow service, not JustBuy.
 
 ## Task Scheduler Boundary
 
@@ -106,8 +130,10 @@ Expected service checks:
 
 ```text
 https://api.bit-man.net/api/health              -> justbuy-api
+https://api.bitman.net/api/health               -> not justbuy-api
 https://marketflow-api.bit-man.net/api/health   -> MarketFlow API
-https://bitman.net                              -> not JustBuy
-https://www.bitman.net                          -> not JustBuy
+https://bitman.net                              -> MarketFlow-owned domain, not JustBuy
+https://www.bitman.net                          -> MarketFlow-owned domain, not JustBuy
 ```
 
+The audit must be clean before and after any deployment that touches MiniPC folders, task scheduler entries, ports, or tunnel config.
