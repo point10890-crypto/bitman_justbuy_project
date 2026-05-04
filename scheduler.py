@@ -51,7 +51,7 @@ import logging
 import subprocess
 import signal as signal_module
 import argparse
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 import json
@@ -144,6 +144,37 @@ class Config:
 # ============================================================
 # 로깅 설정
 # ============================================================
+
+KR_MARKET_HOLIDAYS = {
+    date(2026, 1, 1),
+    date(2026, 2, 16), date(2026, 2, 17), date(2026, 2, 18),
+    date(2026, 3, 1), date(2026, 3, 2),
+    date(2026, 5, 5),   # Children's Day: KRX closed
+    date(2026, 5, 25),
+    date(2026, 6, 6),
+    date(2026, 8, 15), date(2026, 8, 17),
+    date(2026, 9, 24), date(2026, 9, 25), date(2026, 9, 26),
+    date(2026, 10, 3), date(2026, 10, 5), date(2026, 10, 9),
+    date(2026, 12, 25), date(2026, 12, 31),
+}
+
+
+def is_kr_trading_day(day: Optional[date] = None) -> bool:
+    """Return True when scheduled KR market jobs should run."""
+    day = day or datetime.now().date()
+    if day.weekday() >= 5:
+        return False
+    return day not in KR_MARKET_HOLIDAYS
+
+
+def run_kr_scheduled_update():
+    """KR scheduled update wrapper that skips weekends and KRX holidays."""
+    today = datetime.now().date()
+    if not is_kr_trading_day(today):
+        logger.info(f"KR scheduled update skipped: KRX closed ({today.isoformat()})")
+        return True
+    return run_kr_full_update()
+
 
 def setup_logging():
     """로깅 설정"""
@@ -1309,7 +1340,7 @@ class Scheduler:
             # 09:30 — US Track Record 스냅샷 + 성과 추적
             getattr(schedule.every(), day).at(Config.US_TRACK_TIME).do(save_us_track_record_snapshot)
             # 15:00 — KR 올업데이트 (종가베팅V2 + 수급/VCP/AI/리포트) → 텔레그램
-            getattr(schedule.every(), day).at(Config.KR_UPDATE_TIME).do(run_kr_full_update)
+            getattr(schedule.every(), day).at(Config.KR_UPDATE_TIME).do(run_kr_scheduled_update)
 
         # 토요일 히스토리 수집
         schedule.every().saturday.at(Config.HISTORY_TIME).do(collect_historical_institutional)
