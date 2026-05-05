@@ -1,9 +1,12 @@
 package com.bitman.justbuy.controller;
 
 import com.bitman.justbuy.ai.agent.AiAgent;
+import com.bitman.justbuy.service.PrecomputeScheduler;
 import com.bitman.justbuy.service.TrackRecordService;
+import com.bitman.justbuy.util.KoreanMarketCalendar;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +19,9 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -31,6 +37,7 @@ public class MonitorController {
 
     private final List<AiAgent> agents;
     private final TrackRecordService trackRecordService;
+    private final ObjectProvider<PrecomputeScheduler> schedulerProvider;
 
     // 분석 실행 로그 (인메모리, 최근 50건)
     // ConcurrentLinkedDeque 로 lock-free thread safety + addFirst/removeLast 로 bounded ring 구현.
@@ -62,9 +69,12 @@ public class MonitorController {
         return rates;
     }
 
-    public MonitorController(List<AiAgent> agents, TrackRecordService trackRecordService) {
+    public MonitorController(List<AiAgent> agents,
+                             TrackRecordService trackRecordService,
+                             ObjectProvider<PrecomputeScheduler> schedulerProvider) {
         this.agents = agents != null ? agents : List.of();
         this.trackRecordService = trackRecordService;
+        this.schedulerProvider = schedulerProvider;
         log.info("[Monitor] initialized with {} agents", this.agents.size());
     }
 
@@ -219,7 +229,96 @@ public class MonitorController {
         return trackRecordService.getStats();
     }
 
-    /** 외부 서비스 프로브 (HttpURLConnection 사용, 의존성 없음) */
+    /**
+     * GET /api/monitor/scheduler - scheduler heartbeat and liveness status.
+     */
+    @GetMapping("/scheduler")
+    public Map<String, Object> schedulerHeartbeat() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        ZoneId kst = ZoneId.of("Asia/Seoul");
+        ZonedDateTime nowKst = ZonedDateTime.now(kst);
+        result.put("now", nowKst.toString());
+
+        PrecomputeScheduler scheduler = schedulerProvider.getIfAvailable();
+        if (scheduler == null) {
+            result.put("enabled", false);
+            result.put("healthy", false);
+            result.put("reason", "scheduler-disabled");
+            return result;
+        }
+
+        Map<String, String> lastRuns = scheduler.getLastRunTimes();
+        result.put("enabled", true);
+        result.put("lastRunTimes", lastRuns);
+
+        boolean tradingDay = KoreanMarketCalendar.isTradingDay(nowKst.toLocalDate());
+        result.put("isTradingDay", tradingDay);
+        if (!tradingDay) {
+            result.put("healthy", true);
+            result.put("reason", "non-trading-day");
+            return result;
+        }
+
+        LocalTime now = nowKst.toLocalTime();
+        LocalTime expectedSince;
+        String expectedRound;
+        if (now.isAfter(LocalTime.of(14, 55))) {
+            expectedSince = LocalTime.of(14, 50);
+            expectedRound = "14:50";
+        } else if (now.isAfter(LocalTime.of(13, 55))) {
+            expectedSince = LocalTime.of(13, 50);
+            expectedRound = "13:50";
+        } else if (now.isAfter(LocalTime.of(12, 55))) {
+            expectedSince = LocalTime.of(12, 50);
+            expectedRound = "12:50";
+        } else if (now.isAfter(LocalTime.of(11, 55))) {
+            expectedSince = LocalTime.of(11, 50);
+            expectedRound = "11:50";
+        } else if (now.isAfter(LocalTime.of(10, 55))) {
+            expectedSince = LocalTime.of(10, 50);
+            expectedRound = "10:50";
+        } else if (now.isAfter(LocalTime.of(9, 55))) {
+            expectedSince = LocalTime.of(9, 50);
+            expectedRound = "09:50";
+        } else if (now.isAfter(LocalTime.of(8, 55))) {
+            expectedSince = LocalTime.of(8, 50);
+            expectedRound = "08:50";
+        } else {
+            result.put("healthy", true);
+            result.put("reason", "before-first-round");
+            return result;
+        }
+
+        ZonedDateTime threshold = nowKst.with(expectedSince).withSecond(0).withNano(0).minusMinutes(5);
+        Set<String> expectedModes = Set.of("BREAKOUT", "FLOW_LEADER", "CATALYST_BURST", "REVERSAL_EDGE");
+        List<String> staleModes = new ArrayList<>();
+        for (String mode : expectedModes) {
+            String value = lastRuns.get(mode);
+            if (value == null || value.isBlank()) {
+                staleModes.add(mode + " (no run recorded)");
+                continue;
+            }
+            try {
+                Instant updatedAt = Instant.parse(value);
+                if (updatedAt.isBefore(threshold.toInstant())) {
+                    staleModes.add(mode);
+                }
+            } catch (Exception e) {
+                staleModes.add(mode + " (unparseable)");
+            }
+        }
+
+        result.put("expectedRound", expectedRound);
+        result.put("threshold", threshold.toString());
+        result.put("staleModes", staleModes);
+        result.put("healthy", staleModes.isEmpty());
+        if (!staleModes.isEmpty()) {
+            result.put("reason", "stale modes: " + String.join(", ", staleModes));
+        }
+        return result;
+    }
+
+    /** External service probe using HttpURLConnection. */
     private Map<String, Object> probeUrl(String name, String url) {
         long start = System.currentTimeMillis();
         Map<String, Object> result = new LinkedHashMap<>();
