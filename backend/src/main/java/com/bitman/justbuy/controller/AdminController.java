@@ -5,8 +5,10 @@ import com.bitman.justbuy.dto.AdminResetPasswordRequest;
 import com.bitman.justbuy.dto.AdminUpdateUserRequest;
 import com.bitman.justbuy.dto.UserDto;
 import com.bitman.justbuy.service.AnalysisService;
+import com.bitman.justbuy.service.DeepSeekEndpointService;
 import com.bitman.justbuy.service.KisApiService;
 import com.bitman.justbuy.service.PrecomputeScheduler;
+import com.bitman.justbuy.service.RuntimeAiConfigService;
 import com.bitman.justbuy.service.SubscriptionService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +29,8 @@ public class AdminController {
     private final AnalysisService analysisService;
     private final List<AiAgent> agents;
     private final KisApiService kisApiService;
+    private final RuntimeAiConfigService runtimeAiConfigService;
+    private final DeepSeekEndpointService deepSeekEndpointService;
 
     @Autowired(required = false)
     private PrecomputeScheduler precomputeScheduler;
@@ -34,11 +38,15 @@ public class AdminController {
     public AdminController(SubscriptionService subscriptionService,
                            AnalysisService analysisService,
                            List<AiAgent> agents,
-                           KisApiService kisApiService) {
+                           KisApiService kisApiService,
+                           RuntimeAiConfigService runtimeAiConfigService,
+                           DeepSeekEndpointService deepSeekEndpointService) {
         this.subscriptionService = subscriptionService;
         this.analysisService = analysisService;
         this.agents = agents;
         this.kisApiService = kisApiService;
+        this.runtimeAiConfigService = runtimeAiConfigService;
+        this.deepSeekEndpointService = deepSeekEndpointService;
     }
 
     @GetMapping("/subscriptions/pending")
@@ -154,6 +162,34 @@ public class AdminController {
         result.put("responseTime", System.currentTimeMillis() - startMs);
 
         return ResponseEntity.ok(result);
+    }
+
+    // --- AI provider runtime config ---
+
+    public record DeepSeekKeyRequest(String apiKey, String baseUrl, String model) {}
+    public record DeepSeekTestRequest(String message) {}
+
+    @GetMapping("/ai/deepseek")
+    public ResponseEntity<Map<String, Object>> getDeepSeekConfig() {
+        return ResponseEntity.ok(deepSeekEndpointService.status());
+    }
+
+    @PutMapping("/ai/deepseek")
+    public ResponseEntity<Map<String, Object>> saveDeepSeekConfig(@RequestBody DeepSeekKeyRequest request) {
+        runtimeAiConfigService.saveDeepSeekConfig(request.apiKey(), request.baseUrl(), request.model());
+        return ResponseEntity.ok(deepSeekEndpointService.status());
+    }
+
+    @DeleteMapping("/ai/deepseek")
+    public ResponseEntity<Map<String, Object>> deleteDeepSeekRuntimeConfig() {
+        runtimeAiConfigService.deleteRuntimeDeepSeekConfig();
+        return ResponseEntity.ok(deepSeekEndpointService.status());
+    }
+
+    @PostMapping("/ai/deepseek/test")
+    public ResponseEntity<Map<String, Object>> testDeepSeek(@RequestBody(required = false) DeepSeekTestRequest request) {
+        String message = request == null ? "ping" : request.message();
+        return ResponseEntity.ok(deepSeekEndpointService.test(message));
     }
 
     @PostMapping("/system/refresh-all")

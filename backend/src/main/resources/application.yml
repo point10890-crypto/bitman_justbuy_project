@@ -31,6 +31,10 @@ bitman:
   ai:
     openai-api-key: ${OPENAI_API_KEY:}
     grok-api-key: ${XAI_API_KEY:}
+    gemini-api-key: ${GOOGLE_API_KEY:}
+    deepseek-api-key: ${DEEPSEEK_API_KEY:}
+    deepseek-base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+    deepseek-model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
   dart:
     api-key: ${DART_API_KEY:}
   kis:

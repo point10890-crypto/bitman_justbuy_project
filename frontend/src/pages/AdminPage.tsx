@@ -8,7 +8,8 @@ import {
   fetchPendingSubscriptions, approveSubscription, rejectSubscription,
   fetchAllUsers, revokeSubscription, adminUpdateUser, adminResetPassword,
   fetchSystemStatus, refreshAllAnalysis,
-  type UserDto,
+  fetchDeepSeekConfig, saveDeepSeekConfig, deleteDeepSeekConfig, testDeepSeekConfig,
+  type UserDto, type DeepSeekConfigStatus,
 } from '../api/authApi'
 
 type Tab = 'dashboard' | 'subscriptions' | 'members' | 'system' | 'monitor'
@@ -55,6 +56,14 @@ export default function AdminPage() {
   const [systemLoading, setSystemLoading] = useState(false)
   const [refreshLoading, setRefreshLoading] = useState(false)
   const [refreshResult, setRefreshResult] = useState<any>(null)
+  const [deepSeekStatus, setDeepSeekStatus] = useState<DeepSeekConfigStatus | null>(null)
+  const [deepSeekKey, setDeepSeekKey] = useState('')
+  const [deepSeekModel, setDeepSeekModel] = useState('deepseek-v4-flash')
+  const [deepSeekBaseUrl, setDeepSeekBaseUrl] = useState('https://api.deepseek.com')
+  const [deepSeekSaving, setDeepSeekSaving] = useState(false)
+  const [deepSeekDeleting, setDeepSeekDeleting] = useState(false)
+  const [deepSeekTesting, setDeepSeekTesting] = useState(false)
+  const [deepSeekTestResult, setDeepSeekTestResult] = useState<any>(null)
 
   // 모니터링
   const [monitorData, setMonitorData] = useState<any>(null)
@@ -242,13 +251,77 @@ export default function AdminPage() {
     setSystemLoading(true)
     try {
       const startTime = Date.now()
-      const data = await fetchSystemStatus(token)
+      const [data, deepseek] = await Promise.all([
+        fetchSystemStatus(token),
+        fetchDeepSeekConfig(token),
+      ])
       data.responseTime = Date.now() - startTime
       setSystemStatus(data)
+      setDeepSeekStatus(deepseek)
+      setDeepSeekModel(deepseek.model || 'deepseek-v4-flash')
+      setDeepSeekBaseUrl(deepseek.baseUrl || 'https://api.deepseek.com')
     } catch (e: any) {
       setSystemStatus({ error: e.message, status: 'error' })
     } finally {
       setSystemLoading(false)
+    }
+  }
+
+  const handleSaveDeepSeek = async () => {
+    const token = getStoredToken()
+    if (!token) return
+    if (!deepSeekKey.trim()) {
+      showToast('DeepSeek API key를 붙여넣어 주세요.')
+      return
+    }
+    setDeepSeekSaving(true)
+    try {
+      const saved = await saveDeepSeekConfig(token, {
+        apiKey: deepSeekKey.trim(),
+        baseUrl: deepSeekBaseUrl.trim() || 'https://api.deepseek.com',
+        model: deepSeekModel.trim() || 'deepseek-v4-flash',
+      })
+      setDeepSeekStatus(saved)
+      setDeepSeekKey('')
+      showToast('DeepSeek API key가 저장되었습니다.', 'success')
+      loadSystemStatus()
+    } catch (e) {
+      showToast('DeepSeek 저장 실패: ' + (e instanceof Error ? e.message : '오류'))
+    } finally {
+      setDeepSeekSaving(false)
+    }
+  }
+
+  const handleDeleteDeepSeek = async () => {
+    const token = getStoredToken()
+    if (!token) return
+    setDeepSeekDeleting(true)
+    try {
+      const deleted = await deleteDeepSeekConfig(token)
+      setDeepSeekStatus(deleted)
+      setDeepSeekKey('')
+      showToast('DeepSeek runtime key가 삭제되었습니다.', 'success')
+      loadSystemStatus()
+    } catch (e) {
+      showToast('DeepSeek 삭제 실패: ' + (e instanceof Error ? e.message : '오류'))
+    } finally {
+      setDeepSeekDeleting(false)
+    }
+  }
+
+  const handleTestDeepSeek = async () => {
+    const token = getStoredToken()
+    if (!token) return
+    setDeepSeekTesting(true)
+    setDeepSeekTestResult(null)
+    try {
+      const result = await testDeepSeekConfig(token)
+      setDeepSeekTestResult(result)
+      showToast(result.status === 'success' ? 'DeepSeek 연결 테스트 성공' : 'DeepSeek 연결 테스트 확인 필요', result.status === 'success' ? 'success' : 'error')
+    } catch (e) {
+      showToast('DeepSeek 테스트 실패: ' + (e instanceof Error ? e.message : '오류'))
+    } finally {
+      setDeepSeekTesting(false)
     }
   }
 
@@ -1026,6 +1099,116 @@ export default function AdminPage() {
                     </GlassCard>
                   ) : systemStatus ? (
                     <>
+                      <GlassCard>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm">DS</span>
+                            <span className="text-[13px] font-bold" style={{ color: 'var(--text-primary)' }}>DeepSeek API Key</span>
+                          </div>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{
+                            backgroundColor: deepSeekStatus?.configured ? 'rgba(0,200,83,0.1)' : 'rgba(255,23,68,0.08)',
+                            color: deepSeekStatus?.configured ? '#00C853' : '#FF1744',
+                            border: `1px solid ${deepSeekStatus?.configured ? 'rgba(0,200,83,0.25)' : 'rgba(255,23,68,0.2)'}`,
+                          }}>
+                            {deepSeekStatus?.configured ? 'CONNECTED' : 'NOT SET'}
+                          </span>
+                        </div>
+
+                        <div className="rounded-lg p-3 mb-3" style={{ backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)' }}>
+                          <div className="flex items-center justify-between text-[11px] mb-1">
+                            <span style={{ color: 'var(--text-muted)' }}>Source</span>
+                            <span className="font-bold" style={{ color: 'var(--text-primary)' }}>{deepSeekStatus?.source || 'none'}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span style={{ color: 'var(--text-muted)' }}>Key</span>
+                            <span className="font-mono" style={{ color: deepSeekStatus?.configured ? '#00C853' : 'var(--text-muted)' }}>
+                              {deepSeekStatus?.maskedKey || 'empty'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          <input
+                            type="password"
+                            value={deepSeekKey}
+                            onChange={e => setDeepSeekKey(e.target.value)}
+                            placeholder="DeepSeek API key 붙여넣기"
+                            autoComplete="off"
+                            className="w-full rounded-xl px-3 py-3 text-[12px] outline-none"
+                            style={{ backgroundColor: 'rgba(255,255,255,0.05)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)' }}
+                          />
+                          <input
+                            value={deepSeekModel}
+                            onChange={e => setDeepSeekModel(e.target.value)}
+                            placeholder="deepseek-v4-flash"
+                            className="w-full rounded-xl px-3 py-2.5 text-[12px] outline-none"
+                            style={{ backgroundColor: 'rgba(255,255,255,0.04)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)' }}
+                          />
+                          <input
+                            value={deepSeekBaseUrl}
+                            onChange={e => setDeepSeekBaseUrl(e.target.value)}
+                            placeholder="https://api.deepseek.com"
+                            className="w-full rounded-xl px-3 py-2.5 text-[12px] outline-none"
+                            style={{ backgroundColor: 'rgba(255,255,255,0.04)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)' }}
+                          />
+                          <div className="flex gap-2 mt-1">
+                            <button
+                              onClick={handleSaveDeepSeek}
+                              disabled={deepSeekSaving}
+                              className="flex-1 py-2.5 rounded-xl text-[12px] font-black transition-all duration-200"
+                              style={{
+                                background: deepSeekSaving ? 'rgba(255,215,0,0.1)' : 'linear-gradient(135deg, #FFD700, #FF9800)',
+                                color: deepSeekSaving ? '#FFD700' : '#0D1117',
+                                border: deepSeekSaving ? '1px solid rgba(255,215,0,0.2)' : 'none',
+                              }}
+                            >
+                              {deepSeekSaving ? '저장 중...' : '붙여넣은 키 저장'}
+                            </button>
+                            <button
+                              onClick={handleDeleteDeepSeek}
+                              disabled={deepSeekDeleting || !deepSeekStatus?.configured}
+                              className="px-4 py-2.5 rounded-xl text-[12px] font-bold"
+                              style={{
+                                backgroundColor: 'rgba(255,23,68,0.08)',
+                                color: deepSeekStatus?.configured ? '#FF1744' : 'var(--text-muted)',
+                                border: '1px solid rgba(255,23,68,0.18)',
+                                opacity: deepSeekStatus?.configured ? 1 : 0.5,
+                              }}
+                            >
+                              삭제
+                            </button>
+                          </div>
+                          <button
+                            onClick={handleTestDeepSeek}
+                            disabled={deepSeekTesting || !deepSeekStatus?.configured}
+                            className="w-full py-2.5 rounded-xl text-[12px] font-bold"
+                            style={{
+                              backgroundColor: 'rgba(0,200,83,0.08)',
+                              color: deepSeekStatus?.configured ? '#00C853' : 'var(--text-muted)',
+                              border: '1px solid rgba(0,200,83,0.18)',
+                              opacity: deepSeekStatus?.configured ? 1 : 0.5,
+                            }}
+                          >
+                            {deepSeekTesting ? '연결 테스트 중...' : 'DeepSeek 연결 테스트'}
+                          </button>
+                          {deepSeekTestResult && (
+                            <div className="rounded-lg p-3 text-[11px]" style={{ backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)' }}>
+                              <div className="flex items-center justify-between mb-1">
+                                <span style={{ color: 'var(--text-muted)' }}>Status</span>
+                                <span className="font-bold" style={{ color: deepSeekTestResult.status === 'success' ? '#00C853' : '#FF1744' }}>{deepSeekTestResult.status}</span>
+                              </div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span style={{ color: 'var(--text-muted)' }}>Latency</span>
+                                <span className="font-mono" style={{ color: 'var(--text-primary)' }}>{deepSeekTestResult.latencyMs ?? '-'}ms</span>
+                              </div>
+                              {deepSeekTestResult.error && (
+                                <p style={{ color: '#FF1744' }}>{deepSeekTestResult.error}</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </GlassCard>
+
                       {/* 서버 상태 */}
                       <GlassCard>
                         <div className="flex items-center gap-2 mb-3">

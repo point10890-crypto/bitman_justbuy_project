@@ -223,3 +223,53 @@ export async function refreshAllAnalysis(token: string) {
   return res.json()
 }
 
+export interface DeepSeekConfigStatus {
+  provider: 'deepseek'
+  configured: boolean
+  source: string
+  baseUrl: string
+  model: string
+  maskedKey: string | null
+  updatedAt: string | null
+}
+
+export async function fetchDeepSeekConfig(token: string): Promise<DeepSeekConfigStatus> {
+  const res = await apiFetch(`${API_BASE}/api/admin/ai/deepseek`, {
+    headers: authHeaders(token),
+  })
+  if (!res.ok) await handleError(res)
+  return res.json()
+}
+
+export async function saveDeepSeekConfig(
+  token: string,
+  data: { apiKey: string; baseUrl?: string; model?: string }
+): Promise<DeepSeekConfigStatus> {
+  const res = await apiFetch(`${API_BASE}/api/admin/ai/deepseek`, {
+    method: 'PUT',
+    headers: authHeaders(token),
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) await handleError(res)
+  return res.json()
+}
+
+export async function deleteDeepSeekConfig(token: string): Promise<DeepSeekConfigStatus> {
+  const res = await apiFetch(`${API_BASE}/api/admin/ai/deepseek`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
+  })
+  if (!res.ok) await handleError(res)
+  return res.json()
+}
+
+export async function testDeepSeekConfig(token: string, message = 'ping') {
+  const res = await apiFetch(`${API_BASE}/api/admin/ai/deepseek/test`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ message }),
+  })
+  if (!res.ok) await handleError(res)
+  return res.json()
+}
+
