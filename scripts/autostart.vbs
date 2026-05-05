@@ -159,13 +159,13 @@ Else
 End If
 
 ' ── 4. Cloudflared Tunnel ──
-If IsProcessRunning("cloudflared.exe"" tunnel") Then
+If IsProcessRunning("justbuy-tunnel") Then
     Log "Cloudflared: already running"
 Else
     Log "Cloudflared: starting justbuy-tunnel..."
     objShell.Run """" & CLOUDFLARED & """ tunnel --config ""C:\Users\dynas\.cloudflared\config.yml"" run justbuy-tunnel", 0, False
     WScript.Sleep 8000
-    If IsProcessRunning("cloudflared.exe"" tunnel") Then
+    If IsProcessRunning("justbuy-tunnel") Then
         Log "Cloudflared: OK"
     Else
         Log "Cloudflared: FAILED"
@@ -207,7 +207,7 @@ Do While True
     End If
 
     ' Cloudflared
-    If Not IsProcessRunning("cloudflared.exe"" tunnel") Then
+    If Not IsProcessRunning("justbuy-tunnel") Then
         Log "WATCHDOG: Cloudflared DOWN — restarting..."
         objShell.Run """" & CLOUDFLARED & """ tunnel --config ""C:\Users\dynas\.cloudflared\config.yml"" run justbuy-tunnel", 0, False
         WScript.Sleep 8000
