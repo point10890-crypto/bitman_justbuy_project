@@ -9,6 +9,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +26,22 @@ public class MarketProxyController {
 
     public MarketProxyController(MarketDataService marketDataService) {
         this.marketDataService = marketDataService;
+    }
+
+    @GetMapping({"/summary", "/overview"})
+    public ResponseEntity<Map<String, Object>> marketSummary() {
+        return ResponseEntity.ok(Map.of(
+                "status", "ok",
+                "timestamp", Instant.now().toString(),
+                "message", "compatibility market summary",
+                "indices", List.of(
+                        Map.of("symbol", "^KS11", "name", "KOSPI"),
+                        Map.of("symbol", "^KQ11", "name", "KOSDAQ"),
+                        Map.of("symbol", "USDKRW=X", "name", "USD/KRW"),
+                        Map.of("symbol", "^IXIC", "name", "NASDAQ")
+                ),
+                "chartEndpoint", "/api/market/chart/{symbol}?range=2d&interval=1d"
+        ));
     }
 
     /** 종목 코드 리스트로 실시간 현재가 조회 */
