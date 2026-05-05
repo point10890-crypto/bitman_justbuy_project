@@ -14,6 +14,7 @@ export interface User {
   role: 'USER' | 'ADMIN'
   subscription: 'free' | 'pending' | 'pro'
   subscriptionEndDate?: string
+  subscriptionExpired?: boolean
   depositorName?: string
   createdAt: string
 }
@@ -39,9 +40,17 @@ const REMEMBER_KEY = 'bitman_remember'
 
 function isSubscriptionExpired(endDate?: string | null): boolean {
   if (!endDate) return false
-  const expiryDate = new Date(endDate)
-  const now = new Date()
-  return now > expiryDate
+  const endDateKey = endDate.slice(0, 10)
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const byType = Object.fromEntries(parts.map(p => [p.type, p.value]))
+  const todayKst = `${byType.year}-${byType.month}-${byType.day}`
+  // Backend treats subscriptionEndDate as valid through that KST date.
+  return todayKst > endDateKey
 }
 
 function dtoToUser(dto: UserDto): User {
@@ -56,6 +65,7 @@ function dtoToUser(dto: UserDto): User {
     // ADMIN은 무기한 PRO 고정, 일반 유저는 만료 여부 확인
     subscription: dto.role === 'ADMIN' ? 'pro' : isExpired ? 'free' : dto.subscription.toLowerCase() as User['subscription'],
     subscriptionEndDate: dto.subscriptionEndDate ?? undefined,
+    subscriptionExpired: isExpired,
     depositorName: dto.depositorName ?? undefined,
     createdAt: dto.createdAt,
   }

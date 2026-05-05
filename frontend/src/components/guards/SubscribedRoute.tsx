@@ -15,7 +15,6 @@ export default function SubscribedRoute({ children }: { children: ReactNode }) {
   }
 
   if (!user) {
-    // 토큰이 있으면 로그인 직후 state 반영 대기 — 스피너 표시 (landing 리다이렉트 방지)
     if (getStoredToken()) {
       return (
         <div className="min-h-dvh flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
@@ -29,23 +28,20 @@ export default function SubscribedRoute({ children }: { children: ReactNode }) {
     return <Navigate to="/login" state={{ message: '로그인이 필요한 서비스입니다.' }} replace />
   }
 
-  // ADMIN은 구독 없이도 메인 대시보드 접근 허용
   if (user.role === 'ADMIN') return <>{children}</>
 
-  // PRO 플랜 만료 여부 확인
   if (user.subscription !== 'pro') {
-    // pending → 구독 페이지로 (입금 확인 중 안내)
-    // free (또는 만료) → 구독 유도 페이지로 (잠금 해제 컨셉)
     const isPending = user.subscription === 'pending'
+    const message = isPending
+      ? '구독 승인 대기 중입니다. 입금 확인 후 처리됩니다.'
+      : user.subscriptionExpired
+        ? 'PRO 구독이 만료되었습니다. 재구독 신청을 진행해 주세요.'
+        : '이 서비스는 PRO 구독 후 이용 가능합니다.'
+
     return (
       <Navigate
         to="/subscribe"
-        state={{
-          message: isPending
-            ? '구독 승인 대기 중입니다. 입금 확인 후 처리됩니다.'
-            : '이 서비스는 PRO 구독 후 이용 가능합니다.',
-          from: location.pathname,
-        }}
+        state={{ message, from: location.pathname }}
         replace
       />
     )

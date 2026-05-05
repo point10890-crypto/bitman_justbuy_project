@@ -36,9 +36,8 @@ export default function MyPage() {
   const initial = user.name.charAt(0).toUpperCase()
 
   // PRO 플랜 만료 여부 확인
-  const isProExpired = user.subscription === 'pro' && user.subscriptionEndDate
-    ? new Date() > new Date(user.subscriptionEndDate)
-    : false
+  const isProExpired = !!user.subscriptionExpired
+  const subscriptionEndLabel = user.subscriptionEndDate || '무기한'
 
   const openEdit = (mode: EditMode) => {
     setEditMode(mode)
@@ -140,7 +139,7 @@ export default function MyPage() {
                 <>
                   <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
                     구독 종료일: <span className="font-bold" style={{ color: isProExpired ? 'var(--color-bear)' : '#FFD700' }}>
-                      {user.subscriptionEndDate || '무기한'}
+                      {subscriptionEndLabel}
                     </span>
                   </p>
                   <p className="text-[11px]" style={{ color: isProExpired ? 'var(--color-bear)' : 'var(--color-bull)' }}>
@@ -154,10 +153,14 @@ export default function MyPage() {
                 </>
               ) : (
                 <>
-                  <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>현재 구독 중인 플랜이 없습니다.</p>
+                  <p className="text-[12px]" style={{ color: user.subscriptionExpired ? 'var(--color-bear)' : 'var(--text-muted)' }}>
+                    {user.subscriptionExpired
+                      ? `PRO 구독이 ${subscriptionEndLabel}에 만료되었습니다. 재구독 신청을 진행해 주세요.`
+                      : '현재 구독 중인 플랜이 없습니다.'}
+                  </p>
                   <div className="mt-1">
                     <GoldButton delay={0} onClick={() => navigate('/subscribe')}>
-                      PRO 구독 시작하기
+                      {user.subscriptionExpired ? 'PRO 재구독 신청하기' : 'PRO 구독 시작하기'}
                     </GoldButton>
                   </div>
                 </>

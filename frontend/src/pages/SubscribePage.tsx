@@ -451,6 +451,8 @@ export default function SubscribePage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const subscription = user?.subscription ?? 'free'
+  const isRenewal = !!user?.subscriptionExpired
+  const expiredEndDate = user?.subscriptionEndDate
 
   // SubscribedRoute 또는 LoginPage에서 전달된 메시지 (잠금 차단 여부 감지)
   const fromLocked = !!(location.state as { message?: string } | null)?.message
@@ -535,16 +537,33 @@ export default function SubscribePage() {
         {/* 타이틀 */}
         <div className="text-center mb-4 animate-slide-up" style={{ animationFillMode: 'backwards' }}>
           <h1 className="animate-gold-shimmer font-black text-[22px] mb-1.5" style={{ filter: 'drop-shadow(0 0 6px rgba(255,215,0,0.35))', letterSpacing: '-0.02em' }}>
-            PRO 구독 신청
+            {isRenewal ? 'PRO 재구독 신청' : 'PRO 구독 신청'}
           </h1>
           <p className="text-[13px] font-medium" style={{ color: 'var(--text-secondary)' }}>
-            ChatGPT × Grok AI 분석 서비스 구독
+            {isRenewal
+              ? `${expiredEndDate || '이전'} 만료된 구독을 다시 활성화합니다`
+              : 'ChatGPT × Grok AI 분석 서비스 구독'}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
 
           {/* 1. 잠금된 분석 미리보기 */}
+          {isRenewal && (
+            <div className="animate-slide-up" style={{ animationFillMode: 'backwards' }}>
+              <GlassCard>
+                <div className="flex items-start gap-3">
+                  <span className="text-base flex-shrink-0">!</span>
+                  <div>
+                    <p className="text-[13px] font-bold" style={{ color: 'var(--color-warning)' }}>구독 만료 계정입니다</p>
+                    <p className="text-[11px] mt-1 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                      입금자명을 입력해 재구독 신청을 완료하면 관리자 승인 후 바로 PRO 분석을 다시 이용할 수 있습니다.
+                    </p>
+                  </div>
+                </div>
+              </GlassCard>
+            </div>
+          )}
           <LockedAnalysisPreview fromLocked={fromLocked} />
 
           {/* 2. 구독 방법 3단계 */}
@@ -599,7 +618,7 @@ export default function SubscribePage() {
           {/* 6. 신청 버튼 */}
           <div className="animate-slide-up" style={{ animationDelay: '0.3s', animationFillMode: 'backwards' }}>
             <GoldButton type="submit" loading={loading} delay={0}>
-              구독 신청하기
+              {isRenewal ? '재구독 신청하기' : '구독 신청하기'}
             </GoldButton>
           </div>
 
