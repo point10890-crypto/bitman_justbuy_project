@@ -220,7 +220,27 @@ export async function refreshAllAnalysis(token: string) {
     headers: authHeaders(token),
   })
   if (!res.ok) await handleError(res)
-  return res.json()
+  const started = await res.json()
+  if (!started.jobId) return started
+
+  const deadline = Date.now() + 8 * 60_000
+  while (Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 3000))
+    const statusRes = await apiFetch(`${API_BASE}/api/admin/system/refresh-all/${started.jobId}`, {
+      headers: authHeaders(token),
+    })
+    if (!statusRes.ok) await handleError(statusRes)
+    const status = await statusRes.json()
+    if (status.status === 'complete') return status
+    if (status.status === 'error') throw new Error(status.error || 'Refresh failed')
+  }
+
+  return {
+    ...started,
+    status: 'running',
+    message: 'Refresh is still running. Check system status again shortly.',
+    results: [],
+  }
 }
 
 export interface DeepSeekConfigStatus {

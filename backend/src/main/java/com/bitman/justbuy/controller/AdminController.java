@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/api/admin")
@@ -31,9 +32,20 @@ public class AdminController {
     private final KisApiService kisApiService;
     private final RuntimeAiConfigService runtimeAiConfigService;
     private final DeepSeekEndpointService deepSeekEndpointService;
+    private final Map<String, RefreshJob> refreshJobs = new ConcurrentHashMap<>();
 
     @Autowired(required = false)
     private PrecomputeScheduler precomputeScheduler;
+
+    private enum RefreshStatus { PENDING, RUNNING, COMPLETE, ERROR }
+
+    private record RefreshJob(
+        RefreshStatus status,
+        Instant createdAt,
+        Instant completedAt,
+        List<Map<String, Object>> results,
+        String error
+    ) {}
 
     public AdminController(SubscriptionService subscriptionService,
                            AnalysisService analysisService,
@@ -202,12 +214,55 @@ public class AdminController {
             return ResponseEntity.badRequest().body(result);
         }
 
-        result.put("status", "ok");
-        result.put("startedAt", Instant.now().toString());
-        Map<String, String> refreshResults = precomputeScheduler.refreshAll();
-        result.put("results", refreshResults);
-        result.put("completedAt", Instant.now().toString());
+        String jobId = UUID.randomUUID().toString().substring(0, 8);
+        Instant startedAt = Instant.now();
+        refreshJobs.put(jobId, new RefreshJob(RefreshStatus.PENDING, startedAt, null, List.of(), null));
+
+        Thread.startVirtualThread(() -> {
+            refreshJobs.put(jobId, new RefreshJob(RefreshStatus.RUNNING, startedAt, null, List.of(), null));
+            try {
+                Map<String, String> rawResults = precomputeScheduler.refreshAll();
+                List<Map<String, Object>> normalized = rawResults.entrySet().stream()
+                    .map(entry -> {
+                        Map<String, Object> item = new LinkedHashMap<>();
+                        item.put("mode", entry.getKey());
+                        item.put("status", entry.getValue());
+                        item.put("success", "success".equalsIgnoreCase(entry.getValue()));
+                        return item;
+                    })
+                    .toList();
+                refreshJobs.put(jobId, new RefreshJob(RefreshStatus.COMPLETE, startedAt, Instant.now(), normalized, null));
+            } catch (Exception e) {
+                String message = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                refreshJobs.put(jobId, new RefreshJob(RefreshStatus.ERROR, startedAt, Instant.now(), List.of(), message));
+            }
+        });
+
+        result.put("status", "accepted");
+        result.put("jobId", jobId);
+        result.put("startedAt", startedAt.toString());
+        result.put("message", "refresh-all started");
 
         return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/system/refresh-all/{jobId}")
+    public ResponseEntity<Map<String, Object>> refreshAllStatus(@PathVariable String jobId) {
+        RefreshJob job = refreshJobs.get(jobId);
+        if (job == null) {
+            return ResponseEntity.status(404).body(Map.of(
+                "status", "error",
+                "error", "refresh job not found"
+            ));
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", job.status().name().toLowerCase());
+        body.put("jobId", jobId);
+        body.put("startedAt", job.createdAt().toString());
+        if (job.completedAt() != null) body.put("completedAt", job.completedAt().toString());
+        if (job.error() != null) body.put("error", job.error());
+        body.put("results", job.results());
+        return ResponseEntity.ok(body);
     }
 }
