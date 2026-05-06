@@ -144,14 +144,14 @@ public class PrecomputeScheduler {
             // 텔레그램 발송 조건 3가지 동시 충족 시에만 발송:
             // 1) picks > 0  — 빈 분석 결과 발송 방지
             // 2) agentsSucceeded > 0  — 모든 AI 실패 시 발송 방지
-            // 3) 장 시간(09:00~15:59 KST)  — 서버 재시작/장외 자동 분석 발송 방지
+            // 3) 발송 시간(08:00~15:59 KST)  — 08:50 사전 분석과 장중 자동 분석 발송 허용
             int kstHour = ZonedDateTime.now(ZoneId.of("Asia/Seoul")).getHour();
-            boolean isMarketHours = kstHour >= 9 && kstHour < 16;
-            if (telegramNotifier != null && picks > 0 && agentsSucceeded > 0 && isMarketHours) {
+            boolean isAlertWindow = kstHour >= 8 && kstHour < 16;
+            if (telegramNotifier != null && picks > 0 && agentsSucceeded > 0 && isAlertWindow) {
                 telegramNotifier.sendAnalysisResult(mode, result);
             } else {
-                log.info("[Scheduler] {} 텔레그램 Skip — picks={}, agents={}/{}, marketHours={}({}시)",
-                    mode, picks, agentsSucceeded, agentsUsed, isMarketHours, kstHour);
+                log.info("[Scheduler] {} 텔레그램 Skip — picks={}, agents={}/{}, alertWindow={}({}시)",
+                    mode, picks, agentsSucceeded, agentsUsed, isAlertWindow, kstHour);
             }
         } catch (Exception e) {
             log.error("[Scheduler] ❌ {} 실패: {}", mode, e.getMessage());
