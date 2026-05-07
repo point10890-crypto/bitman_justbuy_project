@@ -64,7 +64,7 @@ public class AnalysisController {
             throw new IllegalArgumentException("Invalid mode: " + decodedMode);
         }
 
-        AnalysisResponse data = analysisService.getPrecomputed(decodedMode);
+        AnalysisResponse data = analysisService.getPrecomputedForDisplay(decodedMode);
         if (data == null) {
             throw new ApiException(HttpStatus.NOT_FOUND, "No pre-computed result available for mode: " + decodedMode);
         }

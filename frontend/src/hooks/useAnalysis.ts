@@ -31,16 +31,9 @@ export function useAnalysis() {
         try {
           const precomputed = await fetchPrecomputed(mode, token)
           if (precomputed && precomputed.metadata.agentsSucceeded > 0) {
-            const cached = getCached(query, effectiveMode)
-            const serverTime = new Date(precomputed.updatedAt).getTime()
-            const cachedTime = cached ? new Date(cached.updatedAt).getTime() : 0
-            if (serverTime > cachedTime || !cached) {
-              setResult({ ...precomputed, isPrecomputed: true })
-              setCache(query, effectiveMode, precomputed)
-              addHistory(query, mode, precomputed.content)
-            } else {
-              setResult({ ...cached, isPrecomputed: true })
-            }
+            setResult({ ...precomputed, isPrecomputed: true })
+            setCache(query, effectiveMode, precomputed)
+            addHistory(query, mode, precomputed.content)
             return
           }
         } catch {

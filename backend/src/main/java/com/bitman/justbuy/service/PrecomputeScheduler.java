@@ -60,6 +60,10 @@ public class PrecomputeScheduler {
 
     private void runStartupPrecompute() {
         try { Thread.sleep(30_000); } catch (InterruptedException e) { return; }
+        if (!isTradingDay() || !isAlertWindow()) {
+            log.info("[Scheduler] Startup precompute skipped outside trading alert window");
+            return;
+        }
 
         log.info("[Scheduler] 🚀 서버 시작 — 캐시 확인 중...");
         int success = 0, total = 0;
@@ -118,6 +122,11 @@ public class PrecomputeScheduler {
         return KoreanMarketCalendar.isTradingDay(LocalDate.now(ZoneId.of("Asia/Seoul")));
     }
 
+    private boolean isAlertWindow() {
+        int kstHour = ZonedDateTime.now(ZoneId.of("Asia/Seoul")).getHour();
+        return kstHour >= 8 && kstHour < 16;
+    }
+
     private void execute(String mode, String query) {
         String now = ZonedDateTime.now(ZoneId.of("Asia/Seoul"))
             .format(DateTimeFormatter.ofPattern("HH:mm:ss"));
@@ -125,7 +134,7 @@ public class PrecomputeScheduler {
 
         long startMs = System.currentTimeMillis();
         try {
-            AnalysisResponse result = analysisService.runLiveAnalysis(query, mode);
+            AnalysisResponse result = analysisService.runLiveAnalysis(query, mode, true);
             if (result.updatedAt() != null) lastRunTimes.put(mode, result.updatedAt());
 
             // metadata 가 null 일 수 있는 경로(폴백 응답 등)를 NPE 없이 처리
@@ -146,7 +155,7 @@ public class PrecomputeScheduler {
             // 2) agentsSucceeded > 0  — 모든 AI 실패 시 발송 방지
             // 3) 발송 시간(08:00~15:59 KST)  — 08:50 사전 분석과 장중 자동 분석 발송 허용
             int kstHour = ZonedDateTime.now(ZoneId.of("Asia/Seoul")).getHour();
-            boolean isAlertWindow = kstHour >= 8 && kstHour < 16;
+            boolean isAlertWindow = isAlertWindow();
             if (telegramNotifier != null && picks > 0 && agentsSucceeded > 0 && isAlertWindow) {
                 telegramNotifier.sendAnalysisResult(mode, result);
             } else {
