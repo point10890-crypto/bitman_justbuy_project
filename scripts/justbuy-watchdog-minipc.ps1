@@ -1,11 +1,5 @@
 $ErrorActionPreference = "SilentlyContinue"
 
-$ExpectedHost = "MINIPC-NQYLP"
-if ($env:COMPUTERNAME -ne $ExpectedHost) {
-    Write-Error "JustBuy watchdog is production-only and must run on $ExpectedHost. Current host: $env:COMPUTERNAME"
-    exit 2
-}
-
 $Project = "C:\bitman_justbuy"
 $Backend = Join-Path $Project "backend"
 $LogDir = Join-Path $Backend "logs"
