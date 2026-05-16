@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getStoredToken, useAuth } from '../contexts/AuthContext'
 import {
   approveSubscription,
@@ -71,6 +71,12 @@ const viewMeta: Record<AdminView, { label: string; kicker: string; desc: string 
   system: { label: '시스템 관리', kicker: 'SYSTEM', desc: 'KIS, DART, DeepSeek, 분석 캐시 상태를 확인합니다.' },
 }
 
+const adminViewSet = new Set<AdminView>(Object.keys(viewMeta) as AdminView[])
+
+function parseAdminView(value: string | null): AdminView {
+  return value && adminViewSet.has(value as AdminView) ? value as AdminView : 'dashboard'
+}
+
 const strategyViews: Record<Exclude<AdminView, 'dashboard' | 'approvals' | 'subscriptions' | 'members' | 'system'>, {
   mode: string
   section: string
@@ -109,8 +115,9 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function AdminPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { logout } = useAuth()
-  const [view, setView] = useState<AdminView>('dashboard')
+  const [view, setView] = useState<AdminView>(() => parseAdminView(searchParams.get('view')))
   const [menuOpen, setMenuOpen] = useState(false)
   const [users, setUsers] = useState<UserDto[]>([])
   const [pendingUsers, setPendingUsers] = useState<UserDto[]>([])
@@ -161,6 +168,11 @@ export default function AdminPage() {
   }, [view])
 
   useEffect(() => {
+    const nextView = parseAdminView(searchParams.get('view'))
+    if (nextView !== view) setView(nextView)
+  }, [searchParams, view])
+
+  useEffect(() => {
     if (!menuOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setMenuOpen(false)
@@ -183,6 +195,15 @@ export default function AdminPage() {
   const freeCount = users.filter(user => user.subscription === 'FREE').length
   const pendingCount = pendingUsers.length
   const expiringCount = users.filter(user => user.subscription === 'PRO' && user.subscriptionEndDate).length
+
+  const goAdminView = (nextView: AdminView, nextSearch = '') => {
+    setView(nextView)
+    setMenuOpen(false)
+    setMessage('')
+    setEditingUser(null)
+    setSearch(nextSearch)
+    setSearchParams(nextView === 'dashboard' ? {} : { view: nextView })
+  }
 
   const runAction = async (user: UserDto, action: 'approve' | 'reject' | 'revoke') => {
     const token = getStoredToken()
@@ -306,7 +327,7 @@ export default function AdminPage() {
   const handleMenu = (item: AdminMenuEntry) => {
     setMenuOpen(false)
     if (item.type === 'view' && item.view) {
-      setView(item.view)
+      goAdminView(item.view)
       return
     }
     if (item.type === 'route' && item.route) {
@@ -328,6 +349,12 @@ export default function AdminPage() {
   }
 
   const meta = viewMeta[view]
+  const kpiCards = [
+    { label: '승인 대기', value: pendingCount, desc: '입금 확인 후 승인/반려', view: 'approvals' as AdminView },
+    { label: '활성 구독자', value: activeCount, desc: 'PRO 구독 현황 관리', view: 'subscriptions' as AdminView },
+    { label: '무료 회원', value: freeCount, desc: '전체 회원 목록 확인', view: 'members' as AdminView },
+    { label: '만료일 관리', value: expiringCount, desc: '만료/연장 대상 점검', view: 'subscriptions' as AdminView },
+  ]
 
   return (
     <main className={`admin-page${menuOpen ? ' admin-menu-open' : ''}`}>
@@ -397,10 +424,18 @@ export default function AdminPage() {
 
         {view !== 'system' && (
           <div className="admin-kpi-grid">
-            <div><span>승인 대기</span><strong>{pendingCount}</strong></div>
-            <div><span>활성 구독자</span><strong>{activeCount}</strong></div>
-            <div><span>무료 회원</span><strong>{freeCount}</strong></div>
-            <div><span>만료일 관리</span><strong>{expiringCount}</strong></div>
+            {kpiCards.map(card => (
+              <button
+                className="admin-kpi-card"
+                type="button"
+                key={card.label}
+                onClick={() => goAdminView(card.view)}
+              >
+                <span>{card.label}</span>
+                <strong>{card.value}</strong>
+                <em>{card.desc}</em>
+              </button>
+            ))}
           </div>
         )}
 
@@ -408,7 +443,7 @@ export default function AdminPage() {
           <>
             <div className="admin-dashboard-grid">
               {Object.entries(strategyViews).map(([key, strategy]) => (
-                <button className="admin-strategy-card" type="button" key={key} onClick={() => setView(key as AdminView)}>
+                <button className="admin-strategy-card" type="button" key={key} onClick={() => goAdminView(key as AdminView)}>
                   <span>{strategy.mode}</span>
                   <strong>{viewMeta[key as AdminView].label}</strong>
                   <p>{viewMeta[key as AdminView].desc}</p>
@@ -418,15 +453,15 @@ export default function AdminPage() {
 
             <AdminPanel title="오늘 처리할 운영 업무" description="대기 승인과 주요 운영 상태를 빠르게 확인합니다.">
               <div className="admin-task-list">
-                <button type="button" onClick={() => setView('approvals')}>
+                <button type="button" onClick={() => goAdminView('approvals')}>
                   <strong>구독 승인 대기 {pendingCount}건</strong>
                   <span>입금 확인 후 PRO 권한을 부여하세요.</span>
                 </button>
-                <button type="button" onClick={() => setView('system')}>
+                <button type="button" onClick={() => goAdminView('system')}>
                   <strong>검색식 캐시 상태 확인</strong>
                   <span>KIS, DART, DeepSeek 연동과 분석 캐시를 점검하세요.</span>
                 </button>
-                <button type="button" onClick={() => setView('members')}>
+                <button type="button" onClick={() => goAdminView('members')}>
                   <strong>회원 목록 점검</strong>
                   <span>신규 회원, 무료 회원, PRO 회원 상태를 확인하세요.</span>
                 </button>
@@ -518,7 +553,7 @@ export default function AdminPage() {
               <button type="button" disabled={actionId === 'expire-now'} onClick={runExpiryNow}>
                 만료 구독 즉시 처리
               </button>
-              <button type="button" onClick={() => setView('approvals')}>
+              <button type="button" onClick={() => goAdminView('approvals')}>
                 승인 대기 보기
               </button>
             </div>
