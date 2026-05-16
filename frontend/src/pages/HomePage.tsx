@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAnalysis, type AnalysisResult } from '../hooks/useAnalysis'
 import { useAuth } from '../contexts/AuthContext'
@@ -234,7 +234,13 @@ export default function HomePage() {
   const [endpointRows, setEndpointRows] = useState<Record<string, Section['rows']>>({})
   const [endpointStatus, setEndpointStatus] = useState<Record<string, string>>({})
   const [endpointLoading, setEndpointLoading] = useState<string | null>(null)
+  const handledActionRef = useRef('')
+  const queryRef = useRef('')
   const locked = user?.role !== 'ADMIN' && user?.subscription !== 'pro'
+
+  useEffect(() => {
+    queryRef.current = query
+  }, [query])
 
   const runAnalysis = (analysisQuery: string, mode?: string) => {
     setActiveQuery(analysisQuery)
@@ -271,6 +277,58 @@ export default function HomePage() {
     }
     setEndpointLoading(null)
   }
+
+  const runUsageEndpoint = () => {
+    runAnalysis('BitMan 오늘 뭐사 앱 이용방법: 단타, 스윙, 주도주, 테마주, 종목 알림이, 구독 신청 흐름을 처음 쓰는 이용자에게 간단히 안내', '분석해줘')
+  }
+
+  const runThemeEndpoint = () => {
+    const themeSection = sections.find(section => section.id === 'themes')
+    if (themeSection) loadLegacyEndpoint(themeSection)
+  }
+
+  const runStockEndpoint = () => {
+    const nextQuery = queryRef.current.trim()
+    runAnalysis(nextQuery ? `${nextQuery} 종목 분석` : '오늘 관심 종목 분석', '분석해줘')
+  }
+
+  const runQuickAction = (action: string) => {
+    if (!action) return
+    if (action === 'usage') runUsageEndpoint()
+    if (action === 'theme') runThemeEndpoint()
+    if (action === 'stock') runStockEndpoint()
+  }
+
+  const runQueuedAction = (action: string) => {
+    if (!action || handledActionRef.current === action) return
+    handledActionRef.current = action
+    runQuickAction(action)
+    window.setTimeout(() => {
+      if (handledActionRef.current === action) handledActionRef.current = ''
+    }, 500)
+  }
+
+  useEffect(() => {
+    let action = ''
+    try {
+      action = sessionStorage.getItem('bitman_home_action') || ''
+      if (action) sessionStorage.removeItem('bitman_home_action')
+    } catch { /* ignore */ }
+
+    if (!action) {
+      handledActionRef.current = ''
+    } else {
+      window.setTimeout(() => runQueuedAction(action), 120)
+    }
+
+    const onHomeAction = (event: Event) => {
+      const nextAction = (event as CustomEvent<string>).detail || ''
+      runQueuedAction(nextAction)
+    }
+
+    window.addEventListener('bitman:home-action', onHomeAction)
+    return () => window.removeEventListener('bitman:home-action', onHomeAction)
+  }, [])
 
   const displayedSections = sections.map(section => {
     const apiSection =
@@ -361,13 +419,13 @@ export default function HomePage() {
       ))}
 
       <div className="home-action-grid">
-        <button type="button">앱 이용방법</button>
+        <button type="button" onClick={runUsageEndpoint}>앱 이용방법</button>
         <a className="contact-tile" href="https://open.kakao.com/o/sJVLbWUe" target="_blank" rel="noreferrer">
           <span className="kakao-mark kakao-mark-small">톡</span>
           <span>문의 하기</span>
         </a>
-        <button type="button" onClick={() => document.getElementById('themes')?.scrollIntoView({ behavior: 'smooth' })}>테마분석</button>
-        <button type="button" onClick={() => runAnalysis(query.trim() ? `${query.trim()} 종목 분석` : '오늘 관심 종목 분석', '분석해줘')}>종목분석</button>
+        <button type="button" onClick={runThemeEndpoint}>테마분석</button>
+        <button type="button" onClick={runStockEndpoint}>종목분석</button>
       </div>
 
       <a className="community-cta contact-cta" href="https://open.kakao.com/o/sJVLbWUe" target="_blank" rel="noreferrer">

@@ -52,12 +52,14 @@ export default function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const { user, logout } = useAuth()
-  const { data: marketData } = useMarketData()
+  const { data: marketData, refresh: refreshMarketData } = useMarketData()
   const { data: conditionFeed, refetch: refetchConditions } = useMainConditions()
   const [menuOpen, setMenuOpen] = useState(false)
   const [seenAlertEventKey, setSeenAlertEventKey] = useState(getStoredAlertEventKey)
+  const [notifiedAlertEventKey, setNotifiedAlertEventKey] = useState('')
   const [hasNewAlert, setHasNewAlert] = useState(false)
   const [alertNotice, setAlertNotice] = useState<string | null>(null)
+  const [refreshingMenu, setRefreshingMenu] = useState(false)
   const isAdmin = user?.role === 'ADMIN'
   const isAdminPage = location.pathname.startsWith('/admin')
   const currentSection = location.pathname === '/' ? decodeURIComponent(location.hash.slice(1)) : ''
@@ -88,13 +90,26 @@ export default function AppLayout() {
   useEffect(() => {
     if (isAdminPage) return
     const eventKey = getAlertEventKey(conditionFeed)
-    if (!eventKey || eventKey === seenAlertEventKey) return
+    if (!eventKey) return
 
-    setSeenAlertEventKey(eventKey)
-    try {
-      localStorage.setItem(LAST_ALERT_EVENT_KEY, eventKey)
-    } catch { /* ignore */ }
+    if (currentSection === 'alerts') {
+      setSeenAlertEventKey(eventKey)
+      try {
+        localStorage.setItem(LAST_ALERT_EVENT_KEY, eventKey)
+      } catch { /* ignore */ }
+      setNotifiedAlertEventKey(eventKey)
+      setHasNewAlert(false)
+      setAlertNotice(null)
+      return
+    }
 
+    if (eventKey === seenAlertEventKey) return
+    if (eventKey === notifiedAlertEventKey) {
+      setHasNewAlert(true)
+      return
+    }
+
+    setNotifiedAlertEventKey(eventKey)
     setHasNewAlert(true)
     setAlertNotice(getAlertEventMessage(conditionFeed))
 
@@ -102,7 +117,7 @@ export default function AppLayout() {
       setAlertNotice(null)
     }, 5200)
     return () => window.clearTimeout(timer)
-  }, [conditionFeed, isAdminPage, seenAlertEventKey])
+  }, [conditionFeed, currentSection, isAdminPage, notifiedAlertEventKey, seenAlertEventKey])
 
   const goHomeSection = (section: string) => {
     setMenuOpen(false)
@@ -116,6 +131,33 @@ export default function AppLayout() {
   const goMenuRoute = (path: string) => {
     setMenuOpen(false)
     navigate(path)
+  }
+
+  const goHomeAction = (action: 'usage' | 'theme' | 'stock') => {
+    setMenuOpen(false)
+    try {
+      if (location.pathname !== '/') {
+        sessionStorage.setItem('bitman_home_action', action)
+      } else {
+        sessionStorage.removeItem('bitman_home_action')
+      }
+    } catch { /* ignore */ }
+    if (location.pathname !== '/') {
+      navigate('/')
+    }
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('bitman:home-action', { detail: action }))
+    }, 120)
+  }
+
+  const refreshMenuData = async () => {
+    setRefreshingMenu(true)
+    try {
+      await Promise.all([refetchConditions(), refreshMarketData()])
+    } finally {
+      setRefreshingMenu(false)
+      setMenuOpen(false)
+    }
   }
 
   const handleLogout = () => {
@@ -134,6 +176,14 @@ export default function AppLayout() {
   }
 
   const goAlerts = () => {
+    const eventKey = getAlertEventKey(conditionFeed)
+    if (eventKey) {
+      setSeenAlertEventKey(eventKey)
+      try {
+        localStorage.setItem(LAST_ALERT_EVENT_KEY, eventKey)
+      } catch { /* ignore */ }
+      setNotifiedAlertEventKey(eventKey)
+    }
     setHasNewAlert(false)
     setAlertNotice(null)
     goHomeSection('alerts')
@@ -173,6 +223,10 @@ export default function AppLayout() {
                   {menuOpen && (
                     <div className="header-menu-panel" role="menu">
                       <span className="header-menu-label">조건검색</span>
+                      <button type="button" role="menuitem" onClick={refreshMenuData} disabled={refreshingMenu}>
+                        <strong>{refreshingMenu ? '갱신 중' : '새로고침'}</strong>
+                        <span>조건검색 · 시장지표 다시 불러오기</span>
+                      </button>
                       <button type="button" role="menuitem" onClick={goMain}>
                         <strong>메인</strong>
                         <span>오늘의 조건검색 홈</span>
@@ -196,6 +250,20 @@ export default function AppLayout() {
                       <button type="button" role="menuitem" onClick={() => goHomeSection('alerts')}>
                         <strong>종목 알림이</strong>
                         <span>관심 종목 알림</span>
+                      </button>
+
+                      <span className="header-menu-label header-menu-label-account">빠른 실행</span>
+                      <button type="button" role="menuitem" onClick={() => goHomeAction('usage')}>
+                        <strong>앱 이용방법</strong>
+                        <span>사용법 안내 엔드포인트</span>
+                      </button>
+                      <button type="button" role="menuitem" onClick={() => goHomeAction('theme')}>
+                        <strong>테마분석</strong>
+                        <span>테마주 분석 엔드포인트</span>
+                      </button>
+                      <button type="button" role="menuitem" onClick={() => goHomeAction('stock')}>
+                        <strong>종목분석</strong>
+                        <span>AI 종목 분석 엔드포인트</span>
                       </button>
 
                       <span className="header-menu-label header-menu-label-account">계정</span>

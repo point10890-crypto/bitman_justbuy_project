@@ -1,6 +1,6 @@
 /** BitMan Service Worker - freshness-first app shell */
 
-const CACHE_NAME = 'bitman-v20260517-mobile-admin1'
+const CACHE_NAME = 'bitman-v20260517-menu-actions1'
 const SHELL_ASSETS = [
   '/manifest.json',
 ]
