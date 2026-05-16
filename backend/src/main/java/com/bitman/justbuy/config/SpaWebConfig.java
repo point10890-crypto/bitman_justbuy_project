@@ -1,8 +1,12 @@
 package com.bitman.justbuy.config;
 
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.CacheControl;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import java.util.concurrent.TimeUnit;
 
 /**
  * SPA (Single Page Application) 라우팅 설정.
@@ -10,6 +14,21 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  */
 @Configuration
 public class SpaWebConfig implements WebMvcConfigurer {
+
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        registry.addResourceHandler("/assets/**")
+                .addResourceLocations("classpath:/static/assets/")
+                .setCacheControl(CacheControl.maxAge(365, TimeUnit.DAYS).cachePublic().immutable());
+
+        registry.addResourceHandler("/sw.js", "/index.html")
+                .addResourceLocations("classpath:/static/")
+                .setCacheControl(CacheControl.noStore());
+
+        registry.addResourceHandler("/manifest.json", "/robots.txt", "/_headers")
+                .addResourceLocations("classpath:/static/")
+                .setCacheControl(CacheControl.noCache());
+    }
 
     @Override
     public void addViewControllers(ViewControllerRegistry registry) {

@@ -1,73 +1,64 @@
-/** BitMan Service Worker - PWA Offline + Cache Strategy */
+/** BitMan Service Worker - freshness-first app shell */
 
-const CACHE_NAME = 'bitman-v2'
-const STATIC_ASSETS = [
-  '/',
+const CACHE_NAME = 'bitman-v20260517-ops1'
+const SHELL_ASSETS = [
   '/manifest.json',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
 ]
 
-// Install: pre-cache shell
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS)
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS))
   )
   self.skipWaiting()
 })
 
-// Activate: cleanup old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
-      )
-    })
+    caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+      .then(() => self.clients.claim())
   )
-  self.clients.claim()
 })
 
-// Fetch: Network-first for HTML/API, Cache-first for hashed assets
 self.addEventListener('fetch', (event) => {
   const { request } = event
   const url = new URL(request.url)
 
-  // Skip non-GET requests
   if (request.method !== 'GET') return
-
-  // API calls: Network only (real-time data)
+  if (url.origin !== self.location.origin) return
   if (url.pathname.startsWith('/api/')) return
 
-  // HTML (document) requests: Network-first — 항상 최신 index.html 로드
   if (request.destination === 'document' || request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
+      fetch(request, { cache: 'no-store' })
         .then((response) => {
-          if (response.ok) {
-            const clone = response.clone()
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone))
-          }
-          return response
+          if (response.ok) return response
+          return caches.match('/index.html').then((cached) => cached || response)
         })
-        .catch(() => caches.match(request).then((c) => c || caches.match('/')))
+        .catch(() => caches.match('/index.html'))
     )
     return
   }
 
-  // Hashed static assets (JS/CSS): Cache-first (파일명에 해시 포함)
+  if (
+    url.pathname === '/sw.js' ||
+    url.pathname === '/index.html' ||
+    request.destination === 'script' ||
+    request.destination === 'style'
+  ) {
+    event.respondWith(fetch(request, { cache: 'no-store' }))
+    return
+  }
+
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) return cached
       return fetch(request).then((response) => {
-        if (response.ok && url.origin === self.location.origin) {
+        if (response.ok) {
           const clone = response.clone()
           caches.open(CACHE_NAME).then((cache) => cache.put(request, clone))
         }
         return response
-      }).catch(() => new Response('Offline', { status: 503 }))
+      })
     })
   )
 })
