@@ -1,0 +1,7 @@
+User-agent: *
+Disallow: /admin
+Disallow: /my
+Disallow: /subscribe
+Disallow: /login
+Disallow: /register
+Allow: /

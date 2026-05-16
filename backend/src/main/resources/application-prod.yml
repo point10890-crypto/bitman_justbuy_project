@@ -1,0 +1,58 @@
+# ============================================================================
+# Production profile — Oracle Cloud Always Free 배포용
+# ----------------------------------------------------------------------------
+# 활성화: SPRING_PROFILES_ACTIVE=prod java -jar justbuy-api-1.0.0.jar
+# 필수 env:
+#   JWT_SECRET              (openssl rand -base64 64)
+#   ADMIN_EMAIL             (관리자 이메일)
+#   ADMIN_DEFAULT_PASSWORD  (최초 1회만, 12자 이상 + 대소문자/숫자/특수)
+#   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_CHANNEL_CHAT_ID
+#   OPENAI_API_KEY, XAI_API_KEY, DART_API_KEY
+#   BITMAN_KIS_APP_KEY, BITMAN_KIS_APP_SECRET
+# ============================================================================
+
+spring:
+  datasource:
+    # H2 파일 DB 로 출시 (PostgreSQL 이전은 향후). 절대경로 필수 (systemd cwd 호환).
+    url: ${SPRING_DATASOURCE_URL:jdbc:h2:file:/var/lib/justbuy/data/justbuy-db;AUTO_SERVER=TRUE}
+    username: ${SPRING_DATASOURCE_USERNAME:sa}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+  h2:
+    console:
+      # prod 에서 H2 콘솔 절대 금지.
+      enabled: false
+  jpa:
+    hibernate:
+      # prod: validate 만 허용 (DDL 자동 변경 차단).
+      ddl-auto: validate
+    show-sql: false
+
+bitman:
+  # prod CORS: Cloudflare Pages + Tunnel 도메인만 허용 (기본값).
+  # 추가 도메인 필요 시 CORS_ORIGINS env 로 override.
+  cors:
+    allowed-origins: ${CORS_ORIGINS:https://bitman-justbuy.pages.dev,https://api.bit-man.net}
+  storage:
+    # systemd 호환 절대경로 (/var/lib/justbuy 는 justbuy 유저 소유).
+    data-dir: ${STORAGE_DIR:/var/lib/justbuy/data}
+
+# Actuator: health/info 외 일체 노출 금지 (이미 base yml 과 동일하지만 명시).
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      # prod 에서는 상세 내역 숨김 (DB 연결 정보 노출 방지).
+      show-details: never
+
+logging:
+  level:
+    root: INFO
+    com.bitman.justbuy: INFO
+    org.springframework.security: WARN
+    org.hibernate.SQL: WARN
+  file:
+    # logback-spring.xml 에서 롤링 정책 적용.
+    path: /var/log/justbuy

@@ -4,8 +4,8 @@ import com.bitman.justbuy.dto.AnalysisRequest;
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.entity.SubscriptionStatus;
 import com.bitman.justbuy.repository.UserRepository;
-import com.bitman.justbuy.service.AnalysisService;
 import com.bitman.justbuy.service.AsyncJobManager;
+import com.bitman.justbuy.service.ConditionSearchPipeline;
 import com.bitman.justbuy.service.SubscriptionService;
 import com.bitman.justbuy.service.AsyncJobManager.JobEntry;
 import com.bitman.justbuy.service.AsyncJobManager.JobStatus;
@@ -25,14 +25,14 @@ import java.util.UUID;
 public class AnalysisController {
 
     private static final Logger log = LoggerFactory.getLogger(AnalysisController.class);
-    private final AnalysisService analysisService;
+    private final ConditionSearchPipeline conditionSearchPipeline;
     private final UserRepository userRepository;
     private final AsyncJobManager jobManager;
     private final SubscriptionService subscriptionService;
 
-    public AnalysisController(AnalysisService analysisService, UserRepository userRepository,
+    public AnalysisController(ConditionSearchPipeline conditionSearchPipeline, UserRepository userRepository,
                                AsyncJobManager jobManager, SubscriptionService subscriptionService) {
-        this.analysisService = analysisService;
+        this.conditionSearchPipeline = conditionSearchPipeline;
         this.userRepository = userRepository;
         this.jobManager = jobManager;
         this.subscriptionService = subscriptionService;
@@ -54,17 +54,23 @@ public class AnalysisController {
         }
     }
 
+    @GetMapping("/pipeline")
+    public ResponseEntity<Map<String, Object>> pipeline(@AuthenticationPrincipal UUID userId) {
+        requireProSubscription(userId);
+        return ResponseEntity.ok(conditionSearchPipeline.describe());
+    }
+
     @GetMapping("/{mode}")
     public ResponseEntity<AnalysisResponse> getPrecomputed(@AuthenticationPrincipal UUID userId,
                                                             @PathVariable String mode) {
         requireProSubscription(userId);
         String decodedMode = java.net.URLDecoder.decode(mode, java.nio.charset.StandardCharsets.UTF_8);
 
-        if (!analysisService.isValidMode(decodedMode)) {
+        if (!conditionSearchPipeline.isValidMode(decodedMode)) {
             throw new IllegalArgumentException("Invalid mode: " + decodedMode);
         }
 
-        AnalysisResponse data = analysisService.getPrecomputedForDisplay(decodedMode);
+        AnalysisResponse data = conditionSearchPipeline.getPrecomputed(decodedMode);
         if (data == null) {
             throw new ApiException(HttpStatus.NOT_FOUND, "No pre-computed result available for mode: " + decodedMode);
         }
@@ -81,12 +87,12 @@ public class AnalysisController {
                                                               @Valid @RequestBody AnalysisRequest request) {
         requireProSubscription(userId);
 
-        if (!analysisService.isValidMode(request.mode())) {
+        if (!conditionSearchPipeline.isValidMode(request.mode())) {
             throw new IllegalArgumentException("Invalid mode: " + request.mode());
         }
 
         // 서버 캐시 확인 (30분 TTL) — 캐시 적중 시 AI 호출 없이 즉시 반환
-        AnalysisResponse cached = analysisService.getCachedLive(request.query(), request.mode());
+        AnalysisResponse cached = conditionSearchPipeline.getCachedLive(request.query(), request.mode());
         if (cached != null) {
             log.info("[API] Cache hit: mode={}, query={}", request.mode(), request.query());
             return ResponseEntity.ok(cached);
@@ -99,7 +105,7 @@ public class AnalysisController {
         Thread.startVirtualThread(() -> {
             try {
                 jobManager.markRunning(jobId);
-                AnalysisResponse result = analysisService.runLiveAnalysis(request.query(), request.mode());
+                AnalysisResponse result = conditionSearchPipeline.runLiveAnalysis(request.query(), request.mode());
                 jobManager.markComplete(jobId, result);
             } catch (Exception e) {
                 String errMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();

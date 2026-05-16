@@ -71,6 +71,42 @@ public class MarketDataService {
         return null;
     }
 
+    // ★ v2.8.10 (2026-04-29): Naver 종목명 조회 — KIS current-price 응답에 hts_kor_isnm 필드 없음 대체.
+    //   229640 → "LS에코에너지", 006260 → "LS", 417200 → "LS머트리얼즈" 정확히 구분.
+    //   1시간 캐시.
+    private final java.util.concurrent.ConcurrentHashMap<String, CachedName> nameCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long NAME_CACHE_TTL_MS = 60L * 60 * 1000;
+
+    private record CachedName(String name, long timestamp) {
+        boolean isExpired() { return System.currentTimeMillis() - timestamp > NAME_CACHE_TTL_MS; }
+    }
+
+    /**
+     * Naver Finance 에서 KRX 6자리 코드의 정식 종목명 조회.
+     * @return 정식명 (예: "LS에코에너지") / 조회 실패 시 빈 문자열
+     */
+    public String fetchStockName(String code) {
+        if (code == null || !code.matches("\\d{6}")) return "";
+        CachedName cached = nameCache.get(code);
+        if (cached != null && !cached.isExpired()) return cached.name;
+
+        try {
+            JsonNode stock = fetchJson("https://m.stock.naver.com/api/stock/" + code + "/basic");
+            if (stock != null) {
+                String name = stock.path("stockName").asText("");
+                if (!name.isBlank()) {
+                    nameCache.put(code, new CachedName(name, System.currentTimeMillis()));
+                    return name;
+                }
+            }
+        } catch (Exception e) {
+            log.debug("[MarketData] fetchStockName({}) 실패: {}", code, e.getMessage());
+        }
+        // 조회 실패 시 빈 문자열 캐시 (10분만 — 일시 장애 후 재시도 위해 짧게)
+        nameCache.put(code, new CachedName("", System.currentTimeMillis() - NAME_CACHE_TTL_MS + 600_000));
+        return "";
+    }
+
     private double parseNumber(JsonNode node, String field) {
         if (node == null || !node.has(field)) return 0;
         String val = node.path(field).asText("0").replace(",", "");

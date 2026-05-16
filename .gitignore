@@ -45,6 +45,7 @@ frontend/out/
 data/*.csv
 !data/signals_log.csv
 !data/ticker_to_yahoo_map.csv
+data/*.json
 data/*.db
 data/history/
 data/backtest/
@@ -69,6 +70,12 @@ logs/
 # Backup files
 *_backup.py
 *_backup_*.py
+backups/
+
+# Analysis caches (regenerable from market data) — keep out of git
+backend/data/*.json
+!backend/data/.gitkeep
+!backend/data/dart_corp_codes.json
 
 # Archives & binaries
 *.zip
@@ -124,6 +131,12 @@ reports/
 fix_path_issue.bat
 kill_zombies.ps1
 schtask_result.txt
+.telegram_msg.txt
+tmp/
+
+# Sensitive incident notes / rotation runbooks stay local unless redacted first
+docs/SECURITY_INCIDENT_REPORT.md
+docs/TELEGRAM_TOKEN_ROTATION.md
 
 .vercel
 backend/start.bat

@@ -7,25 +7,37 @@ server:
       force: true
       force-request: true
       force-response: true
+  # Graceful shutdown: in-flight 요청 완료까지 대기 (systemd SIGTERM 호환).
+  shutdown: graceful
 
 spring:
   application:
     name: justbuy-api
+  # 프로파일 기본은 dev. prod 전환: --spring.profiles.active=prod 또는 SPRING_PROFILES_ACTIVE=prod.
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
   datasource:
+    # 기본값: H2 파일 DB (로컬 dev). prod 프로파일에서 override.
     url: ${SPRING_DATASOURCE_URL:jdbc:h2:file:./data/justbuy-db;AUTO_SERVER=TRUE}
     username: ${SPRING_DATASOURCE_USERNAME:sa}
     password: ${SPRING_DATASOURCE_PASSWORD:}
   h2:
     console:
+      # dev 에서만 true 허용. prod 프로파일에서 강제 false + SecurityConfig 차단.
       enabled: ${H2_CONSOLE_ENABLED:false}
       path: /h2-console
   jpa:
     hibernate:
-      ddl-auto: update
+      # dev: update (스키마 자동 반영). prod: validate (DDL 변경 차단).
+      ddl-auto: ${JPA_DDL_AUTO:update}
     show-sql: false
     properties:
       hibernate:
         format_sql: true
+        jdbc:
+          time_zone: Asia/Seoul
 
 bitman:
   ai:
@@ -47,17 +59,24 @@ bitman:
   scheduler:
     enabled: ${SCHEDULER_ENABLED:true}
   telegram:
-    # Secrets — must come from .env / process env. No defaults to avoid leaking via VCS.
     bot-token: ${TELEGRAM_BOT_TOKEN:}
     chat-id: ${TELEGRAM_CHAT_ID:}
     channel-chat-id: ${TELEGRAM_CHANNEL_CHAT_ID:}
   jwt:
+    # JWT_SECRET: prod 에서는 필수 (JwtService 가 기동 차단).
+    #             dev 에서는 미설정 시 data/.jwt-secret 자동 영속화.
+    #             생성: openssl rand -base64 64
     secret: ${JWT_SECRET:}
     expiration-ms: ${JWT_EXPIRATION_MS:2592000000}
   flask:
     base-url: ${FLASK_BASE_URL:http://localhost:5001}
   admin:
     email: ${ADMIN_EMAIL:admin@bitman.net}
+  backup:
+    # JAR cwd = backend/, ../backups → C:\bitman_justbuy_project\backups\ (PS aux 와 동일 위치)
+    # retention 통일을 위해 양쪽 도구가 같은 디렉토리에 쓰도록 강제.
+    enabled: ${BITMAN_BACKUP_ENABLED:true}
+    dir: ${BITMAN_BACKUP_DIR:../backups}
 
 management:
   endpoints:

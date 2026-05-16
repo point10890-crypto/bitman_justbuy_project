@@ -1,6 +1,7 @@
 package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.dto.UserDto;
+import com.bitman.justbuy.entity.Role;
 import com.bitman.justbuy.entity.SubscriptionStatus;
 import com.bitman.justbuy.entity.User;
 import com.bitman.justbuy.repository.UserRepository;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +24,7 @@ import java.util.UUID;
 public class SubscriptionService {
 
     private static final Logger log = LoggerFactory.getLogger(SubscriptionService.class);
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -39,25 +42,28 @@ public class SubscriptionService {
     public UserDto applyForSubscription(UUID userId, String depositorName) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+        SubscriptionStatus previousStatus = user.getSubscription();
+        String normalizedDepositorName = depositorName == null ? "" : depositorName.trim();
+        if (normalizedDepositorName.isBlank()) {
+            throw new IllegalArgumentException("입금자명을 입력해주세요.");
+        }
 
         if (user.getSubscription() == SubscriptionStatus.PENDING) {
             throw new IllegalStateException("이미 구독 신청이 접수되었습니다. 관리자 승인을 기다려주세요.");
         }
 
-        // 유효한 PRO(만료 전)는 재신청 불필요
-        if (isActivePro(user)) {
-            throw new IllegalStateException("이미 유효한 PRO 구독 중입니다. (만료일: "
-                + user.getSubscriptionEndDate() + ")");
-        }
+        boolean keepCurrentAccess = isActivePro(user);
 
-        // 만료된 PRO 또는 FREE → PENDING으로 전환 (재신청 허용)
+        // 만료된 PRO/FREE는 신규 신청, 활성 PRO는 기존 이용권을 유지한 채 연장 승인 대기로 전환한다.
         user.setSubscription(SubscriptionStatus.PENDING);
-        user.setDepositorName(depositorName);
-        // 만료된 이전 endDate 초기화
-        user.setSubscriptionEndDate(null);
+        user.setDepositorName(normalizedDepositorName);
+        if (!keepCurrentAccess) {
+            user.setSubscriptionEndDate(null);
+            user.setSubscriptionApprovedAt(null);
+        }
         userRepository.save(user);
         log.info("Subscription applied: userId={}, depositor={}, previousStatus={}",
-            userId, depositorName, user.getSubscription());
+            userId, normalizedDepositorName, previousStatus);
 
         // 관리자 텔레그램 알림 (실패해도 신청 자체는 성공 처리)
         try {
@@ -74,7 +80,7 @@ public class SubscriptionService {
                     + "👉 관리자 페이지에서 승인/거절 처리하세요.",
                     escape(user.getName()),
                     escape(user.getEmail()),
-                    escape(depositorName),
+                    escape(normalizedDepositorName),
                     user.getId(),
                     pendingCount
                 );
@@ -104,12 +110,22 @@ public class SubscriptionService {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
+        if (user.getRole() == Role.ADMIN) {
+            throw new IllegalStateException("관리자 계정의 구독 상태는 반려할 수 없습니다.");
+        }
+
         if (user.getSubscription() != SubscriptionStatus.PENDING) {
             throw new IllegalStateException("승인 대기 상태가 아닙니다.");
         }
 
+        LocalDate today = LocalDate.now(KST);
+        LocalDate baseDate = user.getSubscriptionEndDate() != null && !user.getSubscriptionEndDate().isBefore(today)
+            ? user.getSubscriptionEndDate()
+            : today;
+
         user.setSubscription(SubscriptionStatus.PRO);
-        user.setSubscriptionEndDate(LocalDate.now().plusMonths(1));
+        user.setSubscriptionEndDate(baseDate.plusMonths(1));
+        user.setSubscriptionApprovedAt(LocalDateTime.now(KST));
         userRepository.save(user);
         log.info("Subscription approved: userId={}", userId);
 
@@ -125,8 +141,14 @@ public class SubscriptionService {
             throw new IllegalStateException("승인 대기 상태가 아닙니다.");
         }
 
-        user.setSubscription(SubscriptionStatus.FREE);
         user.setDepositorName(null);
+        if (hasPendingRenewalAccess(user, LocalDate.now(KST))) {
+            user.setSubscription(SubscriptionStatus.PRO);
+        } else {
+            user.setSubscription(SubscriptionStatus.FREE);
+            user.setSubscriptionEndDate(null);
+            user.setSubscriptionApprovedAt(null);
+        }
         userRepository.save(user);
         log.info("Subscription rejected: userId={}", userId);
 
@@ -145,12 +167,17 @@ public class SubscriptionService {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
+        if (user.getRole() == Role.ADMIN) {
+            throw new IllegalStateException("관리자 계정의 구독 상태는 해제할 수 없습니다.");
+        }
+
         if (user.getSubscription() != SubscriptionStatus.PRO) {
             throw new IllegalStateException("PRO 구독 상태가 아닙니다.");
         }
 
         user.setSubscription(SubscriptionStatus.FREE);
         user.setSubscriptionEndDate(null);
+        user.setSubscriptionApprovedAt(null);
         userRepository.save(user);
         log.info("Subscription revoked: userId={}", userId);
 
@@ -170,12 +197,13 @@ public class SubscriptionService {
         }
 
         if (email != null && !email.isBlank()) {
-            userRepository.findByEmail(email).ifPresent(existing -> {
+            String normalizedEmail = email.trim().toLowerCase(java.util.Locale.ROOT);
+            userRepository.findAllByEmailIgnoreCase(normalizedEmail).forEach(existing -> {
                 if (!existing.getId().equals(userId)) {
                     throw new IllegalArgumentException("이미 사용 중인 이메일입니다.");
                 }
             });
-            user.setEmail(email.trim());
+            user.setEmail(normalizedEmail);
         }
 
         if (subscription != null && !subscription.isBlank()) {
@@ -185,12 +213,28 @@ public class SubscriptionService {
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException("올바르지 않은 구독 상태입니다: " + subscription);
             }
+            if (user.getRole() == Role.ADMIN && newStatus != SubscriptionStatus.PRO) {
+                throw new IllegalStateException("관리자 계정은 항상 PRO 상태여야 합니다.");
+            }
             user.setSubscription(newStatus);
-            if (newStatus == SubscriptionStatus.PRO && user.getSubscriptionEndDate() == null) {
-                user.setSubscriptionEndDate(LocalDate.now().plusMonths(1));
+            if (newStatus == SubscriptionStatus.PRO) {
+                if (user.getRole() == Role.ADMIN) {
+                    user.setSubscriptionEndDate(null);
+                } else if (user.getSubscriptionEndDate() == null
+                    || user.getSubscriptionEndDate().isBefore(LocalDate.now(KST))) {
+                    user.setSubscriptionEndDate(LocalDate.now(KST).plusMonths(1));
+                }
+            }
+            if (newStatus == SubscriptionStatus.PRO && user.getSubscriptionApprovedAt() == null) {
+                user.setSubscriptionApprovedAt(LocalDateTime.now(KST));
+            }
+            if (newStatus == SubscriptionStatus.PENDING) {
+                user.setSubscriptionEndDate(null);
+                user.setSubscriptionApprovedAt(null);
             }
             if (newStatus == SubscriptionStatus.FREE) {
                 user.setSubscriptionEndDate(null);
+                user.setSubscriptionApprovedAt(null);
                 user.setDepositorName(null);
             }
         }
@@ -212,9 +256,9 @@ public class SubscriptionService {
     // ─── 구독 통계 ───
 
     public Map<String, Object> getSubscriptionStats() {
-        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        LocalDate today = LocalDate.now(KST);
 
-        long proCount     = userRepository.findBySubscription(SubscriptionStatus.PRO).size();
+        long proCount     = userRepository.findAll().stream().filter(this::isActivePro).count();
         long pendingCount = userRepository.findBySubscription(SubscriptionStatus.PENDING).size();
         long freeCount    = userRepository.findBySubscription(SubscriptionStatus.FREE).size();
         long totalUsers   = userRepository.count();
@@ -232,8 +276,9 @@ public class SubscriptionService {
             today.minusDays(30).atStartOfDay());
 
         // 만료 임박 유저 목록 (7일 이내, 상세)
-        List<UserDto> expiringSoon = userRepository.findBySubscription(SubscriptionStatus.PRO)
+        List<UserDto> expiringSoon = userRepository.findAll()
             .stream()
+            .filter(this::isActivePro)
             .filter(u -> u.getSubscriptionEndDate() != null
                 && !u.getSubscriptionEndDate().isBefore(today)
                 && !u.getSubscriptionEndDate().isAfter(today.plusDays(7)))
@@ -265,23 +310,41 @@ public class SubscriptionService {
     @Scheduled(cron = "0 0 0 * * *", zone = "Asia/Seoul")
     @Transactional
     public void expireSubscriptions() {
-        LocalDate today;
-        List<User> expired;
         try {
-            today = LocalDate.now(ZoneId.of("Asia/Seoul"));
-            expired = userRepository.findExpiredProUsers(today);
+            expireExpiredProUsers(LocalDate.now(KST));
         } catch (Exception e) {
-            log.error("[Subscription] 만료 대상 조회 실패 — cron skipped: {}", e.getMessage(), e);
-            return;
+            log.error("[Subscription] 만료 배치 실패 — cron skipped: {}", e.getMessage(), e);
         }
-        if (expired.isEmpty()) return;
+    }
+
+    @Transactional
+    public Map<String, Object> expireSubscriptionsNow() {
+        return expireExpiredProUsers(LocalDate.now(KST));
+    }
+
+    private Map<String, Object> expireExpiredProUsers(LocalDate today) {
+        List<User> expired = userRepository.findExpiredProUsers(today);
+        if (expired.isEmpty()) {
+            Map<String, Object> result = new java.util.LinkedHashMap<>();
+            result.put("status", "ok");
+            result.put("asOf", today.toString());
+            result.put("targetCount", 0);
+            result.put("expiredCount", 0);
+            result.put("failedCount", 0);
+            return result;
+        }
 
         int ok = 0;
         int failed = 0;
         for (User user : expired) {
             try {
+                if (user.getRole() == Role.ADMIN) {
+                    log.warn("[Subscription] 관리자 계정은 만료 처리에서 제외: userId={}, email={}", user.getId(), user.getEmail());
+                    continue;
+                }
                 user.setSubscription(SubscriptionStatus.FREE);
                 user.setSubscriptionEndDate(null);
+                user.setSubscriptionApprovedAt(null);
                 userRepository.save(user);
                 log.info("[Subscription] 만료 처리: userId={}, email={}", user.getId(), user.getEmail());
                 ok++;
@@ -308,6 +371,14 @@ public class SubscriptionService {
                 }
             } catch (Exception ignore) { /* 알림 실패는 조용히 무시 */ }
         }
+
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("status", failed == 0 ? "ok" : "partial");
+        result.put("asOf", today.toString());
+        result.put("targetCount", expired.size());
+        result.put("expiredCount", ok);
+        result.put("failedCount", failed);
+        return result;
     }
 
     /**
@@ -315,10 +386,25 @@ public class SubscriptionService {
      * subscriptionEndDate가 오늘 이후여야 PRO로 인정.
      */
     public boolean isActivePro(User user) {
-        if (user.getSubscription() != SubscriptionStatus.PRO) return false;
+        if (user.getRole() == Role.ADMIN) return true;
+        LocalDate today = LocalDate.now(KST);
+        if (user.getSubscription() == SubscriptionStatus.PRO) {
+            return hasProAccessWindow(user, today);
+        }
+        if (user.getSubscription() == SubscriptionStatus.PENDING) {
+            return hasPendingRenewalAccess(user, today);
+        }
+        return false;
+    }
+
+    private boolean hasProAccessWindow(User user, LocalDate today) {
         LocalDate endDate = user.getSubscriptionEndDate();
-        // endDate가 null이면 관리자가 수동 부여한 무기한 PRO로 허용
-        return endDate == null || !endDate.isBefore(LocalDate.now(ZoneId.of("Asia/Seoul")));
+        return endDate == null || !endDate.isBefore(today);
+    }
+
+    private boolean hasPendingRenewalAccess(User user, LocalDate today) {
+        LocalDate endDate = user.getSubscriptionEndDate();
+        return endDate != null && !endDate.isBefore(today);
     }
 
     /** 관리자: 회원 검색 (이름 또는 이메일) */

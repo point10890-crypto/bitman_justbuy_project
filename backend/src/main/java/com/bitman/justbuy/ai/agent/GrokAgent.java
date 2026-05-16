@@ -17,8 +17,13 @@ import java.util.Map;
 
 /**
  * xAI Grok 에이전트.
- * /v1/responses 엔드포인트 사용, web_search + x_search 툴 활성화.
+ * /v1/responses 엔드포인트 사용, 모드별로 검색 툴 활성화 정책을 차별화.
  * 담당: L3 Capital Flow + L5 Derivatives + SNS/X 실시간 센티먼트
+ *
+ * v2.8.3 토큰 절감 (2026-04-25):
+ *  - 모드별 SearchPolicy 도입 (NONE/WEB_ONLY/BOTH)
+ *  - KIS 데이터로 충분한 모드(BREAKOUT)는 검색 비활성 + 저렴 모델로 우회
+ *  - X검색은 센티먼트 활용 모드(REVERSAL_EDGE/CATALYST_BURST)에서만 사용
  */
 @Component
 public class GrokAgent implements AiAgent {
@@ -26,7 +31,7 @@ public class GrokAgent implements AiAgent {
     private static final String BASE_URL = "https://api.x.ai/v1";
     // R1 분석용: 내부 멀티에이전트 협업 모델 (웹/X 검색 포함)
     static final String ANALYSIS_MODEL = "grok-4.20-multi-agent-0309";
-    // R2 교차비판용: 빠르고 저렴한 모델
+    // R2 교차비판용 / 검색 비활성 모드 우회용: 빠르고 저렴한 모델
     static final String CRITIQUE_MODEL = "grok-4-1-fast-reasoning";
 
     // 한국 금융 신뢰 도메인 — Grok API 최대 5개 제한
@@ -36,6 +41,23 @@ public class GrokAgent implements AiAgent {
         "dart.fss.or.kr",
         "hankyung.com",
         "mk.co.kr"
+    );
+
+    /** 모드별 검색 정책 — 토큰 폭발 방지 */
+    public enum SearchPolicy { NONE, WEB_ONLY, BOTH }
+
+    /**
+     * 모드별 검색 정책 매핑.
+     *  - BREAKOUT: KIS 실시간 시세·거래량으로 충분 → 검색 OFF + 저렴 모델 우회
+     *  - FLOW_LEADER: 외국인/기관 수급 검색 필요, X센티먼트는 불필요 → web_search ONLY
+     *  - CATALYST_BURST: 실시간 뉴스/공시 + 사회반응 둘 다 필요 → BOTH
+     *  - REVERSAL_EDGE: X피드 센티먼트가 핵심 → BOTH
+     */
+    private static final Map<String, SearchPolicy> MODE_SEARCH_POLICY = Map.of(
+        "BREAKOUT",       SearchPolicy.NONE,
+        "FLOW_LEADER",    SearchPolicy.WEB_ONLY,
+        "CATALYST_BURST", SearchPolicy.BOTH,
+        "REVERSAL_EDGE",  SearchPolicy.BOTH
     );
 
     private final AiProperties props;
@@ -56,22 +78,37 @@ public class GrokAgent implements AiAgent {
         return props.grokApiKey() != null && !props.grokApiKey().isBlank();
     }
 
-    /** R1 분석용 — 웹검색 + X검색 활성화 (grok-4.20-multi-agent) */
+    /**
+     * R1 분석용 (기본) — 웹검색 + X검색 활성화 (grok-4.20-multi-agent).
+     * 모드 정보가 없는 일반 호출 경로. 토큰 폭발이 우려되는 경우 analyzeForMode 사용.
+     */
     @Override
     public AgentResult analyze(String systemPrompt, String userMessage) {
-        return callResponses(ANALYSIS_MODEL, systemPrompt, userMessage, true);
+        return callResponses(ANALYSIS_MODEL, systemPrompt, userMessage, SearchPolicy.BOTH);
+    }
+
+    /**
+     * 모드별 검색 정책을 적용한 분석.
+     *  - BREAKOUT 등 KIS 데이터가 충분한 모드는 검색 OFF + 저렴 모델 우회
+     *  - 나머지는 모드별 SearchPolicy 적용
+     */
+    public AgentResult analyzeForMode(String systemPrompt, String userMessage, String mode) {
+        SearchPolicy policy = MODE_SEARCH_POLICY.getOrDefault(mode, SearchPolicy.BOTH);
+        // 검색 비활성 모드는 저렴 모델로 우회 (multi-agent 사용할 이유 없음)
+        String model = (policy == SearchPolicy.NONE) ? CRITIQUE_MODEL : ANALYSIS_MODEL;
+        return callResponses(model, systemPrompt, userMessage, policy);
     }
 
     /** R2 교차비판용 — 저렴한 모델, 웹검색 없이 추론 (grok-4-1-fast) */
     public AgentResult critique(String systemPrompt, String userMessage) {
-        return callResponses(CRITIQUE_MODEL, systemPrompt, userMessage, false);
+        return callResponses(CRITIQUE_MODEL, systemPrompt, userMessage, SearchPolicy.NONE);
     }
 
     /**
      * xAI Responses API 호출.
-     * enableSearch=true 시 web_search + x_search 툴 활성화.
+     * SearchPolicy 에 따라 web_search / x_search 툴을 선택적으로 활성화.
      */
-    private AgentResult callResponses(String model, String systemPrompt, String userMessage, boolean enableSearch) {
+    private AgentResult callResponses(String model, String systemPrompt, String userMessage, SearchPolicy policy) {
         long start = System.currentTimeMillis();
 
         if (!isAvailable()) {
@@ -91,8 +128,11 @@ public class GrokAgent implements AiAgent {
                 Map.of("role", "user", "content", userMessage)
             ));
 
-            // 검색 툴 (R1 분석 모드에서만 활성화)
-            if (enableSearch) {
+            // 검색 툴 — SearchPolicy 에 따라 차별 활성
+            //   NONE     : 검색 OFF (KIS 데이터로 충분, 토큰 폭발 방지)
+            //   WEB_ONLY : 웹검색만 (외국인/기관 수급 등)
+            //   BOTH     : 웹+X 검색 (실시간 뉴스+사회반응)
+            if (policy != SearchPolicy.NONE) {
                 String today = LocalDate.now(ZoneId.of("Asia/Seoul")).toString();
                 List<Map<String, Object>> tools = new ArrayList<>();
 
@@ -102,11 +142,13 @@ public class GrokAgent implements AiAgent {
                     "allowed_domains", ALLOWED_DOMAINS
                 ));
 
-                // X(트위터) 검색 — 오늘부터 실시간
-                tools.add(Map.of(
-                    "type", "x_search",
-                    "from_date", today
-                ));
+                // X(트위터) 검색 — BOTH 모드에서만 활성 (센티먼트 활용 모드)
+                if (policy == SearchPolicy.BOTH) {
+                    tools.add(Map.of(
+                        "type", "x_search",
+                        "from_date", today
+                    ));
+                }
 
                 body.put("tools", tools);
             }

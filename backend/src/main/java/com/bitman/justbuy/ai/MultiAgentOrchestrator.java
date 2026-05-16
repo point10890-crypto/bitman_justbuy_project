@@ -1,6 +1,8 @@
 package com.bitman.justbuy.ai;
 
 import com.bitman.justbuy.ai.agent.AiAgent;
+import com.bitman.justbuy.ai.agent.GeminiAgent;
+import com.bitman.justbuy.ai.agent.GrokAgent;
 import com.bitman.justbuy.controller.MonitorController;
 import com.bitman.justbuy.dto.AgentResult;
 import com.bitman.justbuy.dto.AnalysisResponse;
@@ -35,7 +37,8 @@ public class MultiAgentOrchestrator {
     private static final Logger log = LoggerFactory.getLogger(MultiAgentOrchestrator.class);
 
     private final List<AiAgent> agents;
-    private final SynthesisEngine synthesisEngine;
+    /** Grok 실패 시 폴백 — Round 1 에서만 사용. 직접 iterate 안 함. */
+    private final GeminiAgent geminiFallback;
     private final MarketDataService marketDataService;
     private final ConsensusEngine consensusEngine;
     private final DartApiService dartApiService;
@@ -45,14 +48,26 @@ public class MultiAgentOrchestrator {
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
-    public MultiAgentOrchestrator(List<AiAgent> agents, SynthesisEngine synthesisEngine,
+    public MultiAgentOrchestrator(List<AiAgent> allAgents,
                                    MarketDataService marketDataService, ConsensusEngine consensusEngine,
                                    DartApiService dartApiService, FinancialScorer financialScorer,
                                    KisApiService kisApiService,
                                    TrackRecordService trackRecordService,
                                    RestTemplate restTemplate, ObjectMapper objectMapper) {
-        this.agents = agents;
-        this.synthesisEngine = synthesisEngine;
+        // ★ v2.8.6 (2026-04-29): Gemini 는 fallback 전용 — 정규 agent list 에서 분리
+        //   Grok analyze 실패(error/skipped/empty) 시 Gemini 가 자동 대체.
+        //   Grok 정상 동작 시 Gemini 호출 0 → 토큰 0.
+        this.geminiFallback = allAgents.stream()
+            .filter(a -> a instanceof GeminiAgent)
+            .map(a -> (GeminiAgent) a)
+            .findFirst()
+            .orElse(null);
+        this.agents = allAgents.stream()
+            .filter(a -> !(a instanceof GeminiAgent))
+            .toList();
+        log.info("[Orchestrator] Initialized: {} primary agents, gemini fallback {}",
+            this.agents.size(), this.geminiFallback != null ? "available" : "disabled");
+
         this.marketDataService = marketDataService;
         this.consensusEngine = consensusEngine;
         this.dartApiService = dartApiService;
@@ -207,25 +222,31 @@ public class MultiAgentOrchestrator {
             + "\"데이터에 접근할 수 없다\"는 회피 답변 금지. 학습 데이터 기반으로라도 구체적 가격대와 근거를 반드시 제시할 것.");
 
         // ─── 4 NEW CONCEPT MODES ─────────────────────────────────────────
+        m.put("\uC885\uBAA9\uBD84\uC11D", m.get("\uBD84\uC11D\uD574\uC918"));
+
         m.put("BREAKOUT",
-            "기술적 돌파 매수 관점에서 분석해줘.\n"
-            + "오늘 장중 52주 신고가 돌파, 저항선 돌파, 거래량 급증 패턴 종목을 찾아:\n"
+            "단타 조건검색 전용 분석. 반드시 아래 공식으로 후보를 선별해:\n"
+            + "공식 = 거래량 급증 + 돌파 + 상승률 + 장중 강도 + 실시간조회 순위 + 거래량 상위 순위 + 거래대금 상위 순위 + 거래원 매수 상위 순위.\n"
+            + "오늘 장중 52주 신고가 돌파, 저항선 돌파, 거래량 급증, 거래대금 집중, 거래원 매수 우위 패턴 종목을 찾아:\n"
             + "\uD83D\uDCCC 종목명 (종목코드) \u2014 현재가 약 XX,XXX원\n"
-            + "  - 돌파 근거: (어떤 저항선/고점을 돌파했는지, 거래량 급증 배율)\n"
-            + "  - 이동평균 배열: (5/20/60선 정배열 여부)\n"
+            + "  - 단타 검출 근거: 거래량 급증, 돌파 가격, 상승률, 장중 강도, 실시간/거래량/거래대금/거래원 순위 중 확인된 항목\n"
+            + "  - 돌파 근거: 어떤 저항선/고점을 돌파했는지, 거래량 급증 배율 또는 거래대금 증가\n"
+            + "  - 장중 강도: 고가권 유지, 양봉 지속, VI/신고가/전고점 돌파 여부\n"
             + "  - 기술적 타겟: XX,XXX원 (돌파 후 목표 — 피보나치/전고점 기준)\n"
             + "  - 손절: XX,XXX원 (돌파 실패·되돌림 기준)\n"
-            + "  - 수급 확인: 외국인/기관 돌파 동반 여부 (Grok 검색)\n"
-            + "입력된 KIS 실시간 데이터에서 상승률·거래량 상위 종목 우선 선별. 최소 3종목 제시.\n"
+            + "  - 제외 조건: 장중 고점 이탈, 거래대금 급감, 단일 호가 급등, 재료 미확인\n"
+            + "입력된 KIS 실시간 데이터의 상승률·거래량·거래대금 상위 종목 안에서 우선 선별. 최소 3종목 제시.\n"
             + "회피 답변 금지. 기술적 근거가 있는 한 반드시 구체적 종목을 제시할 것.");
 
         m.put("FLOW_LEADER",
-            "외국인·기관 수급 주도 종목 분석.\n"
-            + "쌍끌이(외국인+기관 동시매수), 연속 순매수, 수급 전환 종목을 찾아:\n"
+            "주도주 조건검색 전용 분석. 반드시 아래 공식으로 후보를 선별해:\n"
+            + "공식 = 거래대금 + 외국인/기관 수급 + 섹터 강도 + 거래량 상위 + 거래대금 상위.\n"
+            + "쌍끌이(외국인+기관 동시매수), 연속 순매수, 거래대금 집중, 섹터 상대강도 상위 종목을 찾아:\n"
             + "\uD83D\uDCCC 종목명 (종목코드) \u2014 현재가 약 XX,XXX원\n"
             + "  - 외국인: 순매수 X일 연속, 약 X억원 (Grok 검색·krx.co.kr 기준)\n"
             + "  - 기관: 순매수 X일 연속, 약 X억원 (Grok 검색 기준)\n"
             + "  - 수급 유형: 쌍끌이/외국인단독/기관유입/연기금매수/프로그램\n"
+            + "  - 주도주 검출 근거: 거래대금 순위, 거래량 순위, 섹터 강도, 관련 대장주 여부\n"
             + "  - 수급 전환 배경: (왜 외국인/기관이 매수하는지 매크로·뉴스 연결)\n"
             + "  - 목표가: XX,XXX원 (수급 지속 시)\n"
             + "  - 환율·매크로 영향: USD/KRW 방향이 외국인 자금에 미치는 영향 (ChatGPT)\n"
@@ -233,29 +254,31 @@ public class MultiAgentOrchestrator {
             + "⚠️ 수급 수치는 Grok 검색 결과만 사용. 출처 없는 수치 환각 금지!");
 
         m.put("CATALYST_BURST",
-            "재료/이벤트 드리븐 급등 후보 분석.\n"
-            + "오늘 공시(DART), 뉴스, 정책 발표, 실적 서프라이즈 등 강력한 재료 종목:\n"
+            "테마주 조건검색 전용 분석. 반드시 아래 공식으로 후보를 선별해:\n"
+            + "공식 = DART/뉴스 재료 + 관련 종목 가격 반응 + 대장주 판별 + 대장주.\n"
+            + "오늘 공시(DART), 뉴스, 정책 발표, 실적 서프라이즈 등 강력한 재료와 관련주 동반 반응이 있는 종목:\n"
             + "\uD83D\uDCCC 종목명 (종목코드) \u2014 현재가 약 XX,XXX원\n"
             + "  - 핵심 재료: (공시/뉴스 내용, 발생 시간 KST 명시)\n"
             + "  - 재료 강도: ★★★(구조적·반복) / ★★(단기·이벤트) / ★(1회성)\n"
             + "  - 가격 반영도: (재료가 주가에 얼마나 반영됐는지 — 선반영/후반영 판단)\n"
-            + "  - 연관 테마: (동반 상승 가능한 섹터·테마 종목)\n"
+            + "  - 연관 테마: 관련 종목 가격 반응, 동반 상승 여부, 확산성\n"
+            + "  - 대장주 판별: 같은 테마 안에서 거래대금·상승률·뉴스 집중도가 가장 강한지\n"
             + "  - 목표가: XX,XXX원 / 손절: XX,XXX원\n"
             + "  - ChatGPT DART 공시 분석 + Grok 실시간 뉴스 검색 결합\n"
             + "재료가 있는 종목부터 우선. 재료 발생 시간 반드시 명시. 회피 금지.");
 
         m.put("REVERSAL_EDGE",
-            "역발상 반전 매수 후보 분석.\n"
-            + "과매도 구간, 숏스퀴즈 가능, X피드 공포 극대화 후 반전 징후 종목:\n"
+            "스윙 조건검색 전용 분석. 반드시 아래 공식으로 후보를 선별해:\n"
+            + "공식 = 눌림목 + 추세 유지 + 목표구간 + 리스크 + 주도주 섹터 + 대장주.\n"
+            + "과열 추격이 아니라 주도 섹터 안의 대장주가 눌림목을 만든 뒤 추세를 유지하는 종목을 찾아:\n"
             + "\uD83D\uDCCC 종목명 (종목코드) \u2014 현재가 약 XX,XXX원\n"
-            + "  - 과매도 지표: RSI(30 이하)/스토캐스틱 수치, 52주 저점 대비 낙폭(%)\n"
-            + "  - 반전 신호: (캔들 패턴 — 망치형/역망치/피어싱라인, 거래량 급증)\n"
-            + "  - X피드 심리: (Grok X검색 — 공포 극대화 문구, 패닉 셀 분위기)\n"
-            + "  - 숏스퀴즈 가능성: 공매도 비율 + 대차잔고 (Grok 검색)\n"
-            + "  - 컨센서스 역발상: (다수가 약세를 볼 때 강세 근거)\n"
+            + "  - 스윙 검출 근거: 눌림목 위치, 추세 유지, 주도 섹터, 대장주 여부\n"
+            + "  - 목표구간: 1차/2차 목표와 손절가를 명확히 제시\n"
+            + "  - 리스크: 추세 이탈, 거래대금 감소, 공시/실적 악재, 테마 소멸\n"
+            + "  - 대장주 판별: 같은 섹터 안에서 거래대금·상승률·수급이 가장 강한지\n"
             + "  - 목표가: XX,XXX원 / 손절: XX,XXX원\n"
-            + "  - Grok X피드 센티먼트 + ChatGPT 기술적 과매도 판단 결합\n"
-            + "⚠️ 시장 전체 급락(-3% 이상)이면 개별 역발상보다 전체 반전 신호를 먼저 진단할 것.");
+            + "  - Grok 실시간 섹터/뉴스 확인 + ChatGPT 기술적 눌림목 판단 결합\n"
+            + "⚠️ 시장 전체 급락(-3% 이상)이면 신규 스윙보다 리스크 관리와 분할 접근을 우선 진단할 것.");
 
         MODE_PROMPTS = java.util.Collections.unmodifiableMap(m);
     }
@@ -362,7 +385,26 @@ public class MultiAgentOrchestrator {
                     }
 
                     log.info("[Orchestrator] {} starting (specialized)...", agent.name());
-                    AgentResult result = agent.analyze(agentSystemPrompt, userMessage);
+                    // ★ v2.8.3: Grok 은 모드별 SearchPolicy 적용 (BREAKOUT 검색 OFF + 저렴 모델)
+                    //   ChatGPT 등 다른 에이전트는 기본 analyze() 유지
+                    AgentResult result;
+                    if (agent instanceof GrokAgent grok) {
+                        result = grok.analyzeForMode(agentSystemPrompt, userMessage, mode);
+                        // ★ v2.8.6 (2026-04-29): Grok 실패 시 Gemini 자동 폴백
+                        //   xAI team_blocked / 401 / network error 등으로 grok 이 success 외 status 반환 시
+                        //   Gemini 가 동일 프롬프트로 재분석. 토큰 비용 추가지만 분석 누락 방지.
+                        if (geminiFallback != null && geminiFallback.isAvailable()
+                                && !"success".equals(result.status())) {
+                            log.warn("[Orchestrator] grok failed (status={}, {}ms) → Gemini 폴백 시작",
+                                result.status(), result.durationMs());
+                            AgentResult fallback = geminiFallback.analyze(agentSystemPrompt, userMessage);
+                            log.info("[Orchestrator] gemini fallback finished ({}ms, status={})",
+                                fallback.durationMs(), fallback.status());
+                            result = fallback;
+                        }
+                    } else {
+                        result = agent.analyze(agentSystemPrompt, userMessage);
+                    }
                     log.info("[Orchestrator] {} finished ({}ms, status={})",
                         agent.name(), result.durationMs(), result.status());
                     return result;
@@ -419,68 +461,24 @@ public class MultiAgentOrchestrator {
             }
         }
 
-        // ★ Synthesis 전에 1차 종목 추출 + 실시간 가격 수집 (stock project 패턴)
-        List<StockPick> preSynthesisPicks = new ArrayList<>();
-        for (AgentResult r : successResults) {
-            List<StockPick> morePicks = StockParser.parseStockPicks(r.content());
-            for (StockPick p : morePicks) {
-                if (preSynthesisPicks.stream().noneMatch(sp -> sp.code().equals(p.code()))) {
-                    preSynthesisPicks.add(p);
-                }
-            }
-        }
-
-        // ★ Round 2/3 전에 추천 종목의 DART 재무/공시 데이터를 추가 수집
-        //    (Round 1 쿼리 종목 DART 는 별도, 여기서는 Round 1이 선정한 pick 기준 최대 8종목)
-        Set<String> pickCodes = new LinkedHashSet<>();
-        for (StockPick p : preSynthesisPicks) {
-            if (p.code() != null && p.code().length() == 6) pickCodes.add(p.code());
-            if (pickCodes.size() >= 8) break;
-        }
-        // 이미 쿼리 DART 주입된 코드는 중복 방지
-        pickCodes.removeAll(queryCodes);
-        String pickDartText = fetchDartDataForStocks(pickCodes);
-        if (!pickDartText.isEmpty()) {
-            log.info("[Orchestrator] Pick 기반 DART 주입: {}개 종목", pickCodes.size());
-        }
-
-        // 실시간 가격 미리 수집 → Synthesis prompt에 주입
-        Map<String, String> preSynthesisPrices = new HashMap<>(queryStockPrices);
-        if (!preSynthesisPicks.isEmpty()) {
-            try {
-                List<String> preCodes = preSynthesisPicks.stream()
-                    .map(StockPick::code).filter(c -> c.length() == 6).toList();
-                Map<String, String> fetched = marketDataService.fetchStockPrices(preCodes);
-                preSynthesisPrices.putAll(fetched);
-                log.info("[Orchestrator] Pre-synthesis 가격 수집: {}개 종목", fetched.size());
-            } catch (Exception e) {
-                log.warn("[Orchestrator] Pre-synthesis 가격 수집 실패: {}", e.getMessage());
-            }
-        }
-
-        // Round 2: Claude synthesis — 합의 데이터 + 실시간 가격 포함
-        String finalContent;
+        // ★ v2.8.3 토큰 절감 (2026-04-25):
+        //   Round 2 (Synthesis) 단계 제거 — ChatGPT/Grok 둘 다 analyze 만 수행.
+        //   v2.8.4 (2026-04-26): SynthesisEngine 클래스 완전 삭제.
+        //   finalContent 선택 우선순위: ChatGPT analyze > Grok analyze > 첫 성공 결과.
+        //   ChatGPT 의 analyze 출력은 구조화된 인용/마크다운 포맷이 잘 잡혀 있어 그대로 사용 가능.
         AgentResult synthesisResult = null;
-        if (successResults.size() >= 2 && synthesisEngine.isAvailable()) {
-            log.info("[Orchestrator] Starting Round 2: Synthesis ({} results, {} verified prices)",
-                successResults.size(), preSynthesisPrices.size());
-            try {
-                synthesisResult = synthesisEngine.synthesizeWithResult(
-                    successResults, query, mode, today, consensusText, preSynthesisPicks, preSynthesisPrices,
-                    pickDartText);
-            } catch (Exception e) {
-                log.warn("[Orchestrator] Synthesis 오류 (첫 번째 에이전트 결과로 폴백): {}", e.getMessage());
-                synthesisResult = null;
-            }
-            finalContent = (synthesisResult != null && "success".equals(synthesisResult.status())
-                && synthesisResult.content() != null && !synthesisResult.content().isBlank())
-                ? synthesisResult.content() : successResults.getFirst().content();
-        } else if (successResults.size() == 1) {
-            finalContent = successResults.getFirst().content();
-        } else if (successResults.isEmpty()) {
+        String finalContent;
+        if (successResults.isEmpty()) {
             finalContent = "\uBAA8\uB4E0 AI \uC5D4\uC9C4\uC774 \uC751\uB2F5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. API \uD0A4\uB97C \uD655\uC778\uD558\uACE0 \uC7A0\uC2DC \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
         } else {
-            finalContent = successResults.getFirst().content();
+            AgentResult chatgptResult = successResults.stream()
+                .filter(r -> "chatgpt".equals(r.agent()))
+                .findFirst().orElse(null);
+            finalContent = (chatgptResult != null && chatgptResult.content() != null && !chatgptResult.content().isBlank())
+                ? chatgptResult.content()
+                : successResults.getFirst().content();
+            log.info("[Orchestrator] Synthesis 단계 생략 (v2.8.3 토큰 절감) — finalContent={}",
+                chatgptResult != null ? "chatgpt" : successResults.getFirst().agent());
         }
 
         // Extract stock picks

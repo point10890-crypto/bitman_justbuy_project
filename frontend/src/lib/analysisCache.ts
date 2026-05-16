@@ -9,7 +9,7 @@ interface CacheEntry {
   mode?: string
 }
 
-const CACHE_KEY = 'bitman_analysis_cache'
+const CACHE_KEY = 'bitman_analysis_cache_v2'
 const DEFAULT_TTL = 24 * 60 * 60 * 1000 // 24시간
 const MAX_ENTRIES = 50
 

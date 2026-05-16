@@ -2,17 +2,23 @@ package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.StockPick;
+import com.bitman.justbuy.dto.performance.DailyClosePerformanceResponse;
+import com.bitman.justbuy.dto.performance.SwingCumulativePerformanceResponse;
 import com.bitman.justbuy.entity.AnalysisTrackRecord;
 import com.bitman.justbuy.entity.AnalysisTrackRecord.TrackStatus;
 import com.bitman.justbuy.repository.TrackRecordRepository;
+import com.bitman.justbuy.util.KoreanMarketCalendar;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 
@@ -21,6 +27,11 @@ import java.util.*;
 public class TrackRecordService {
 
     private static final Logger log = LoggerFactory.getLogger(TrackRecordService.class);
+    private static final String SHORT_TERM_MODE = "BREAKOUT";
+    private static final String SWING_MODE = "REVERSAL_EDGE";
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final LocalTime MARKET_CLOSE = LocalTime.of(15, 30);
+    private static final DateTimeFormatter KST_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(KST);
 
     private final TrackRecordRepository repository;
     private final KisApiService kisApiService;
@@ -41,6 +52,15 @@ public class TrackRecordService {
             if (pick.code() == null || pick.code().length() != 6) continue;
 
             try {
+                Long priceAtAnalysis = parsePrice(pick.currentPrice());
+                boolean duplicate = priceAtAnalysis == null
+                    ? repository.existsByModeAndAnalysisDateAndStockCode(response.mode(), today, pick.code())
+                    : repository.existsByModeAndAnalysisDateAndStockCodeAndPriceAtAnalysis(
+                        response.mode(), today, pick.code(), priceAtAnalysis);
+                if (duplicate) {
+                    continue;
+                }
+
                 var record = new AnalysisTrackRecord();
                 record.setMode(response.mode());
                 record.setAnalysisDate(today);
@@ -56,7 +76,7 @@ public class TrackRecordService {
                         .ifPresent(cs -> record.setConsensusScore(cs.consensusScore()));
                 }
 
-                record.setPriceAtAnalysis(parsePrice(pick.currentPrice()));
+                record.setPriceAtAnalysis(priceAtAnalysis);
                 record.setTargetPrice(parsePrice(pick.targetPrice()));
                 record.setStopLoss(parsePrice(pick.stopLoss()));
 
@@ -67,6 +87,49 @@ public class TrackRecordService {
         }
 
         log.info("[TrackRecord] Recorded {} picks for mode={}", response.stockPicks().size(), response.mode());
+    }
+
+    /** 단타는 당일 마감 후 바로 성과를 검증한다. */
+    @Scheduled(cron = "0 40 15 * * MON-FRI", zone = "Asia/Seoul")
+    @Transactional
+    public void verifyTodayShortTermClose() {
+        LocalDate today = LocalDate.now(KST);
+        if (!KoreanMarketCalendar.isTradingDay(today)) {
+            log.info("[TrackRecord] 단타 마감 검증 건너뜀 (휴장일)");
+            return;
+        }
+        verifyShortTermClose(today);
+    }
+
+    @Transactional
+    public DailyClosePerformanceResponse getShortTermDailyClose(LocalDate date, boolean refresh) {
+        LocalDate targetDate = date != null ? date : LocalDate.now(KST);
+        LocalDate today = LocalDate.now(KST);
+        boolean marketClosed = targetDate.isBefore(today)
+            || (targetDate.equals(today) && LocalTime.now(KST).isAfter(MARKET_CLOSE));
+        boolean canRefreshFromRealtimeClose = targetDate.equals(today) && marketClosed;
+
+        if (canRefreshFromRealtimeClose && (refresh || hasUnverifiedShortTerm(targetDate))) {
+            verifyShortTermClose(targetDate);
+        }
+
+        List<AnalysisTrackRecord> records = repository.findByModeAndAnalysisDateOrderByCreatedAtDesc(
+            SHORT_TERM_MODE, targetDate);
+        return buildDailyCloseResponse(targetDate, marketClosed, records);
+    }
+
+    public SwingCumulativePerformanceResponse getSwingCumulative(LocalDate from, LocalDate to) {
+        LocalDate end = to != null ? to : LocalDate.now(KST);
+        LocalDate start = from != null ? from : end.minusDays(30);
+        if (start.isAfter(end)) {
+            LocalDate tmp = start;
+            start = end;
+            end = tmp;
+        }
+
+        List<AnalysisTrackRecord> records = repository
+            .findByModeAndAnalysisDateBetweenOrderByAnalysisDateDescCreatedAtDesc(SWING_MODE, start, end);
+        return buildSwingCumulativeResponse(start, end, records);
     }
 
     /** 매일 16:00 KST에 미완료 레코드의 현재가 업데이트 */
@@ -175,6 +238,162 @@ public class TrackRecordService {
         return stats;
     }
 
+    private boolean hasUnverifiedShortTerm(LocalDate date) {
+        return repository.findByModeAndAnalysisDateOrderByCreatedAtDesc(SHORT_TERM_MODE, date).stream()
+            .anyMatch(record -> record.getClosePrice() == null);
+    }
+
+    private void verifyShortTermClose(LocalDate date) {
+        List<AnalysisTrackRecord> records = repository.findByModeAndAnalysisDateOrderByCreatedAtDesc(
+            SHORT_TERM_MODE, date);
+        if (records.isEmpty()) return;
+
+        int verified = 0;
+        for (AnalysisTrackRecord record : records) {
+            try {
+                Long entry = record.getPriceAtAnalysis();
+                if (entry == null || entry <= 0 || record.getStockCode() == null) continue;
+
+                Map<String, String> priceData = kisApiService.fetchCurrentPrice(record.getStockCode());
+                Long close = parseCurrentPrice(priceData);
+                if (close == null || close <= 0) continue;
+
+                double returnPct = roundPct(((double) (close - entry) / entry) * 100);
+                record.setClosePrice(close);
+                record.setCloseReturn(returnPct);
+                record.setCloseVerifiedAt(Instant.now());
+
+                if (record.getTargetPrice() != null && close >= record.getTargetPrice()) {
+                    record.setHitTarget(true);
+                }
+                if (record.getStopLoss() != null && close <= record.getStopLoss()) {
+                    record.setHitStop(true);
+                }
+
+                repository.save(record);
+                verified++;
+            } catch (Exception e) {
+                log.debug("[TrackRecord] 단타 마감 검증 실패 {}: {}", record.getStockCode(), e.getMessage());
+            }
+        }
+
+        log.info("[TrackRecord] 단타 마감 검증 완료: date={}, verified={}/{}", date, verified, records.size());
+    }
+
+    private DailyClosePerformanceResponse buildDailyCloseResponse(LocalDate date, boolean marketClosed,
+                                                                 List<AnalysisTrackRecord> records) {
+        List<DailyClosePerformanceResponse.DailyCloseRow> rows = new ArrayList<>();
+        int rank = 1;
+        for (AnalysisTrackRecord record : records) {
+            Double closeReturn = record.getCloseReturn();
+            rows.add(new DailyClosePerformanceResponse.DailyCloseRow(
+                rank++,
+                valueOrDash(record.getStockName()),
+                valueOrDash(record.getStockCode()),
+                valueOrDash(record.getAction()),
+                formatPrice(record.getPriceAtAnalysis()),
+                formatPrice(record.getClosePrice()),
+                formatPercent(closeReturn),
+                resultLabel(closeReturn),
+                formatPrice(record.getTargetPrice()),
+                formatPrice(record.getStopLoss()),
+                record.isHitTarget(),
+                record.isHitStop(),
+                record.getCreatedAt() != null ? KST_FORMATTER.format(record.getCreatedAt()) : "",
+                record.getCloseVerifiedAt() != null ? KST_FORMATTER.format(record.getCloseVerifiedAt()) : ""
+            ));
+        }
+
+        List<Double> returns = records.stream()
+            .map(AnalysisTrackRecord::getCloseReturn)
+            .filter(Objects::nonNull)
+            .toList();
+        int wins = (int) returns.stream().filter(v -> v > 0).count();
+        int losses = (int) returns.stream().filter(v -> v < 0).count();
+        int flats = (int) returns.stream().filter(v -> v == 0).count();
+        boolean verified = !records.isEmpty() && records.stream().allMatch(r -> r.getClosePrice() != null);
+
+        String note;
+        if (records.isEmpty()) {
+            note = "해당 날짜에 단타 조건검색 기록이 없습니다.";
+        } else if (!marketClosed) {
+            note = "장마감 전입니다. 15:30 이후 마감 성과 검증이 가능합니다.";
+        } else if (!verified) {
+            note = "일부 종목은 KIS 현재가 확인 실패로 아직 미검증 상태입니다.";
+        } else {
+            note = "단타 후보의 당일 마감 기준 성과 검증 결과입니다.";
+        }
+
+        return new DailyClosePerformanceResponse(
+            date.toString(),
+            SHORT_TERM_MODE,
+            "단타 당일 마감 성과",
+            marketClosed,
+            verified,
+            KST_FORMATTER.format(Instant.now()),
+            records.size(),
+            wins,
+            losses,
+            flats,
+            avgPercent(returns),
+            extremePercent(returns, true),
+            extremePercent(returns, false),
+            rows,
+            note
+        );
+    }
+
+    private SwingCumulativePerformanceResponse buildSwingCumulativeResponse(LocalDate from, LocalDate to,
+                                                                            List<AnalysisTrackRecord> records) {
+        List<SwingCumulativePerformanceResponse.SwingRow> rows = new ArrayList<>();
+        int rank = 1;
+        for (AnalysisTrackRecord record : records) {
+            rows.add(new SwingCumulativePerformanceResponse.SwingRow(
+                rank++,
+                valueOrDash(record.getStockName()),
+                valueOrDash(record.getStockCode()),
+                valueOrDash(record.getAction()),
+                record.getAnalysisDate() != null ? record.getAnalysisDate().toString() : "",
+                formatPrice(record.getPriceAtAnalysis()),
+                record.getStatus() != null ? record.getStatus().name() : "",
+                formatPercent(record.getReturn1d()),
+                formatPercent(record.getReturn3d()),
+                formatPercent(record.getReturn5d()),
+                formatPrice(record.getTargetPrice()),
+                formatPrice(record.getStopLoss()),
+                record.isHitTarget(),
+                record.isHitStop(),
+                record.getCreatedAt() != null ? KST_FORMATTER.format(record.getCreatedAt()) : ""
+            ));
+        }
+
+        List<Double> r1 = records.stream().map(AnalysisTrackRecord::getReturn1d).filter(Objects::nonNull).toList();
+        List<Double> r3 = records.stream().map(AnalysisTrackRecord::getReturn3d).filter(Objects::nonNull).toList();
+        List<Double> r5 = records.stream().map(AnalysisTrackRecord::getReturn5d).filter(Objects::nonNull).toList();
+        int completed = (int) records.stream().filter(r -> r.getStatus() == TrackStatus.COMPLETED).count();
+        int tracking = records.size() - completed;
+
+        return new SwingCumulativePerformanceResponse(
+            from.toString(),
+            to.toString(),
+            SWING_MODE,
+            "스윙 누적 성과",
+            records.size(),
+            tracking,
+            completed,
+            avgPercent(r1),
+            avgPercent(r3),
+            avgPercent(r5),
+            winRate(r1),
+            winRate(r3),
+            winRate(r5),
+            ratioPercent((int) records.stream().filter(AnalysisTrackRecord::isHitTarget).count(), records.size()),
+            ratioPercent((int) records.stream().filter(AnalysisTrackRecord::isHitStop).count(), records.size()),
+            rows,
+            "스윙 후보는 1/3/5거래일 추적 결과를 누적 성과로 표시합니다."
+        );
+    }
+
     private Long parsePrice(String priceStr) {
         if (priceStr == null || priceStr.isBlank()) return null;
         try {
@@ -182,5 +401,64 @@ public class TrackRecordService {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    private Long parseCurrentPrice(Map<String, String> priceData) {
+        if (priceData == null || priceData.isEmpty()) return null;
+        String value = firstNonBlank(priceData.get("currentPrice"), priceData.get("현재가"));
+        return parsePrice(value);
+    }
+
+    private String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) return first;
+        return second;
+    }
+
+    private static double roundPct(double value) {
+        return Math.round(value * 100.0) / 100.0;
+    }
+
+    private static String valueOrDash(String value) {
+        return value == null || value.isBlank() ? "-" : value;
+    }
+
+    private static String formatPrice(Long value) {
+        return value == null || value <= 0 ? "-" : String.format(Locale.KOREA, "%,d원", value);
+    }
+
+    private static String formatPercent(Double value) {
+        if (value == null) return "-";
+        return (value > 0 ? "+" : "") + String.format(Locale.KOREA, "%.2f%%", value);
+    }
+
+    private static String avgPercent(List<Double> values) {
+        if (values == null || values.isEmpty()) return "-";
+        return formatPercent(values.stream().mapToDouble(Double::doubleValue).average().orElse(0));
+    }
+
+    private static String extremePercent(List<Double> values, boolean max) {
+        if (values == null || values.isEmpty()) return "-";
+        OptionalDouble result = max
+            ? values.stream().mapToDouble(Double::doubleValue).max()
+            : values.stream().mapToDouble(Double::doubleValue).min();
+        return result.isPresent() ? formatPercent(result.getAsDouble()) : "-";
+    }
+
+    private static String winRate(List<Double> values) {
+        if (values == null || values.isEmpty()) return "-";
+        int wins = (int) values.stream().filter(v -> v > 0).count();
+        return ratioPercent(wins, values.size());
+    }
+
+    private static String ratioPercent(int numerator, int denominator) {
+        if (denominator <= 0) return "-";
+        return Math.round((double) numerator / denominator * 100) + "%";
+    }
+
+    private static String resultLabel(Double value) {
+        if (value == null) return "미검증";
+        if (value > 0) return "승";
+        if (value < 0) return "패";
+        return "보합";
     }
 }

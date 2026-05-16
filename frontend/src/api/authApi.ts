@@ -293,3 +293,18 @@ export async function testDeepSeekConfig(token: string, message = 'ping') {
   return res.json()
 }
 
+export async function expireSubscriptionsNow(token: string): Promise<{
+  status: string
+  asOf: string
+  targetCount: number
+  expiredCount: number
+  failedCount: number
+}> {
+  const res = await apiFetch(`${API_BASE}/api/admin/subscriptions/expire-now`, {
+    method: 'POST',
+    headers: authHeaders(token),
+  })
+  if (!res.ok) await handleError(res)
+  return res.json()
+}
+

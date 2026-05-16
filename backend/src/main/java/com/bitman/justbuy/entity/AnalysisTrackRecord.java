@@ -34,6 +34,11 @@ public class AnalysisTrackRecord {
     private Double return3d;
     private Double return5d;
 
+    // 단타 당일 마감 성과 검증
+    private Long closePrice;
+    private Double closeReturn;
+    private Instant closeVerifiedAt;
+
     private boolean hitTarget;
     private boolean hitStop;
 
@@ -92,6 +97,15 @@ public class AnalysisTrackRecord {
 
     public Double getReturn5d() { return return5d; }
     public void setReturn5d(Double return5d) { this.return5d = return5d; }
+
+    public Long getClosePrice() { return closePrice; }
+    public void setClosePrice(Long closePrice) { this.closePrice = closePrice; }
+
+    public Double getCloseReturn() { return closeReturn; }
+    public void setCloseReturn(Double closeReturn) { this.closeReturn = closeReturn; }
+
+    public Instant getCloseVerifiedAt() { return closeVerifiedAt; }
+    public void setCloseVerifiedAt(Instant closeVerifiedAt) { this.closeVerifiedAt = closeVerifiedAt; }
 
     public boolean isHitTarget() { return hitTarget; }
     public void setHitTarget(boolean hitTarget) { this.hitTarget = hitTarget; }

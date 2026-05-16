@@ -21,7 +21,7 @@ import java.util.Map;
 public class ChatGptAgent implements AiAgent {
 
     private static final String BASE_URL = "https://api.openai.com/v1";
-    // 분석용: 웹검색 포함 모델 / 합성용: 순수 추론 모델
+    // v2.8.4 (2026-04-26): R3 Synthesis 단계 제거, analyze 만 유지 (웹검색 포함 모델)
     static final String ANALYSIS_MODEL = "gpt-4o-search-preview";
     static final String SYNTHESIS_MODEL = "gpt-4o";
 
@@ -49,7 +49,6 @@ public class ChatGptAgent implements AiAgent {
         return callOpenAi(ANALYSIS_MODEL, systemPrompt, userMessage, true);
     }
 
-    /** R3 합성용 — 웹검색 없이 순수 추론 (gpt-4o) */
     public AgentResult synthesize(String systemPrompt, String userMessage) {
         return callOpenAi(SYNTHESIS_MODEL, systemPrompt, userMessage, false);
     }

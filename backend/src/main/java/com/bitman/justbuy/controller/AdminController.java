@@ -5,6 +5,8 @@ import com.bitman.justbuy.dto.AdminResetPasswordRequest;
 import com.bitman.justbuy.dto.AdminUpdateUserRequest;
 import com.bitman.justbuy.dto.UserDto;
 import com.bitman.justbuy.service.AnalysisService;
+import com.bitman.justbuy.service.BackupService;
+import com.bitman.justbuy.service.ConditionSearchPipeline;
 import com.bitman.justbuy.service.DeepSeekEndpointService;
 import com.bitman.justbuy.service.KisApiService;
 import com.bitman.justbuy.service.PrecomputeScheduler;
@@ -20,7 +22,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/api/admin")
@@ -28,33 +29,28 @@ public class AdminController {
 
     private final SubscriptionService subscriptionService;
     private final AnalysisService analysisService;
+    private final ConditionSearchPipeline conditionSearchPipeline;
     private final List<AiAgent> agents;
     private final KisApiService kisApiService;
     private final RuntimeAiConfigService runtimeAiConfigService;
     private final DeepSeekEndpointService deepSeekEndpointService;
-    private final Map<String, RefreshJob> refreshJobs = new ConcurrentHashMap<>();
 
     @Autowired(required = false)
     private PrecomputeScheduler precomputeScheduler;
 
-    private enum RefreshStatus { PENDING, RUNNING, COMPLETE, ERROR }
-
-    private record RefreshJob(
-        RefreshStatus status,
-        Instant createdAt,
-        Instant completedAt,
-        List<Map<String, Object>> results,
-        String error
-    ) {}
+    @Autowired(required = false)
+    private BackupService backupService;
 
     public AdminController(SubscriptionService subscriptionService,
                            AnalysisService analysisService,
+                           ConditionSearchPipeline conditionSearchPipeline,
                            List<AiAgent> agents,
                            KisApiService kisApiService,
                            RuntimeAiConfigService runtimeAiConfigService,
                            DeepSeekEndpointService deepSeekEndpointService) {
         this.subscriptionService = subscriptionService;
         this.analysisService = analysisService;
+        this.conditionSearchPipeline = conditionSearchPipeline;
         this.agents = agents;
         this.kisApiService = kisApiService;
         this.runtimeAiConfigService = runtimeAiConfigService;
@@ -89,6 +85,11 @@ public class AdminController {
     @PostMapping("/subscriptions/{userId}/revoke")
     public ResponseEntity<UserDto> revoke(@PathVariable UUID userId) {
         return ResponseEntity.ok(subscriptionService.revokeSubscription(userId));
+    }
+
+    @PostMapping("/subscriptions/expire-now")
+    public ResponseEntity<Map<String, Object>> expireNow() {
+        return ResponseEntity.ok(subscriptionService.expireSubscriptionsNow());
     }
 
     // --- 회원관리 ---
@@ -167,6 +168,13 @@ public class AdminController {
             result.put("kisAvailable", false);
         }
 
+        // 메인 조건검색식 파이프라인
+        try {
+            result.put("pipeline", conditionSearchPipeline.describe());
+        } catch (Exception e) {
+            result.put("pipeline", Map.of("status", "error", "message", e.getMessage()));
+        }
+
         // 스케줄러 상태
         result.put("schedulerEnabled", precomputeScheduler != null);
 
@@ -204,6 +212,41 @@ public class AdminController {
         return ResponseEntity.ok(deepSeekEndpointService.test(message));
     }
 
+    /**
+     * 즉시 H2 DB 백업 트리거 — 미니PC 이전·코드 배포 등 위험 작업 직전 안전망용.
+     * H2 native BACKUP TO 'file.zip' SQL 사용 — 라이브 락에서도 atomic snapshot 획득 가능.
+     */
+    @PostMapping("/system/backup")
+    public ResponseEntity<Map<String, Object>> triggerBackup() {
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        if (backupService == null) {
+            result.put("status", "error");
+            result.put("message", "BackupService not available (bitman.backup.enabled=false?)");
+            return ResponseEntity.badRequest().body(result);
+        }
+
+        long start = System.currentTimeMillis();
+        result.put("startedAt", Instant.now().toString());
+
+        try {
+            java.nio.file.Path zip = backupService.runBackup();
+            long size = java.nio.file.Files.size(zip);
+            result.put("status", "ok");
+            result.put("file", zip.toString());
+            result.put("sizeBytes", size);
+            result.put("sizeKB", size / 1024);
+            result.put("durationMs", System.currentTimeMillis() - start);
+            result.put("completedAt", Instant.now().toString());
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            result.put("status", "error");
+            result.put("message", e.getMessage());
+            result.put("durationMs", System.currentTimeMillis() - start);
+            return ResponseEntity.status(500).body(result);
+        }
+    }
+
     @PostMapping("/system/refresh-all")
     public ResponseEntity<Map<String, Object>> refreshAll() {
         Map<String, Object> result = new LinkedHashMap<>();
@@ -214,55 +257,12 @@ public class AdminController {
             return ResponseEntity.badRequest().body(result);
         }
 
-        String jobId = UUID.randomUUID().toString().substring(0, 8);
-        Instant startedAt = Instant.now();
-        refreshJobs.put(jobId, new RefreshJob(RefreshStatus.PENDING, startedAt, null, List.of(), null));
-
-        Thread.startVirtualThread(() -> {
-            refreshJobs.put(jobId, new RefreshJob(RefreshStatus.RUNNING, startedAt, null, List.of(), null));
-            try {
-                Map<String, String> rawResults = precomputeScheduler.refreshAll();
-                List<Map<String, Object>> normalized = rawResults.entrySet().stream()
-                    .map(entry -> {
-                        Map<String, Object> item = new LinkedHashMap<>();
-                        item.put("mode", entry.getKey());
-                        item.put("status", entry.getValue());
-                        item.put("success", "success".equalsIgnoreCase(entry.getValue()));
-                        return item;
-                    })
-                    .toList();
-                refreshJobs.put(jobId, new RefreshJob(RefreshStatus.COMPLETE, startedAt, Instant.now(), normalized, null));
-            } catch (Exception e) {
-                String message = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                refreshJobs.put(jobId, new RefreshJob(RefreshStatus.ERROR, startedAt, Instant.now(), List.of(), message));
-            }
-        });
-
-        result.put("status", "accepted");
-        result.put("jobId", jobId);
-        result.put("startedAt", startedAt.toString());
-        result.put("message", "refresh-all started");
+        result.put("status", "ok");
+        result.put("startedAt", Instant.now().toString());
+        Map<String, String> refreshResults = precomputeScheduler.refreshAll();
+        result.put("results", refreshResults);
+        result.put("completedAt", Instant.now().toString());
 
         return ResponseEntity.ok(result);
-    }
-
-    @GetMapping("/system/refresh-all/{jobId}")
-    public ResponseEntity<Map<String, Object>> refreshAllStatus(@PathVariable String jobId) {
-        RefreshJob job = refreshJobs.get(jobId);
-        if (job == null) {
-            return ResponseEntity.status(404).body(Map.of(
-                "status", "error",
-                "error", "refresh job not found"
-            ));
-        }
-
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("status", job.status().name().toLowerCase());
-        body.put("jobId", jobId);
-        body.put("startedAt", job.createdAt().toString());
-        if (job.completedAt() != null) body.put("completedAt", job.completedAt().toString());
-        if (job.error() != null) body.put("error", job.error());
-        body.put("results", job.results());
-        return ResponseEntity.ok(body);
     }
 }

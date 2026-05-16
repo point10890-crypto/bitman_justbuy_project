@@ -34,6 +34,8 @@ public class User {
 
     private LocalDate subscriptionEndDate;
 
+    private LocalDateTime subscriptionApprovedAt;
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -65,5 +67,7 @@ public class User {
     public void setDepositorName(String depositorName) { this.depositorName = depositorName; }
     public LocalDate getSubscriptionEndDate() { return subscriptionEndDate; }
     public void setSubscriptionEndDate(LocalDate subscriptionEndDate) { this.subscriptionEndDate = subscriptionEndDate; }
+    public LocalDateTime getSubscriptionApprovedAt() { return subscriptionApprovedAt; }
+    public void setSubscriptionApprovedAt(LocalDateTime subscriptionApprovedAt) { this.subscriptionApprovedAt = subscriptionApprovedAt; }
     public LocalDateTime getCreatedAt() { return createdAt; }
 }

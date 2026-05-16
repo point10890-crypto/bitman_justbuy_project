@@ -1,14 +1,13 @@
 package com.bitman.justbuy.config;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
-import io.swagger.v3.oas.models.OpenAPI;
-import io.swagger.v3.oas.models.info.Info;
-import io.swagger.v3.oas.models.info.Contact;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.cache.caffeine.CaffeineCacheManager;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
@@ -19,11 +18,23 @@ import java.util.Arrays;
 @EnableCaching
 public class AppConfig {
 
+    /** 기본 RestTemplate — AI/시장 데이터 API용 (connect 10s / read 120s) */
     @Bean
+    @Primary
     public RestTemplate restTemplate() {
         var factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(10));
         factory.setReadTimeout(Duration.ofSeconds(120));
+        return new RestTemplate(factory);
+    }
+
+    /** 텔레그램 전용 RestTemplate — connect 30s / read 30s (간헐적 타임아웃 대응) */
+    @Bean
+    @Qualifier("telegram")
+    public RestTemplate telegramRestTemplate() {
+        var factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofSeconds(30));
+        factory.setReadTimeout(Duration.ofSeconds(30));
         return new RestTemplate(factory);
     }
 
@@ -44,17 +55,5 @@ public class AppConfig {
         ));
 
         return manager;
-    }
-
-    @Bean
-    public OpenAPI customOpenAPI() {
-        return new OpenAPI()
-                .info(new Info()
-                        .title("BitMan JustBuy API")
-                        .version("2.7.0")
-                        .description("KR/US 시장 데이터 및 AI 분석 API")
-                        .contact(new Contact()
-                                .name("BitMan Team")
-                                .email("support@bitman.ai")));
     }
 }

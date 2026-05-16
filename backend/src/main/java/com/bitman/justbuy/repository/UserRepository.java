@@ -15,12 +15,20 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByEmail(String email);
 
+    Optional<User> findByEmailIgnoreCase(String email);
+
+    Optional<User> findFirstByEmailIgnoreCaseOrderByCreatedAtAsc(String email);
+
+    List<User> findAllByEmailIgnoreCase(String email);
+
     boolean existsByEmail(String email);
+
+    boolean existsByEmailIgnoreCase(String email);
 
     List<User> findBySubscription(SubscriptionStatus subscription);
 
     /** 만료일이 지난 PRO 유저 목록 (자동 다운그레이드용) */
-    @Query("SELECT u FROM User u WHERE u.subscription = 'PRO' AND u.subscriptionEndDate < :today")
+    @Query("SELECT u FROM User u WHERE u.subscription = 'PRO' AND u.role <> 'ADMIN' AND u.subscriptionEndDate < :today")
     List<User> findExpiredProUsers(@Param("today") LocalDate today);
 
     /** 특정 기간 내 만료 예정인 PRO 유저 수 */

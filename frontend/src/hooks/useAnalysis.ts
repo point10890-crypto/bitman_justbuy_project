@@ -13,8 +13,8 @@ export function useAnalysis() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const analyze = useCallback(async (query: string, mode?: string) => {
-    if (!query.trim()) return
+  const analyze = useCallback(async (query: string, mode?: string): Promise<AnalysisResult | null> => {
+    if (!query.trim()) return null
     try {
       setLoading(true)
       setError(null)
@@ -31,10 +31,20 @@ export function useAnalysis() {
         try {
           const precomputed = await fetchPrecomputed(mode, token)
           if (precomputed && precomputed.metadata.agentsSucceeded > 0) {
-            setResult({ ...precomputed, isPrecomputed: true })
-            setCache(query, effectiveMode, precomputed)
-            addHistory(query, mode, precomputed.content)
-            return
+            const cached = getCached(query, effectiveMode)
+            const serverTime = new Date(precomputed.updatedAt).getTime()
+            const cachedTime = cached ? new Date(cached.updatedAt).getTime() : 0
+            if (serverTime > cachedTime || !cached) {
+              const nextResult = { ...precomputed, isPrecomputed: true }
+              setResult(nextResult)
+              setCache(query, effectiveMode, precomputed)
+              addHistory(query, mode, precomputed.content)
+              return nextResult
+            } else {
+              const nextResult = { ...cached, isPrecomputed: true }
+              setResult(nextResult)
+              return nextResult
+            }
           }
         } catch {
           // 프리컴퓨트 실패 → 라이브 폴백
@@ -43,16 +53,19 @@ export function useAnalysis() {
         // 라이브 모드 (분석해줘, 수급분석): 클라이언트 캐시 우선
         const cached = getCached(query, effectiveMode)
         if (cached && cached.metadata.agentsSucceeded > 0) {
-          setResult({ ...cached, isPrecomputed: false })
-          return
+          const nextResult = { ...cached, isPrecomputed: false }
+          setResult(nextResult)
+          return nextResult
         }
       }
 
       // 라이브 멀티에이전트 분석
       const res = await fetchLiveAnalysis(query, effectiveMode, token)
-      setResult({ ...res, isPrecomputed: false })
+      const nextResult = { ...res, isPrecomputed: false }
+      setResult(nextResult)
       setCache(query, effectiveMode, res)
       addHistory(query, mode, res.content)
+      return nextResult
     } catch (err) {
       const msg = (err instanceof Error ? err.message : '분석 중 오류 발생') || '분석 중 오류 발생'
       if (msg.includes('403') || msg.includes('PRO') || msg.includes('구독자만')) {
@@ -68,6 +81,7 @@ export function useAnalysis() {
       } else {
         setError(msg)
       }
+      return null
     } finally {
       setLoading(false)
     }

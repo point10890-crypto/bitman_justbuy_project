@@ -1,0 +1,58 @@
+[Unit]
+Description=BitMan JustBuy API (Spring Boot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=justbuy
+Group=justbuy
+
+# ─── 환경변수 로드 ─────────────────────────────────────────────
+# /etc/justbuy/env 는 root:justbuy 소유 600 권한.
+# JWT_SECRET, TELEGRAM_*, OPENAI_API_KEY, XAI_API_KEY, DART_API_KEY,
+# BITMAN_KIS_APP_KEY, BITMAN_KIS_APP_SECRET, ADMIN_EMAIL, ADMIN_DEFAULT_PASSWORD 포함.
+EnvironmentFile=/etc/justbuy/env
+Environment=SPRING_PROFILES_ACTIVE=prod
+Environment=LOG_PATH=/var/log/justbuy
+
+# ─── 작업 디렉토리 ─────────────────────────────────────────────
+WorkingDirectory=/opt/justbuy
+
+# ─── JAR 실행 + JVM 튜닝 ──────────────────────────────────────
+# Oracle Cloud Ampere A1 (24GB RAM) 기준: 앱에 4GB 할당.
+# G1GC + 200ms pause 목표 + OOM dump 자동 생성.
+ExecStart=/usr/bin/java \
+    -Xms2g -Xmx4g \
+    -XX:+UseG1GC \
+    -XX:MaxGCPauseMillis=200 \
+    -XX:+HeapDumpOnOutOfMemoryError \
+    -XX:HeapDumpPath=/var/log/justbuy/ \
+    -Dfile.encoding=UTF-8 \
+    -Duser.timezone=Asia/Seoul \
+    -jar /opt/justbuy/justbuy-api.jar
+
+# ─── Graceful restart ─────────────────────────────────────────
+# SIGTERM 수신 시 server.shutdown=graceful 로 in-flight 요청 완료 대기.
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=45
+
+Restart=always
+RestartSec=10
+
+# ─── 보안 hardening ───────────────────────────────────────────
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# 쓰기 허용 경로 (DB / 로그 / 힙덤프).
+ReadWritePaths=/var/lib/justbuy /var/log/justbuy
+# 읽기 허용 경로.
+ReadOnlyPaths=/opt/justbuy /etc/justbuy
+
+# ─── 리소스 제한 ──────────────────────────────────────────────
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

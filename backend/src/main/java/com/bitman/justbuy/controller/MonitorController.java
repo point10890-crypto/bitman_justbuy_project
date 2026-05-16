@@ -19,6 +19,7 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -230,95 +231,97 @@ public class MonitorController {
     }
 
     /**
-     * GET /api/monitor/scheduler - scheduler heartbeat and liveness status.
+     * GET /api/monitor/scheduler — 스케줄러 heartbeat / liveness
+     *
+     * 평일 거래일 기준, 각 모드의 마지막 분석 시각을 노출한다.
+     * 분석 누락(스케줄러 죽음·예외 swallow)이 발생하면 healthy=false 반환.
+     *
+     * 판정 규칙:
+     *  - 거래일이 아니면(휴장/주말) 항상 healthy=true (기준 N/A)
+     *  - 거래일이고 14:50(3차) 이후라면 모든 모드의 last-run 이 오늘이어야 함
+     *  - 거래일이고 11:50(2차) ~ 14:50 사이라면 모든 모드의 last-run 이 오늘 11:50 이후여야 함
+     *  - 거래일이고 08:50(1차) ~ 11:50 사이라면 모든 모드의 last-run 이 오늘 08:50 이후여야 함
      */
     @GetMapping("/scheduler")
     public Map<String, Object> schedulerHeartbeat() {
         Map<String, Object> result = new LinkedHashMap<>();
-        ZoneId kst = ZoneId.of("Asia/Seoul");
-        ZonedDateTime nowKst = ZonedDateTime.now(kst);
+        ZoneId KST = ZoneId.of("Asia/Seoul");
+        ZonedDateTime nowKst = ZonedDateTime.now(KST);
         result.put("now", nowKst.toString());
 
         PrecomputeScheduler scheduler = schedulerProvider.getIfAvailable();
         if (scheduler == null) {
-            result.put("enabled", false);
             result.put("healthy", false);
-            result.put("reason", "scheduler-disabled");
+            result.put("reason", "scheduler-disabled (bitman.scheduler.enabled=false)");
             return result;
         }
 
         Map<String, String> lastRuns = scheduler.getLastRunTimes();
-        result.put("enabled", true);
         result.put("lastRunTimes", lastRuns);
 
-        boolean tradingDay = KoreanMarketCalendar.isTradingDay(nowKst.toLocalDate());
-        result.put("isTradingDay", tradingDay);
-        if (!tradingDay) {
+        boolean isTradingDay = KoreanMarketCalendar.isTradingDay(nowKst.toLocalDate());
+        result.put("isTradingDay", isTradingDay);
+        if (!isTradingDay) {
             result.put("healthy", true);
             result.put("reason", "non-trading-day");
             return result;
         }
 
+        // 거래일 — 현재 시각 기준 가장 최근 회차 시각
         LocalTime now = nowKst.toLocalTime();
         LocalTime expectedSince;
-        String expectedRound;
+        String round;
         if (now.isAfter(LocalTime.of(14, 55))) {
             expectedSince = LocalTime.of(14, 50);
-            expectedRound = "14:50";
-        } else if (now.isAfter(LocalTime.of(13, 55))) {
-            expectedSince = LocalTime.of(13, 50);
-            expectedRound = "13:50";
-        } else if (now.isAfter(LocalTime.of(12, 55))) {
-            expectedSince = LocalTime.of(12, 50);
-            expectedRound = "12:50";
+            round = "3차";
         } else if (now.isAfter(LocalTime.of(11, 55))) {
             expectedSince = LocalTime.of(11, 50);
-            expectedRound = "11:50";
-        } else if (now.isAfter(LocalTime.of(10, 55))) {
-            expectedSince = LocalTime.of(10, 50);
-            expectedRound = "10:50";
-        } else if (now.isAfter(LocalTime.of(9, 55))) {
-            expectedSince = LocalTime.of(9, 50);
-            expectedRound = "09:50";
+            round = "2차";
         } else if (now.isAfter(LocalTime.of(8, 55))) {
             expectedSince = LocalTime.of(8, 50);
-            expectedRound = "08:50";
+            round = "1차";
         } else {
+            // 08:55 이전 — 어제 14:50 결과가 살아있어야 함 (TTL 175분 안엔 들어가지만 우린 당일 기준만 본다)
             result.put("healthy", true);
-            result.put("reason", "before-first-round");
+            result.put("reason", "before-first-round (08:55 KST)");
             return result;
         }
 
-        ZonedDateTime threshold = nowKst.with(expectedSince).withSecond(0).withNano(0).minusMinutes(5);
-        Set<String> expectedModes = Set.of("BREAKOUT", "FLOW_LEADER", "CATALYST_BURST", "REVERSAL_EDGE");
-        List<String> staleModes = new ArrayList<>();
-        for (String mode : expectedModes) {
-            String value = lastRuns.get(mode);
-            if (value == null || value.isBlank()) {
-                staleModes.add(mode + " (no run recorded)");
-                continue;
-            }
+        ZonedDateTime threshold = nowKst.with(expectedSince).withSecond(0).withNano(0);
+        // ★ +5분 그레이스: 분석 시작 후 완료까지 시간이 걸려서 updatedAt 이 cron 시각보다 늦음
+        ZonedDateTime graceThreshold = threshold.minusMinutes(5);
+
+        List<String> stale = new ArrayList<>();
+        for (var entry : lastRuns.entrySet()) {
             try {
-                Instant updatedAt = Instant.parse(value);
-                if (updatedAt.isBefore(threshold.toInstant())) {
-                    staleModes.add(mode);
+                Instant updatedAt = Instant.parse(entry.getValue());
+                if (updatedAt.isBefore(graceThreshold.toInstant())) {
+                    stale.add(entry.getKey());
                 }
             } catch (Exception e) {
-                staleModes.add(mode + " (unparseable)");
+                stale.add(entry.getKey() + " (unparseable: " + entry.getValue() + ")");
             }
         }
 
-        result.put("expectedRound", expectedRound);
-        result.put("threshold", threshold.toString());
-        result.put("staleModes", staleModes);
-        result.put("healthy", staleModes.isEmpty());
-        if (!staleModes.isEmpty()) {
-            result.put("reason", "stale modes: " + String.join(", ", staleModes));
+        // 스케줄 모드 4개 모두 lastRuns 에 있어야 함
+        Set<String> expectedModes = Set.of("BREAKOUT", "FLOW_LEADER", "CATALYST_BURST", "REVERSAL_EDGE");
+        for (String mode : expectedModes) {
+            if (!lastRuns.containsKey(mode)) {
+                stale.add(mode + " (no run recorded)");
+            }
+        }
+
+        result.put("expectedRound", round);
+        result.put("threshold", graceThreshold.toString());
+        result.put("staleModes", stale);
+        result.put("healthy", stale.isEmpty());
+        if (!stale.isEmpty()) {
+            result.put("reason", round + " 분석이 누락된 모드: " + String.join(", ", stale));
         }
         return result;
     }
 
-    /** External service probe using HttpURLConnection. */
+    /** 외부 서비스 프로브 (HttpURLConnection 사용, 의존성 없음) */
     private Map<String, Object> probeUrl(String name, String url) {
         long start = System.currentTimeMillis();
         Map<String, Object> result = new LinkedHashMap<>();

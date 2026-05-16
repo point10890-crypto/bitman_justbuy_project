@@ -49,27 +49,65 @@ public class AuthService {
     public void ensureAdminExistsOnStartup() {
         if (adminEmail == null || adminEmail.isBlank()) return;
 
-        var existing = userRepository.findByEmail(adminEmail.trim());
+        String normalizedAdminEmail = normalizeEmail(adminEmail);
+        var existing = userRepository.findFirstByEmailIgnoreCaseOrderByCreatedAtAsc(normalizedAdminEmail);
         if (existing.isEmpty()) {
             // 계정이 없을 때만 ADMIN_DEFAULT_PASSWORD 사용해 부트스트랩.
-            // 환경변수 미설정 시: 예측 불가능한 랜덤 비밀번호를 1회 생성해 로그에 출력.
+            // 환경변수 미설정 OR 약한 비밀번호 감지 시: 예측 불가능한 랜덤 비밀번호를 1회 생성.
             // (하드코딩 폴백 'Admin1234' 제거 — 평문 유출 리스크 차단)
             String defaultPassword = System.getenv("ADMIN_DEFAULT_PASSWORD");
+            boolean generated = false;
+
             if (defaultPassword == null || defaultPassword.isBlank()) {
-                defaultPassword = UUID.randomUUID().toString().replace("-", "") + "!A1";
+                defaultPassword = generateStrongRandomPassword();
+                generated = true;
                 log.warn("===============================================================");
                 log.warn("ADMIN_DEFAULT_PASSWORD env var NOT SET.");
-                log.warn("Generated one-time random admin password for {}:", adminEmail.trim());
-                log.warn("  {}", defaultPassword);
-                log.warn("SAVE THIS NOW — it will NOT be logged again. Then set ADMIN_DEFAULT_PASSWORD in .env and restart, or change via admin UI.");
-                log.warn("===============================================================");
+            } else if (!PasswordPolicy.isStrong(defaultPassword)) {
+                // 약한 비밀번호 감지 (12자 미만 또는 복잡도 부족) — 환경변수를 무시하고 랜덤 생성.
+                defaultPassword = generateStrongRandomPassword();
+                generated = true;
+                log.error("===============================================================");
+                log.error("ADMIN_DEFAULT_PASSWORD is WEAK (needs 12+ chars, upper/lower/digit/special).");
+                log.error("Ignoring weak env value; generated strong random password instead.");
             }
-            var admin = new User(adminEmail.trim(), "Admin", passwordEncoder.encode(defaultPassword));
+
+            if (generated) {
+                // ★ v2.8.4 (2026-04-26): 비밀번호를 로그에 찍지 않음.
+                //    대신 data/.admin-bootstrap-password 파일에 1회성으로 기록.
+                //    파일 권한은 lock-env.ps1 / OS-level ACL 로 제한.
+                //    관리자가 읽고 즉시 삭제해야 함.
+                java.nio.file.Path passwordFile = java.nio.file.Path.of("data", ".admin-bootstrap-password");
+                try {
+                    java.nio.file.Files.createDirectories(passwordFile.getParent());
+                    java.nio.file.Files.writeString(passwordFile,
+                        "ADMIN: " + normalizedAdminEmail + "\n"
+                        + "ONE-TIME PASSWORD: " + defaultPassword + "\n"
+                        + "GENERATED: " + java.time.Instant.now() + "\n\n"
+                        + "ACTION REQUIRED:\n"
+                        + "  1. Login at https://api.bit-man.net/admin with above credentials\n"
+                        + "  2. Change password via admin UI\n"
+                        + "  3. DELETE THIS FILE: data/.admin-bootstrap-password\n"
+                        + "  4. Set strong ADMIN_DEFAULT_PASSWORD env var (12+ chars, mixed case/digit/special)\n"
+                    );
+                    log.warn("===============================================================");
+                    log.warn("Admin one-time password written to: {}", passwordFile.toAbsolutePath());
+                    log.warn("Read it ON THE SERVER, then DELETE the file.");
+                    log.warn("DO NOT transmit this file over network.");
+                    log.warn("===============================================================");
+                } catch (java.io.IOException ioe) {
+                    // 파일 쓰기 실패 시 부득이 로그로 (서버가 부팅 못하면 더 큰 문제)
+                    log.error("Failed to write bootstrap password file: {}. Falling back to log.", ioe.getMessage());
+                    log.warn("ONE-TIME ADMIN PASSWORD: {} (rotate immediately!)", defaultPassword);
+                }
+            }
+
+            var admin = new User(normalizedAdminEmail, "Admin", passwordEncoder.encode(defaultPassword));
             admin.setRole(Role.ADMIN);
             admin.setSubscription(SubscriptionStatus.PRO);
             admin.setSubscriptionEndDate(null);
             userRepository.save(admin);
-            log.info("Admin account created: {}", adminEmail.trim());
+            log.info("Admin account created: {}", normalizedAdminEmail);
         } else {
             // 계정이 이미 존재하면 비밀번호는 절대 건드리지 않음 (재시작마다 reset 되던 버그 수정).
             // role/subscription 만 보장.
@@ -79,26 +117,27 @@ public class AuthService {
                 admin.setRole(Role.ADMIN);
                 changed = true;
             }
-            if (admin.getSubscription() != SubscriptionStatus.PRO) {
+            if (admin.getSubscription() != SubscriptionStatus.PRO || admin.getSubscriptionEndDate() != null) {
                 admin.setSubscription(SubscriptionStatus.PRO);
                 admin.setSubscriptionEndDate(null);
                 changed = true;
             }
             if (changed) {
                 userRepository.save(admin);
-                log.info("Admin role/subscription re-applied for {}", adminEmail.trim());
+                log.info("Admin role/subscription re-applied for {}", normalizedAdminEmail);
             }
         }
     }
 
     @Transactional
     public AuthResponse register(RegisterRequest request) {
-        if (userRepository.existsByEmail(request.email())) {
+        String email = normalizeEmail(request.email());
+        if (userRepository.existsByEmailIgnoreCase(email)) {
             throw new IllegalArgumentException("이미 등록된 이메일입니다.");
         }
 
         var user = new User(
-            request.email(),
+            email,
             request.name(),
             passwordEncoder.encode(request.password())
         );
@@ -106,7 +145,7 @@ public class AuthService {
         // 첫 번째 가입자 또는 지정된 관리자 이메일은 ADMIN + 무기한 PRO
         if (userRepository.count() == 0
                 || (adminEmail != null && !adminEmail.isBlank()
-                    && request.email().equalsIgnoreCase(adminEmail.trim()))) {
+                    && email.equalsIgnoreCase(normalizeEmail(adminEmail)))) {
             user.setRole(Role.ADMIN);
             user.setSubscription(SubscriptionStatus.PRO);
             user.setSubscriptionEndDate(null);
@@ -150,9 +189,15 @@ public class AuthService {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
+    /** 관리자 부트스트랩용 강력 랜덤 비밀번호 (PasswordPolicy 정책 자동 만족). */
+    private static String generateStrongRandomPassword() {
+        return PasswordPolicy.generateStrong();
+    }
+
     @Transactional
     public AuthResponse login(AuthRequest request) {
-        var user = userRepository.findByEmail(request.email())
+        String email = normalizeEmail(request.email());
+        var user = userRepository.findFirstByEmailIgnoreCaseOrderByCreatedAtAsc(email)
             .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."));
 
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
@@ -165,6 +210,10 @@ public class AuthService {
             user.getId(), user.getEmail(), user.getRole().name(), request.rememberMe());
 
         return new AuthResponse(token, UserDto.from(user));
+    }
+
+    private static String normalizeEmail(String email) {
+        return email == null ? "" : email.trim().toLowerCase(java.util.Locale.ROOT);
     }
 
     @Transactional
@@ -181,13 +230,14 @@ public class AuthService {
     private void ensureAdminPro(User user) {
         // 관리자 이메일인데 아직 ADMIN이 아니면 승격
         if (adminEmail != null && !adminEmail.isBlank()
-                && user.getEmail().equalsIgnoreCase(adminEmail.trim())
+                && user.getEmail().equalsIgnoreCase(normalizeEmail(adminEmail))
                 && user.getRole() != Role.ADMIN) {
             user.setRole(Role.ADMIN);
             log.info("User promoted to ADMIN: {}", user.getEmail());
         }
 
-        if (user.getRole() == Role.ADMIN && user.getSubscription() != SubscriptionStatus.PRO) {
+        if (user.getRole() == Role.ADMIN
+                && (user.getSubscription() != SubscriptionStatus.PRO || user.getSubscriptionEndDate() != null)) {
             user.setSubscription(SubscriptionStatus.PRO);
             user.setSubscriptionEndDate(null);
             userRepository.save(user);

@@ -15,6 +15,7 @@ export interface User {
   subscription: 'free' | 'pending' | 'pro'
   subscriptionEndDate?: string
   subscriptionExpired?: boolean
+  subscriptionRenewalPending?: boolean
   depositorName?: string
   createdAt: string
 }
@@ -38,7 +39,7 @@ const TOKEN_KEY = 'bitman_token'
 const USER_KEY = 'bitman_auth_user'
 const REMEMBER_KEY = 'bitman_remember'
 
-function isSubscriptionExpired(endDate?: string | null): boolean {
+export function isSubscriptionExpired(endDate?: string | null): boolean {
   if (!endDate) return false
   const endDateKey = endDate.slice(0, 10)
   const parts = new Intl.DateTimeFormat('en', {
@@ -55,28 +56,46 @@ function isSubscriptionExpired(endDate?: string | null): boolean {
 
 function dtoToUser(dto: UserDto): User {
   // PRO 플랜이 만료되었는지 확인
-  const isExpired = dto.subscription.toLowerCase() === 'pro' && isSubscriptionExpired(dto.subscriptionEndDate)
+  const rawSubscription = dto.subscription.toLowerCase() as User['subscription']
+  const isExpired = rawSubscription === 'pro' && isSubscriptionExpired(dto.subscriptionEndDate)
+  const isPendingRenewal =
+    rawSubscription === 'pending' &&
+    !!dto.subscriptionEndDate &&
+    !isSubscriptionExpired(dto.subscriptionEndDate)
 
   return {
     id: dto.id,
     email: dto.email,
     name: dto.name,
     role: dto.role,
-    // ADMIN은 무기한 PRO 고정, 일반 유저는 만료 여부 확인
-    subscription: dto.role === 'ADMIN' ? 'pro' : isExpired ? 'free' : dto.subscription.toLowerCase() as User['subscription'],
+    // ADMIN은 무기한 PRO 고정. 연장 승인 대기 중인 기존 PRO는 남은 기간 동안 계속 PRO로 취급한다.
+    subscription: dto.role === 'ADMIN' ? 'pro' : isPendingRenewal ? 'pro' : isExpired ? 'free' : rawSubscription,
     subscriptionEndDate: dto.subscriptionEndDate ?? undefined,
     subscriptionExpired: isExpired,
+    subscriptionRenewalPending: isPendingRenewal,
     depositorName: dto.depositorName ?? undefined,
     createdAt: dto.createdAt,
   }
 }
 
+function usePersistentStorage() {
+  return localStorage.getItem(REMEMBER_KEY) !== '0'
+}
+
 function setToken(token: string) {
-  localStorage.setItem(TOKEN_KEY, token)
+  const persistent = usePersistentStorage()
+  const storage = persistent ? localStorage : sessionStorage
+  const other = persistent ? sessionStorage : localStorage
+  storage.setItem(TOKEN_KEY, token)
+  other.removeItem(TOKEN_KEY)
 }
 
 function setUserData(user: string) {
-  localStorage.setItem(USER_KEY, user)
+  const persistent = usePersistentStorage()
+  const storage = persistent ? localStorage : sessionStorage
+  const other = persistent ? sessionStorage : localStorage
+  storage.setItem(USER_KEY, user)
+  other.removeItem(USER_KEY)
 }
 
 function clearAuth() {
@@ -99,7 +118,13 @@ function getStoredUser(): User | null {
     if (subscription && subscription === subscription.toUpperCase()) {
       return dtoToUser(parsed as UserDto)
     }
-    return parsed as User
+    const user = parsed as User
+    const expired = user.subscription === 'pro' && isSubscriptionExpired(user.subscriptionEndDate)
+    return {
+      ...user,
+      subscription: user.role === 'ADMIN' ? 'pro' : expired ? 'free' : user.subscription,
+      subscriptionExpired: expired || !!user.subscriptionExpired,
+    }
   } catch {
     return null
   }

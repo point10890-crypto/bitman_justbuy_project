@@ -14,6 +14,7 @@ public record UserDto(
     String subscription,
     String depositorName,
     LocalDate subscriptionEndDate,
+    LocalDateTime subscriptionApprovedAt,
     LocalDateTime createdAt
 ) {
     public static UserDto from(User user) {
@@ -25,6 +26,7 @@ public record UserDto(
             user.getSubscription().name(),
             user.getDepositorName(),
             user.getSubscriptionEndDate(),
+            user.getSubscriptionApprovedAt(),
             user.getCreatedAt()
         );
     }

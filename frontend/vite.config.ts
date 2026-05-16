@@ -38,6 +38,14 @@ export default defineConfig({
         changeOrigin: true,
         timeout: 300000,
       },
+      '/api/main': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/api/conditions': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
       '/api/health': {
         target: 'http://localhost:8080',
         changeOrigin: true,
