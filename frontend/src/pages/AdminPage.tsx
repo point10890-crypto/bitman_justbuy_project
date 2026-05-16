@@ -26,6 +26,8 @@ type AdminView =
   | 'members'
   | 'system'
 
+type AdminFocus = 'active' | 'expiring' | null
+
 type AdminMenuEntry = {
   type: 'view' | 'route' | 'external' | 'logout'
   key: string
@@ -77,6 +79,10 @@ function parseAdminView(value: string | null): AdminView {
   return value && adminViewSet.has(value as AdminView) ? value as AdminView : 'dashboard'
 }
 
+function parseAdminFocus(value: string | null): AdminFocus {
+  return value === 'active' || value === 'expiring' ? value : null
+}
+
 const strategyViews: Record<Exclude<AdminView, 'dashboard' | 'approvals' | 'subscriptions' | 'members' | 'system'>, {
   mode: string
   section: string
@@ -118,6 +124,7 @@ export default function AdminPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { logout } = useAuth()
   const [view, setView] = useState<AdminView>(() => parseAdminView(searchParams.get('view')))
+  const [focus, setFocus] = useState<AdminFocus>(() => parseAdminFocus(searchParams.get('focus')))
   const [menuOpen, setMenuOpen] = useState(false)
   const [users, setUsers] = useState<UserDto[]>([])
   const [pendingUsers, setPendingUsers] = useState<UserDto[]>([])
@@ -169,8 +176,10 @@ export default function AdminPage() {
 
   useEffect(() => {
     const nextView = parseAdminView(searchParams.get('view'))
+    const nextFocus = parseAdminFocus(searchParams.get('focus'))
     if (nextView !== view) setView(nextView)
-  }, [searchParams, view])
+    if (nextFocus !== focus) setFocus(nextFocus)
+  }, [focus, searchParams, view])
 
   useEffect(() => {
     if (!menuOpen) return
@@ -191,18 +200,43 @@ export default function AdminPage() {
     )
   }, [search, users])
 
+  const subscriptionUsers = useMemo(() => {
+    const tierRank = (user: UserDto) => {
+      if (user.subscription === 'PRO') return 0
+      if (user.subscription === 'PENDING') return 1
+      return 2
+    }
+
+    return [...filteredUsers].sort((a, b) => {
+      const rankDiff = tierRank(a) - tierRank(b)
+      if (rankDiff !== 0) return rankDiff
+
+      if (focus === 'expiring' && a.subscription === 'PRO' && b.subscription === 'PRO') {
+        const aEnd = a.subscriptionEndDate ? new Date(a.subscriptionEndDate).getTime() : Number.MAX_SAFE_INTEGER
+        const bEnd = b.subscriptionEndDate ? new Date(b.subscriptionEndDate).getTime() : Number.MAX_SAFE_INTEGER
+        if (aEnd !== bEnd) return aEnd - bEnd
+      }
+
+      return a.name.localeCompare(b.name, 'ko-KR')
+    })
+  }, [filteredUsers, focus])
+
   const activeCount = users.filter(user => user.subscription === 'PRO').length
   const freeCount = users.filter(user => user.subscription === 'FREE').length
   const pendingCount = pendingUsers.length
   const expiringCount = users.filter(user => user.subscription === 'PRO' && user.subscriptionEndDate).length
 
-  const goAdminView = (nextView: AdminView, nextSearch = '') => {
+  const goAdminView = (nextView: AdminView, nextSearch = '', nextFocus: AdminFocus = null) => {
     setView(nextView)
+    setFocus(nextFocus)
     setMenuOpen(false)
     setMessage('')
     setEditingUser(null)
     setSearch(nextSearch)
-    setSearchParams(nextView === 'dashboard' ? {} : { view: nextView })
+    const nextParams: Record<string, string> = {}
+    if (nextView !== 'dashboard') nextParams.view = nextView
+    if (nextFocus) nextParams.focus = nextFocus
+    setSearchParams(nextParams)
   }
 
   const runAction = async (user: UserDto, action: 'approve' | 'reject' | 'revoke') => {
@@ -350,10 +384,10 @@ export default function AdminPage() {
 
   const meta = viewMeta[view]
   const kpiCards = [
-    { label: '승인 대기', value: pendingCount, desc: '입금 확인 후 승인/반려', view: 'approvals' as AdminView },
-    { label: '활성 구독자', value: activeCount, desc: 'PRO 구독 현황 관리', view: 'subscriptions' as AdminView },
-    { label: '무료 회원', value: freeCount, desc: '전체 회원 목록 확인', view: 'members' as AdminView },
-    { label: '만료일 관리', value: expiringCount, desc: '만료/연장 대상 점검', view: 'subscriptions' as AdminView },
+    { label: '승인 대기', value: pendingCount, desc: '입금 확인 후 승인/반려', view: 'approvals' as AdminView, focus: null as AdminFocus },
+    { label: '활성 구독자', value: activeCount, desc: 'PRO 구독 현황 관리', view: 'subscriptions' as AdminView, focus: 'active' as AdminFocus },
+    { label: '무료 회원', value: freeCount, desc: '전체 회원 목록 확인', view: 'members' as AdminView, focus: null as AdminFocus },
+    { label: '만료일 관리', value: expiringCount, desc: '만료/연장 대상 점검', view: 'subscriptions' as AdminView, focus: 'expiring' as AdminFocus },
   ]
 
   return (
@@ -429,7 +463,7 @@ export default function AdminPage() {
                 className="admin-kpi-card"
                 type="button"
                 key={card.label}
-                onClick={() => goAdminView(card.view)}
+                onClick={() => goAdminView(card.view, '', card.focus)}
               >
                 <span>{card.label}</span>
                 <strong>{card.value}</strong>
@@ -549,6 +583,8 @@ export default function AdminPage() {
         {view === 'subscriptions' && (
           <AdminPanel title="구독 관리" description="정상 구독, 만료 예정, 수동 해제를 관리합니다.">
             <AdminToolbar search={search} onSearch={setSearch} placeholder="회원명, 이메일, ID 검색" />
+            {focus === 'active' && <div className="admin-filter-banner">활성 PRO 구독자를 먼저 정렬했습니다.</div>}
+            {focus === 'expiring' && <div className="admin-filter-banner">PRO 구독자를 만료일이 가까운 순서로 정렬했습니다.</div>}
             <div className="admin-action-row admin-subscription-actions">
               <button type="button" disabled={actionId === 'expire-now'} onClick={runExpiryNow}>
                 만료 구독 즉시 처리
@@ -558,7 +594,7 @@ export default function AdminPage() {
               </button>
             </div>
             <AdminTable columns={['회원', '입금자명', '플랜', '승인일', '만료일', '상태', '액션']} emptyText="회원이 없습니다.">
-              {filteredUsers.map(user => (
+              {subscriptionUsers.map(user => (
                 <tr key={user.id}>
                   <td>{user.name}</td>
                   <td>{user.depositorName || '-'}</td>

@@ -6490,6 +6490,10 @@ body,
     gap: 8px;
   }
 
+  .admin-filter-banner {
+    margin: 0 0 10px;
+  }
+
   .admin-action-row button,
   .admin-primary-action,
   .admin-secondary-action {
@@ -6617,6 +6621,17 @@ body,
   .admin-user-editor select {
     min-width: 0;
   }
+}
+
+.admin-filter-banner {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 216, 23, .24);
+  border-radius: 10px;
+  background: rgba(255, 216, 23, .07);
+  color: #f6df70;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.4;
 }
 
 /* ===== Whole-app mobile publishing pass ===== */
@@ -7311,6 +7326,25 @@ body,
 
   .bm-landing-nav > div button:first-child {
     display: none;
+  }
+
+  .bm-hero h1 {
+    font-size: clamp(28px, 8.4vw, 34px);
+    line-height: 1.12;
+    overflow-wrap: anywhere;
+  }
+
+  .bm-preview-card p {
+    grid-template-columns: minmax(0, 1fr) minmax(0, .72fr) minmax(0, .72fr) minmax(0, .86fr);
+    gap: 4px;
+    font-size: 10px;
+  }
+
+  .bm-preview-card p span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .maker-search-box {
