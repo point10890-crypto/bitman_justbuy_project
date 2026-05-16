@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { Children, cloneElement, isValidElement, useEffect, useMemo, useState, type FormEvent, type ReactElement, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getStoredToken, useAuth } from '../contexts/AuthContext'
 import {
@@ -794,6 +794,7 @@ function AdminTable({
   emptyText: string
 }) {
   const hasRows = Array.isArray(children) ? children.length > 0 : !!children
+  const labeledRows = hasRows ? labelAdminTableRows(children, columns) : null
 
   return (
     <div className="admin-table-wrap">
@@ -802,7 +803,7 @@ function AdminTable({
           <tr>{columns.map(column => <th key={column}>{column}</th>)}</tr>
         </thead>
         <tbody>
-          {hasRows ? children : (
+          {hasRows ? labeledRows : (
             <tr>
               <td colSpan={columns.length} className="admin-empty">{emptyText}</td>
             </tr>
@@ -811,4 +812,25 @@ function AdminTable({
       </table>
     </div>
   )
+}
+
+function labelAdminTableRows(children: ReactNode, columns: string[]) {
+  return Children.map(children, row => {
+    if (!isValidElement(row)) return row
+
+    const rowElement = row as ReactElement<any>
+
+    return cloneElement(rowElement, {
+      children: Children.map(rowElement.props.children, (cell, index) => {
+        if (!isValidElement(cell)) return cell
+
+        const cellElement = cell as ReactElement<any>
+        const existingLabel = cellElement.props['data-label']
+
+        return cloneElement(cellElement, {
+          'data-label': existingLabel || columns[index] || '',
+        })
+      }),
+    })
+  })
 }
