@@ -5927,11 +5927,16 @@ body,
     position: sticky;
     top: 0;
     z-index: 2;
+    display: grid;
     grid-template-columns: 38px minmax(0, 1fr) auto;
     min-height: 64px;
     padding: 12px;
     background: #11161f;
     border-bottom: 1px solid #252c37;
+  }
+
+  .admin-brand div {
+    min-width: 0;
   }
 
   .admin-sidebar-close {
