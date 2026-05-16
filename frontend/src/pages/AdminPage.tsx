@@ -111,6 +111,7 @@ export default function AdminPage() {
   const navigate = useNavigate()
   const { logout } = useAuth()
   const [view, setView] = useState<AdminView>('dashboard')
+  const [menuOpen, setMenuOpen] = useState(false)
   const [users, setUsers] = useState<UserDto[]>([])
   const [pendingUsers, setPendingUsers] = useState<UserDto[]>([])
   const [systemStatus, setSystemStatus] = useState<any>(null)
@@ -158,6 +159,15 @@ export default function AdminPage() {
   useEffect(() => {
     if (view === 'system') loadSystem()
   }, [view])
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [menuOpen])
 
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -294,6 +304,7 @@ export default function AdminPage() {
   }
 
   const handleMenu = (item: AdminMenuEntry) => {
+    setMenuOpen(false)
     if (item.type === 'view' && item.view) {
       setView(item.view)
       return
@@ -319,14 +330,42 @@ export default function AdminPage() {
   const meta = viewMeta[view]
 
   return (
-    <main className="admin-page">
-      <aside className="admin-sidebar">
+    <main className={`admin-page${menuOpen ? ' admin-menu-open' : ''}`}>
+      <header className="admin-mobile-topbar">
+        <button
+          className="admin-mobile-menu-button"
+          type="button"
+          aria-label="관리 메뉴 열기"
+          aria-controls="admin-menu-drawer"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen(true)}
+        >
+          <span />
+          <span />
+          <span />
+        </button>
+        <div>
+          <strong>{meta.label}</strong>
+          <span>{meta.kicker}</span>
+        </div>
+        <button type="button" onClick={view === 'system' ? loadSystem : loadUsers}>새로고침</button>
+      </header>
+
+      <button
+        className="admin-menu-backdrop"
+        type="button"
+        aria-label="관리 메뉴 닫기"
+        onClick={() => setMenuOpen(false)}
+      />
+
+      <aside className="admin-sidebar" id="admin-menu-drawer" aria-label="관리자 메뉴">
         <div className="admin-brand">
           <span className="admin-brand-mark">B</span>
           <div>
             <strong>BitMan 운영센터</strong>
             <span>AI CONDITION ADMIN</span>
           </div>
+          <button className="admin-sidebar-close" type="button" aria-label="관리 메뉴 닫기" onClick={() => setMenuOpen(false)}>닫기</button>
         </div>
 
         <AdminMenuGroup items={productMenu} activeView={view} onSelect={handleMenu} />

@@ -2783,6 +2783,12 @@
   font-weight: 700;
 }
 
+.admin-mobile-topbar,
+.admin-menu-backdrop,
+.admin-sidebar-close {
+  display: none;
+}
+
 .admin-dashboard-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5789,5 +5795,186 @@ body,
   .admin-password-reset button,
   .admin-user-editor-actions button {
     width: 100%;
+  }
+}
+
+/* ===== Admin mobile drawer publishing ===== */
+@media (max-width: 640px) {
+  .admin-page {
+    position: relative;
+    display: block;
+    width: 100%;
+    min-height: 100dvh;
+    padding: 0 10px calc(18px + env(safe-area-inset-bottom));
+    background: #0b0f15;
+  }
+
+  .admin-mobile-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 70;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 9px;
+    min-height: 62px;
+    margin: 0 -10px 12px;
+    padding: max(9px, env(safe-area-inset-top)) 10px 9px;
+    background: rgba(8, 11, 16, .98);
+    border-bottom: 1px solid #242b35;
+    box-shadow: 0 14px 28px rgba(0, 0, 0, .26);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  .admin-mobile-menu-button {
+    width: 42px;
+    height: 42px;
+    border: 1px solid #303844;
+    border-radius: 12px;
+    background: #141922;
+    display: grid;
+    place-content: center;
+    gap: 5px;
+  }
+
+  .admin-mobile-menu-button span {
+    width: 18px;
+    height: 2px;
+    border-radius: 999px;
+    background: #f5f7fb;
+  }
+
+  .admin-mobile-topbar div {
+    min-width: 0;
+  }
+
+  .admin-mobile-topbar strong,
+  .admin-mobile-topbar span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .admin-mobile-topbar strong {
+    color: #fff;
+    font-size: 16px;
+    font-weight: 900;
+  }
+
+  .admin-mobile-topbar span {
+    margin-top: 2px;
+    color: #8e96a3;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: .08em;
+  }
+
+  .admin-mobile-topbar > button:last-child {
+    min-height: 38px;
+    border: 1px solid #303844;
+    border-radius: 10px;
+    padding: 0 10px;
+    background: #171d27;
+    color: #f8f5ed;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .admin-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 78;
+    display: block;
+    border: 0;
+    padding: 0;
+    background: rgba(0, 0, 0, .58);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s ease;
+  }
+
+  .admin-sidebar {
+    position: fixed !important;
+    inset: 0 auto 0 0;
+    z-index: 80;
+    width: min(86vw, 330px);
+    max-width: min(86vw, 330px);
+    height: 100dvh;
+    max-height: none;
+    margin: 0;
+    padding: 0 0 max(16px, env(safe-area-inset-bottom));
+    overflow-y: auto;
+    border-radius: 0 16px 16px 0;
+    background: #11161f;
+    box-shadow: 24px 0 60px rgba(0, 0, 0, .38);
+    transform: translateX(calc(-100% - 24px));
+    transition: transform .24s ease;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .admin-page.admin-menu-open .admin-sidebar {
+    transform: translateX(0);
+  }
+
+  .admin-page.admin-menu-open .admin-menu-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .admin-brand {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    min-height: 64px;
+    padding: 12px;
+    background: #11161f;
+    border-bottom: 1px solid #252c37;
+  }
+
+  .admin-sidebar-close {
+    display: inline-grid;
+    place-items: center;
+    min-height: 34px;
+    border: 1px solid #303844;
+    border-radius: 10px;
+    padding: 0 10px;
+    background: #171d27;
+    color: #d8dee8;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .admin-sidebar .admin-menu-item {
+    min-height: 66px;
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: 11px;
+    padding: 11px 12px;
+  }
+
+  .admin-menu-copy strong {
+    font-size: 14px;
+  }
+
+  .admin-menu-copy em {
+    max-width: 100%;
+    font-size: 11px;
+  }
+
+  .admin-workspace {
+    width: 100%;
+    display: grid;
+    gap: 12px;
+  }
+
+  .admin-topbar {
+    display: none;
+  }
+
+  .admin-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
   }
 }
