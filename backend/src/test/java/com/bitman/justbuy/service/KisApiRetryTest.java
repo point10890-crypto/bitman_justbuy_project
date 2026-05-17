@@ -87,4 +87,22 @@ class KisApiRetryTest {
             .exchange(contains("/uapi/domestic-stock/v1/quotations/inquire-price"),
                 eq(HttpMethod.GET), any(), eq(String.class));
     }
+
+    @Test
+    void fetchRealtimeVolumeRanking_usesDomesticStockMarketCode() {
+        String rankingBody =
+            "{\"output\":[{\"hts_kor_isnm\":\"삼성전자\",\"mksc_shrn_iscd\":\"005930\","
+            + "\"stck_prpr\":\"70000\",\"prdy_ctrt\":\"1.23\",\"acml_vol\":\"1000000\"}]}";
+        when(restTemplate.exchange(contains("/uapi/domestic-stock/v1/quotations/volume-rank"),
+                eq(HttpMethod.GET), any(), eq(String.class)))
+            .thenReturn(ResponseEntity.ok(rankingBody));
+
+        var result = service.fetchRealtimeVolumeRankingStocks(10);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).code()).isEqualTo("005930");
+        verify(restTemplate, times(1))
+            .exchange(contains("FID_COND_MRKT_DIV_CODE=J"),
+                eq(HttpMethod.GET), any(), eq(String.class));
+    }
 }

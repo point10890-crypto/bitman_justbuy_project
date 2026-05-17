@@ -746,22 +746,22 @@ public class KisApiService {
 
     public List<RankedStock> fetchVolumeRankingStocks(int limit) {
         return fetchRankingStocks("kis_rank_volume_structured_" + limit, "FHPST01710000",
-            "/uapi/domestic-stock/v1/quotations/volume-rank", "0", limit, false, Duration.ofMinutes(10));
+            "/uapi/domestic-stock/v1/quotations/volume-rank", "J", limit, false, Duration.ofMinutes(10));
     }
 
     public List<RankedStock> fetchGainersRankingStocks(int limit) {
         return fetchRankingStocks("kis_rank_gainers_structured_" + limit, "FHPST01710000",
-            "/uapi/domestic-stock/v1/quotations/volume-rank", "0", limit, true, Duration.ofMinutes(10));
+            "/uapi/domestic-stock/v1/quotations/volume-rank", "J", limit, true, Duration.ofMinutes(10));
     }
 
     public List<RankedStock> fetchRealtimeVolumeRankingStocks(int limit) {
         return fetchRankingStocks("kis_rt_rank_volume_structured_" + limit, "FHPST01710000",
-            "/uapi/domestic-stock/v1/quotations/volume-rank", "0", limit, false, Duration.ofSeconds(50));
+            "/uapi/domestic-stock/v1/quotations/volume-rank", "J", limit, false, Duration.ofSeconds(50));
     }
 
     public List<RankedStock> fetchRealtimeGainersRankingStocks(int limit) {
         return fetchRankingStocks("kis_rt_rank_gainers_structured_" + limit, "FHPST01710000",
-            "/uapi/domestic-stock/v1/quotations/volume-rank", "0", limit, true, Duration.ofSeconds(50));
+            "/uapi/domestic-stock/v1/quotations/volume-rank", "J", limit, true, Duration.ofSeconds(50));
     }
 
     public InvestorFlowSnapshot fetchInvestorFlowSnapshot(String stockCode, int days) {
