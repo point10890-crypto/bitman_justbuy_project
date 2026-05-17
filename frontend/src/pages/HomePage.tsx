@@ -154,8 +154,11 @@ function rowsFromEndpointResult(section: Section, result: AnalysisResult): Secti
 
 function sectionSourceStatus(section: ConditionSectionResponse | undefined) {
   if (!section) return '기본 표시'
+  if (section.sourceStatus === 'REALTIME_SCAN') return '실시간 포착'
   if (section.sourceStatus === 'PRECOMPUTED') return '실시간 캐시'
   if (section.sourceStatus === 'STALE_CACHE') return '최근 저장 결과'
+  if (section.sourceStatus === 'REALTIME_EMPTY') return '실시간 대기'
+  if (section.sourceStatus === 'REALTIME_WAITING') return '정규장 대기'
   if (section.sourceStatus === 'READY') return '알림 대기'
   if (section.sourceStatus === 'DATA_UNAVAILABLE') return '데이터 준비 중'
   return '조건검색 준비'
@@ -228,7 +231,7 @@ export default function HomePage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { result, loading, error, analyze, clear } = useAnalysis()
-  const { data: mainConditions, loading: conditionsLoading, error: conditionsError } = useMainConditions()
+  const { data: mainConditions, loading: conditionsLoading, error: conditionsError } = useMainConditions(30_000)
   const [query, setQuery] = useState('')
   const [activeQuery, setActiveQuery] = useState('')
   const [panelOpen, setPanelOpen] = useState(false)

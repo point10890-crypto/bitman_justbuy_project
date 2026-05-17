@@ -12,6 +12,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 
 import java.text.NumberFormat;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -745,12 +746,22 @@ public class KisApiService {
 
     public List<RankedStock> fetchVolumeRankingStocks(int limit) {
         return fetchRankingStocks("kis_rank_volume_structured_" + limit, "FHPST01710000",
-            "/uapi/domestic-stock/v1/quotations/volume-rank", "0", limit);
+            "/uapi/domestic-stock/v1/quotations/volume-rank", "0", limit, false, Duration.ofMinutes(10));
     }
 
     public List<RankedStock> fetchGainersRankingStocks(int limit) {
         return fetchRankingStocks("kis_rank_gainers_structured_" + limit, "FHPST01710000",
-            "/uapi/domestic-stock/v1/quotations/volume-rank", "0", limit);
+            "/uapi/domestic-stock/v1/quotations/volume-rank", "0", limit, true, Duration.ofMinutes(10));
+    }
+
+    public List<RankedStock> fetchRealtimeVolumeRankingStocks(int limit) {
+        return fetchRankingStocks("kis_rt_rank_volume_structured_" + limit, "FHPST01710000",
+            "/uapi/domestic-stock/v1/quotations/volume-rank", "0", limit, false, Duration.ofSeconds(50));
+    }
+
+    public List<RankedStock> fetchRealtimeGainersRankingStocks(int limit) {
+        return fetchRankingStocks("kis_rt_rank_gainers_structured_" + limit, "FHPST01710000",
+            "/uapi/domestic-stock/v1/quotations/volume-rank", "0", limit, true, Duration.ofSeconds(50));
     }
 
     public InvestorFlowSnapshot fetchInvestorFlowSnapshot(String stockCode, int days) {
@@ -897,7 +908,8 @@ public class KisApiService {
         return candidates.size() <= limit ? candidates : new ArrayList<>(candidates.subList(0, limit));
     }
 
-    private List<RankedStock> fetchRankingStocks(String cacheKey, String trId, String path, String marketDiv, int limit) {
+    private List<RankedStock> fetchRankingStocks(String cacheKey, String trId, String path, String marketDiv,
+                                                int limit, boolean sortByChange, Duration ttl) {
         if (!isAvailable()) return List.of();
 
         CachedEntry cached = cache.get(cacheKey);
@@ -945,9 +957,13 @@ public class KisApiService {
                 ));
             }
 
+            if (sortByChange) {
+                stocks.sort(Comparator.comparingDouble((RankedStock stock) -> parseRate(stock.changeRate())).reversed());
+            }
+
             if (!stocks.isEmpty()) {
                 cache.put(cacheKey, new CachedEntry(objectMapper.writeValueAsString(stocks),
-                    Instant.now().plus(10, ChronoUnit.MINUTES)));
+                    Instant.now().plus(ttl)));
             }
             return stocks;
         } catch (Exception e) {
@@ -1059,6 +1075,14 @@ public class KisApiService {
     private long parseLong(String s) {
         try { return Long.parseLong(s.replace(",", "").trim()); }
         catch (Exception e) { return 0; }
+    }
+
+    private double parseRate(String s) {
+        try {
+            return Double.parseDouble(s.replace("%", "").replace("+", "").replace(",", "").trim());
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private String firstNonBlank(String first, String second) {

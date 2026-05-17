@@ -7,6 +7,8 @@ import com.bitman.justbuy.dto.condition.ConditionSectionResponse;
 import com.bitman.justbuy.dto.condition.ConditionSignalDto;
 import com.bitman.justbuy.dto.condition.MainConditionResponse;
 import com.bitman.justbuy.dto.condition.TrackRecordSummary;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -18,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 @Service
 public class MainConditionService {
@@ -29,9 +32,22 @@ public class MainConditionService {
         "조건검색 결과는 투자 참고용 정보이며, 특정 종목의 매수/매도 추천이나 수익 보장을 의미하지 않습니다.";
 
     private final ConditionSearchPipeline conditionSearchPipeline;
+    private final ShortTermRealtimeScanner shortTermRealtimeScanner;
 
     public MainConditionService(ConditionSearchPipeline conditionSearchPipeline) {
+        this(conditionSearchPipeline, (ShortTermRealtimeScanner) null);
+    }
+
+    @Autowired
+    public MainConditionService(ConditionSearchPipeline conditionSearchPipeline,
+                                ObjectProvider<ShortTermRealtimeScanner> shortTermRealtimeScannerProvider) {
+        this(conditionSearchPipeline, shortTermRealtimeScannerProvider.getIfAvailable());
+    }
+
+    MainConditionService(ConditionSearchPipeline conditionSearchPipeline,
+                         ShortTermRealtimeScanner shortTermRealtimeScanner) {
         this.conditionSearchPipeline = conditionSearchPipeline;
+        this.shortTermRealtimeScanner = shortTermRealtimeScanner;
     }
 
     public MainConditionResponse getMain() {
@@ -46,7 +62,7 @@ public class MainConditionService {
         allSignals.addAll(swing.signals());
         allSignals.addAll(leaders.signals());
         allSignals.addAll(themes.signals());
-        ConditionSectionResponse alerts = alertsSection(allSignals, hasStaleSource(shortTerm, swing, leaders, themes));
+        ConditionSectionResponse alerts = alertsSection(allSignals, alertSourceStatus(shortTerm, swing, leaders, themes));
 
         return new MainConditionResponse(
             asOf,
@@ -71,7 +87,23 @@ public class MainConditionService {
             signals.addAll(swing.signals());
             signals.addAll(leaders.signals());
             signals.addAll(themes.signals());
-            return alertsSection(signals, hasStaleSource(shortTerm, swing, leaders, themes));
+            return alertsSection(signals, alertSourceStatus(shortTerm, swing, leaders, themes));
+        }
+
+        if (section == ConditionSection.SHORT_TERM) {
+            Optional<ShortTermRealtimeScanner.ScanSnapshot> snapshot = latestShortTermRealtime();
+            if (snapshot.isPresent()) {
+                return new ConditionSectionResponse(
+                    section.responseKey(),
+                    section.slug(),
+                    section.title(),
+                    section.legacyMode(),
+                    "/api/conditions/" + section.slug(),
+                    snapshot.get().asOf(),
+                    "REALTIME_SCAN",
+                    snapshot.get().signals()
+                );
+            }
         }
 
         AnalysisResponse response = null;
@@ -113,11 +145,7 @@ public class MainConditionService {
         );
     }
 
-    private ConditionSectionResponse alertsSection(List<ConditionSignalDto> candidates) {
-        return alertsSection(candidates, false);
-    }
-
-    private ConditionSectionResponse alertsSection(List<ConditionSignalDto> candidates, boolean stale) {
+    private ConditionSectionResponse alertsSection(List<ConditionSignalDto> candidates, String sourceStatus) {
         String asOf = nowKst();
         Map<String, ConditionSignalDto> unique = new LinkedHashMap<>();
         candidates.stream()
@@ -140,16 +168,29 @@ public class MainConditionService {
             "ALERTS",
             "/api/conditions/alerts",
             alerts.stream().findFirst().map(ConditionSignalDto::capturedAt).orElse(asOf),
-            alerts.isEmpty() ? "READY" : stale ? "STALE_CACHE" : "PRECOMPUTED",
+            alerts.isEmpty() ? "READY" : sourceStatus,
             alerts
         );
     }
 
-    private boolean hasStaleSource(ConditionSectionResponse... sections) {
-        for (ConditionSectionResponse section : sections) {
-            if (section != null && "STALE_CACHE".equals(section.sourceStatus())) return true;
+    private Optional<ShortTermRealtimeScanner.ScanSnapshot> latestShortTermRealtime() {
+        if (shortTermRealtimeScanner == null) return Optional.empty();
+        try {
+            Optional<ShortTermRealtimeScanner.ScanSnapshot> snapshot = shortTermRealtimeScanner.latestFresh();
+            return snapshot == null ? Optional.empty() : snapshot;
+        } catch (Exception ignored) {
+            return Optional.empty();
         }
-        return false;
+    }
+
+    private String alertSourceStatus(ConditionSectionResponse... sections) {
+        boolean stale = false;
+        for (ConditionSectionResponse section : sections) {
+            if (section == null) continue;
+            if ("REALTIME_SCAN".equals(section.sourceStatus())) return "REALTIME_SCAN";
+            if ("STALE_CACHE".equals(section.sourceStatus())) stale = true;
+        }
+        return stale ? "STALE_CACHE" : "PRECOMPUTED";
     }
 
     private ConditionSignalDto toAlertSignal(ConditionSignalDto signal, int rank) {

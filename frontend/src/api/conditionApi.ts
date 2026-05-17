@@ -28,7 +28,7 @@ export interface ConditionSectionResponse {
   mode: string
   endpoint: string
   asOf: string
-  sourceStatus: 'PRECOMPUTED' | 'SERVICE_FALLBACK' | 'READY' | string
+  sourceStatus: 'REALTIME_SCAN' | 'REALTIME_EMPTY' | 'REALTIME_WAITING' | 'PRECOMPUTED' | 'STALE_CACHE' | 'SERVICE_FALLBACK' | 'READY' | string
   signals: ConditionSignal[]
 }
 

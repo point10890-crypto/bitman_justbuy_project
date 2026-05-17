@@ -9,6 +9,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
@@ -17,6 +18,7 @@ import static org.mockito.Mockito.when;
 class MainConditionServiceTest {
 
     @Mock ConditionSearchPipeline conditionSearchPipeline;
+    @Mock ShortTermRealtimeScanner shortTermRealtimeScanner;
 
     @Test
     void mainAlertsAreDerivedFromActualConditionSignals() {
@@ -42,6 +44,45 @@ class MainConditionServiceTest {
             .containsOnly("새 알림");
         assertThat(alerts).extracting(ConditionSignalDto::maxReturnPct)
             .containsOnly("앱");
+    }
+
+    @Test
+    void shortTermSectionUsesFreshRealtimeScanBeforeStoredCache() {
+        ConditionSignalDto liveSignal = new ConditionSignalDto(
+            "shortTerm",
+            "BREAKOUT",
+            1,
+            "로보티즈",
+            "108490",
+            "31,200",
+            "31,200",
+            "+7.50%",
+            "+7.50%",
+            "실시간 포착",
+            94,
+            0,
+            94,
+            "KIS 실시간 랭킹 기반 단타 포착",
+            List.of("KIS 정규장 실시간 스캔"),
+            List.of("단타 변동성 확대"),
+            "거래량 순위 이탈",
+            "2026-05-18T09:10:00+09:00"
+        );
+        when(shortTermRealtimeScanner.latestFresh())
+            .thenReturn(Optional.of(new ShortTermRealtimeScanner.ScanSnapshot(
+                "2026-05-18T09:10:00+09:00",
+                java.time.Instant.parse("2026-05-18T00:10:00Z"),
+                "REALTIME_SCAN",
+                true,
+                List.of(liveSignal)
+            )));
+
+        MainConditionService service = new MainConditionService(conditionSearchPipeline, shortTermRealtimeScanner);
+
+        var section = service.getSection("short-term");
+
+        assertThat(section.sourceStatus()).isEqualTo("REALTIME_SCAN");
+        assertThat(section.signals()).containsExactly(liveSignal);
     }
 
     private static AnalysisResponse response(String mode, StockPick... picks) {

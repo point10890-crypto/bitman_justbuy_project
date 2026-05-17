@@ -53,7 +53,8 @@ export default function AppLayout() {
   const location = useLocation()
   const { user, logout } = useAuth()
   const { data: marketData, refresh: refreshMarketData } = useMarketData()
-  const { data: conditionFeed, refetch: refetchConditions } = useMainConditions()
+  const isAdminPage = location.pathname.startsWith('/admin')
+  const { data: conditionFeed, refetch: refetchConditions } = useMainConditions(isAdminPage ? 0 : 60_000)
   const [menuOpen, setMenuOpen] = useState(false)
   const [seenAlertEventKey, setSeenAlertEventKey] = useState(getStoredAlertEventKey)
   const [notifiedAlertEventKey, setNotifiedAlertEventKey] = useState('')
@@ -61,7 +62,6 @@ export default function AppLayout() {
   const [alertNotice, setAlertNotice] = useState<string | null>(null)
   const [refreshingMenu, setRefreshingMenu] = useState(false)
   const isAdmin = user?.role === 'ADMIN'
-  const isAdminPage = location.pathname.startsWith('/admin')
   const currentSection = location.pathname === '/' ? decodeURIComponent(location.hash.slice(1)) : ''
   const isHomeActive = location.pathname === '/' && !currentSection
   const isSectionActive = (section: string) => currentSection === section
@@ -78,14 +78,6 @@ export default function AppLayout() {
     }, 80)
     return () => window.clearTimeout(timer)
   }, [location.pathname, location.hash])
-
-  useEffect(() => {
-    if (isAdminPage) return
-    const timer = window.setInterval(() => {
-      refetchConditions()
-    }, 60_000)
-    return () => window.clearInterval(timer)
-  }, [isAdminPage, refetchConditions])
 
   useEffect(() => {
     if (isAdminPage) return

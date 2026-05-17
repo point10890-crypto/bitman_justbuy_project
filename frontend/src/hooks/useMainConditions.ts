@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { fetchMainConditions, type MainConditionResponse } from '../api/conditionApi'
 import { getStoredToken } from '../contexts/AuthContext'
 
-export function useMainConditions() {
+export function useMainConditions(pollMs = 0) {
   const [data, setData] = useState<MainConditionResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -23,6 +23,14 @@ export function useMainConditions() {
   useEffect(() => {
     refetch()
   }, [refetch])
+
+  useEffect(() => {
+    if (!pollMs) return
+    const timer = window.setInterval(() => {
+      refetch()
+    }, pollMs)
+    return () => window.clearInterval(timer)
+  }, [pollMs, refetch])
 
   return { data, loading, error, refetch }
 }
