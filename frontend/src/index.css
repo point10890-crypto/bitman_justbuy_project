@@ -6749,9 +6749,20 @@ body,
     padding: max(9px, env(safe-area-inset-top)) 12px 9px;
     align-items: center;
     flex-direction: row;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  .bm-landing-nav .bitman-logo-lockup {
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .bm-landing-nav > div {
+    min-width: 0;
     flex: 0 0 auto;
     gap: 6px;
   }
@@ -6767,6 +6778,10 @@ body,
     min-height: auto;
     padding: 20px 12px 34px;
     gap: 18px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .bm-hero-copy,
@@ -6812,6 +6827,8 @@ body,
 
   .bm-phone-preview {
     width: 100%;
+    max-width: calc(100vw - 24px);
+    min-width: 0;
     border-width: 5px;
     border-radius: 18px;
   }
@@ -6851,6 +6868,10 @@ body,
 
   .bm-section {
     padding: 34px 12px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .bm-section-head {
@@ -7316,12 +7337,25 @@ body,
 }
 
 @media (max-width: 420px) {
+  .bm-landing-nav {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .bm-landing-nav > div button {
+    max-width: 82px;
+    padding: 0 9px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .bitman-logo-copy strong {
-    max-width: 48vw;
+    max-width: 46vw;
   }
 
   .bitman-logo-copy small {
-    max-width: 48vw;
+    max-width: 46vw;
   }
 
   .bm-landing-nav > div button:first-child {
@@ -7335,9 +7369,9 @@ body,
   }
 
   .bm-preview-card p {
-    grid-template-columns: minmax(0, 1fr) minmax(0, .72fr) minmax(0, .72fr) minmax(0, .86fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, .66fr) minmax(0, .66fr) minmax(0, .72fr);
     gap: 4px;
-    font-size: 10px;
+    font-size: 9.5px;
   }
 
   .bm-preview-card p span {

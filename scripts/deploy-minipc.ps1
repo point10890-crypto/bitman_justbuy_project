@@ -93,6 +93,43 @@ Run-Step "Swap JAR and restart MiniPC service" {
 `$backupJar = "`$root\backend\justbuy-api-1.0.0.jar.bak-`$stamp"
 `$upload = '$RemoteUpload'
 `$health = 'http://localhost:8080/api/health'
+function Get-JustBuyProcesses {
+  Get-CimInstance Win32_Process |
+    Where-Object { `$_.CommandLine -like '*justbuy-api-1.0.0.jar*' -or (`$_.Name -eq 'wscript.exe' -and `$_.CommandLine -like '*bitman_justbuy*autostart.vbs*') }
+}
+function Stop-JustBuy {
+  schtasks /End /TN BitMan-JustBuy-Api 2>`$null | Out-Null
+  for (`$i = 0; `$i -lt 10; `$i++) {
+    `$procs = @(Get-JustBuyProcesses)
+    if (`$procs.Count -eq 0) { return }
+    foreach (`$proc in `$procs) {
+      Stop-Process -Id `$proc.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Seconds 2
+  }
+  `$remaining = @(Get-JustBuyProcesses)
+  if (`$remaining.Count -gt 0) {
+    throw "Unable to stop MiniPC JustBuy process before deploy."
+  }
+}
+function Move-WithRetry {
+  param(
+    [string]`$Source,
+    [string]`$Destination
+  )
+  `$lastError = `$null
+  for (`$i = 0; `$i -lt 8; `$i++) {
+    try {
+      Move-Item -LiteralPath `$Source -Destination `$Destination -Force
+      return
+    } catch {
+      `$lastError = `$_
+      Stop-JustBuy
+      Start-Sleep -Seconds 2
+    }
+  }
+  throw `$lastError
+}
 function Start-JustBuy {
   `$taskName = 'BitMan-JustBuy-Api'
   `$taskCommand = 'C:\Windows\System32\cmd.exe /c C:\bitman_justbuy\scripts\start-springboot.bat'
@@ -100,22 +137,16 @@ function Start-JustBuy {
   schtasks /Run /TN `$taskName | Out-Null
 }
 
-schtasks /End /TN BitMan-JustBuy-Api 2>`$null | Out-Null
-`$procs = Get-CimInstance Win32_Process |
-  Where-Object { `$_.CommandLine -like '*justbuy-api-1.0.0.jar*' -or (`$_.Name -eq 'wscript.exe' -and `$_.CommandLine -like '*bitman_justbuy*autostart.vbs*') }
-foreach (`$proc in `$procs) {
-  Stop-Process -Id `$proc.ProcessId -Force
-}
-Start-Sleep -Seconds 3
+Stop-JustBuy
 
 `$db = "`$root\backend\data\justbuy-db.mv.db"
 `$dbBackup = "`$root\backups\predeploy-justbuy-db-`$stamp.mv.db"
 Copy-Item `$db `$dbBackup -Force
 
 if (Test-Path `$jar) {
-  Move-Item `$jar `$backupJar -Force
+  Move-WithRetry `$jar `$backupJar
 }
-Move-Item `$upload `$jar -Force
+Move-WithRetry `$upload `$jar
 
 Start-JustBuy
 
@@ -129,10 +160,11 @@ for (`$i = 0; `$i -lt 24; `$i++) {
 }
 
 if (-not `$ok) {
+  Stop-JustBuy
   `$failedJar = "`$root\backend\justbuy-api-1.0.0.jar.failed-`$stamp"
-  if (Test-Path `$jar) { Move-Item `$jar `$failedJar -Force }
+  if (Test-Path `$jar) { Move-WithRetry `$jar `$failedJar }
   if (Test-Path `$backupJar) {
-    Move-Item `$backupJar `$jar -Force
+    Move-WithRetry `$backupJar `$jar
     Start-JustBuy
   }
   throw "MiniPC deployment failed health check. Previous JAR restored."
