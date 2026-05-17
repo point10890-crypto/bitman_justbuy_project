@@ -125,6 +125,19 @@ public class AnalysisService {
         }
     }
 
+    public AnalysisResponse getStoredPrecomputed(String mode) {
+        Path file = dataDir.resolve(mode + ".json");
+        if (!Files.exists(file)) return null;
+
+        try {
+            String json = Files.readString(file);
+            return mapper.readValue(json, AnalysisResponse.class);
+        } catch (IOException e) {
+            log.error("Failed to load stored precomputed result for {}: {}", mode, e.getMessage());
+            return null;
+        }
+    }
+
     /** 캐시된 라이브 분석 결과 조회 (컨트롤러에서 호출) */
     public AnalysisResponse getCachedLive(String query, String mode) {
         String key = mode + ":" + query;

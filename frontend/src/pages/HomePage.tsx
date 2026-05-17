@@ -155,6 +155,7 @@ function rowsFromEndpointResult(section: Section, result: AnalysisResult): Secti
 function sectionSourceStatus(section: ConditionSectionResponse | undefined) {
   if (!section) return '기본 표시'
   if (section.sourceStatus === 'PRECOMPUTED') return '실시간 캐시'
+  if (section.sourceStatus === 'STALE_CACHE') return '최근 저장 결과'
   if (section.sourceStatus === 'READY') return '알림 대기'
   if (section.sourceStatus === 'DATA_UNAVAILABLE') return '데이터 준비 중'
   return '조건검색 준비'

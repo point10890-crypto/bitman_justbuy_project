@@ -13,8 +13,11 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 @Service
 public class MainConditionService {
@@ -37,13 +40,13 @@ public class MainConditionService {
         ConditionSectionResponse swing = getSection(ConditionSection.SWING);
         ConditionSectionResponse leaders = getSection(ConditionSection.LEADERS);
         ConditionSectionResponse themes = getSection(ConditionSection.THEMES);
-        ConditionSectionResponse alerts = getSection(ConditionSection.ALERTS);
 
         List<ConditionSignalDto> allSignals = new ArrayList<>();
         allSignals.addAll(shortTerm.signals());
         allSignals.addAll(swing.signals());
         allSignals.addAll(leaders.signals());
         allSignals.addAll(themes.signals());
+        ConditionSectionResponse alerts = alertsSection(allSignals, hasStaleSource(shortTerm, swing, leaders, themes));
 
         return new MainConditionResponse(
             asOf,
@@ -59,14 +62,34 @@ public class MainConditionService {
 
     public ConditionSectionResponse getSection(ConditionSection section) {
         if (!section.hasAnalysisMode()) {
-            return alertsSection();
+            ConditionSectionResponse shortTerm = getSection(ConditionSection.SHORT_TERM);
+            ConditionSectionResponse swing = getSection(ConditionSection.SWING);
+            ConditionSectionResponse leaders = getSection(ConditionSection.LEADERS);
+            ConditionSectionResponse themes = getSection(ConditionSection.THEMES);
+            List<ConditionSignalDto> signals = new ArrayList<>();
+            signals.addAll(shortTerm.signals());
+            signals.addAll(swing.signals());
+            signals.addAll(leaders.signals());
+            signals.addAll(themes.signals());
+            return alertsSection(signals, hasStaleSource(shortTerm, swing, leaders, themes));
         }
 
         AnalysisResponse response = null;
+        boolean stale = false;
         try {
             response = conditionSearchPipeline.getPrecomputed(section.legacyMode());
         } catch (Exception ignored) {
             response = null;
+        }
+
+        if (response == null) {
+            try {
+                response = conditionSearchPipeline.getStoredPrecomputed(section.legacyMode());
+                stale = response != null;
+            } catch (Exception ignored) {
+                response = null;
+                stale = false;
+            }
         }
 
         boolean hasPicks = response != null
@@ -75,7 +98,7 @@ public class MainConditionService {
         List<ConditionSignalDto> signals = toSignals(section, response);
         String asOf = response != null && response.updatedAt() != null ? response.updatedAt() : nowKst();
         String sourceStatus = hasPicks
-            ? "PRECOMPUTED"
+            ? stale ? "STALE_CACHE" : "PRECOMPUTED"
             : "DATA_UNAVAILABLE";
 
         return new ConditionSectionResponse(
@@ -90,30 +113,25 @@ public class MainConditionService {
         );
     }
 
-    private ConditionSectionResponse alertsSection() {
+    private ConditionSectionResponse alertsSection(List<ConditionSignalDto> candidates) {
+        return alertsSection(candidates, false);
+    }
+
+    private ConditionSectionResponse alertsSection(List<ConditionSignalDto> candidates, boolean stale) {
         String asOf = nowKst();
-        List<ConditionSignalDto> alerts = List.of(
-            new ConditionSignalDto(
-                ConditionSection.ALERTS.responseKey(),
-                "ALERTS",
-                1,
-                "관심종목",
-                "",
-                "-",
-                "-",
-                "-",
-                "-",
-                "대기",
-                0,
-                0,
-                0,
-                "관심 종목이 단타, 스윙, 주도주, 테마주 조건에 진입하면 알림 후보로 표시됩니다.",
-                List.of("조건검색 섹션 진입", "목표 조건 도달", "공시 발생 감지"),
-                List.of("알림은 투자 지시가 아닌 조건 충족 안내입니다."),
-                "사용자가 알림 조건을 해제하면 중단",
-                asOf
-            )
-        );
+        Map<String, ConditionSignalDto> unique = new LinkedHashMap<>();
+        candidates.stream()
+            .filter(signal -> signal.stockName() != null && !signal.stockName().isBlank())
+            .filter(signal -> !"관심종목".equals(signal.stockName()))
+            .sorted(Comparator.comparingInt(ConditionSignalDto::finalScore).reversed())
+            .forEach(signal -> unique.putIfAbsent(alertKey(signal), signal));
+
+        List<ConditionSignalDto> alerts = new ArrayList<>();
+        int rank = 1;
+        for (ConditionSignalDto signal : unique.values()) {
+            if (alerts.size() >= 3) break;
+            alerts.add(toAlertSignal(signal, rank++));
+        }
 
         return new ConditionSectionResponse(
             ConditionSection.ALERTS.responseKey(),
@@ -121,10 +139,73 @@ public class MainConditionService {
             ConditionSection.ALERTS.title(),
             "ALERTS",
             "/api/conditions/alerts",
-            asOf,
-            "READY",
+            alerts.stream().findFirst().map(ConditionSignalDto::capturedAt).orElse(asOf),
+            alerts.isEmpty() ? "READY" : stale ? "STALE_CACHE" : "PRECOMPUTED",
             alerts
         );
+    }
+
+    private boolean hasStaleSource(ConditionSectionResponse... sections) {
+        for (ConditionSectionResponse section : sections) {
+            if (section != null && "STALE_CACHE".equals(section.sourceStatus())) return true;
+        }
+        return false;
+    }
+
+    private ConditionSignalDto toAlertSignal(ConditionSignalDto signal, int rank) {
+        String condition = alertConditionLabel(signal);
+        String summary = condition + " - " + signal.stockName();
+        if (signal.currentPrice() != null && !signal.currentPrice().isBlank() && !"-".equals(signal.currentPrice())) {
+            summary += " 현재가 " + signal.currentPrice();
+        }
+        if (signal.maxReturnPct() != null && !signal.maxReturnPct().isBlank() && !"-".equals(signal.maxReturnPct())) {
+            summary += ", 기대/포착 수익률 " + signal.maxReturnPct();
+        }
+        if (signal.summary() != null && !signal.summary().isBlank()) {
+            summary += ". " + signal.summary();
+        }
+
+        List<String> evidence = new ArrayList<>();
+        evidence.add(condition);
+        evidence.add("조건검색 TOP3 진입");
+        if (signal.evidence() != null) evidence.addAll(signal.evidence());
+
+        return new ConditionSignalDto(
+            ConditionSection.ALERTS.responseKey(),
+            "ALERTS",
+            rank,
+            signal.stockName(),
+            signal.stockCode(),
+            condition,
+            normalizeDisplay(signal.currentPrice(), "-"),
+            "새 알림",
+            "앱",
+            "새 알림",
+            signal.ruleScore(),
+            signal.aiScore(),
+            signal.finalScore(),
+            summary,
+            evidence,
+            List.of("알림은 투자 지시가 아닌 조건 충족 안내입니다.", "포착 이후 가격 변동성이 커질 수 있습니다."),
+            normalizeDisplay(signal.invalidation(), "사용자 알림 조건 해제"),
+            normalizeDisplay(signal.capturedAt(), nowKst())
+        );
+    }
+
+    private String alertConditionLabel(ConditionSignalDto signal) {
+        String mode = signal.mode() == null ? "" : signal.mode();
+        return switch (mode) {
+            case "BREAKOUT" -> "단타 포착";
+            case "REVERSAL_EDGE" -> "스윙 포착";
+            case "FLOW_LEADER" -> "주도주 포착";
+            case "CATALYST_BURST" -> "테마주 포착";
+            default -> "조건 포착";
+        };
+    }
+
+    private String alertKey(ConditionSignalDto signal) {
+        if (signal.stockCode() != null && !signal.stockCode().isBlank()) return signal.stockCode();
+        return signal.stockName();
     }
 
     private List<ConditionSignalDto> toSignals(ConditionSection section, AnalysisResponse response) {

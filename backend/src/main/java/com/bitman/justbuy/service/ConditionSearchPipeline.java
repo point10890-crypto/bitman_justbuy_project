@@ -33,6 +33,10 @@ public class ConditionSearchPipeline {
         return analysisService.getPrecomputed(mode);
     }
 
+    public AnalysisResponse getStoredPrecomputed(String mode) {
+        return analysisService.getStoredPrecomputed(mode);
+    }
+
     public AnalysisResponse getCachedLive(String query, String mode) {
         return analysisService.getCachedLive(query, mode);
     }
