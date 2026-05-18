@@ -123,7 +123,11 @@ function getStoredUser(): User | null {
     return {
       ...user,
       subscription: user.role === 'ADMIN' ? 'pro' : expired ? 'free' : user.subscription,
-      subscriptionExpired: expired || !!user.subscriptionExpired,
+      subscriptionExpired: expired,
+      subscriptionRenewalPending:
+        user.subscriptionRenewalPending &&
+        !!user.subscriptionEndDate &&
+        !isSubscriptionExpired(user.subscriptionEndDate),
     }
   } catch {
     return null
@@ -194,8 +198,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(REMEMBER_KEY, rememberMe ? '1' : '0')
     setToken(res.token)
     setUserData(JSON.stringify(u))
-    sessionStorage.removeItem(TOKEN_KEY)
-    sessionStorage.removeItem(USER_KEY)
     setUser(u)
     return u
   }
