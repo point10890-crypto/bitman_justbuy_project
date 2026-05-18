@@ -240,6 +240,14 @@ export default function AdminPage() {
   }
 
   const runAction = async (user: UserDto, action: 'approve' | 'reject' | 'revoke') => {
+    if (action === 'reject' || action === 'revoke') {
+      const actionLabel = action === 'reject' ? '구독 신청을 반려' : 'PRO 구독을 해제'
+      const ok = window.confirm(
+        `${user.name} 회원의 ${actionLabel}할까요?\n\n회원의 앱 접근 권한이 바뀔 수 있습니다.`
+      )
+      if (!ok) return
+    }
+
     const token = getStoredToken()
     if (!token) return
     setActionId(user.id)
@@ -313,6 +321,15 @@ export default function AdminPage() {
       setMessage('관리자 계정은 항상 PRO 상태로 보호됩니다.')
       return
     }
+    const actionLabel =
+      subscription === 'PRO' ? 'PRO 승인' :
+      subscription === 'PENDING' ? '승인 대기 상태로 변경' :
+      'PRO 구독 해제'
+    const ok = window.confirm(
+      `${user.name} 회원을 ${actionLabel}할까요?\n\n회원의 앱 접근 권한이 즉시 반영됩니다.`
+    )
+    if (!ok) return
+
     setActionId(user.id)
     setMessage('')
     try {
@@ -342,6 +359,11 @@ export default function AdminPage() {
   }
 
   const runExpiryNow = async () => {
+    const ok = window.confirm(
+      '만료일이 지난 PRO 구독을 즉시 FREE로 전환할까요?\n\n운영 회원 권한이 변경되는 작업입니다.'
+    )
+    if (!ok) return
+
     const token = getStoredToken()
     if (!token) return
     setActionId('expire-now')
