@@ -8,10 +8,13 @@ interface BeforeInstallPromptEvent extends Event {
 
 // 전역 캡처 — React 마운트 전에 이벤트가 발생해도 놓치지 않음
 let _deferredPrompt: BeforeInstallPromptEvent | null = null
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault()
-  _deferredPrompt = e as BeforeInstallPromptEvent
-})
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault()
+    _deferredPrompt = e as BeforeInstallPromptEvent
+    window.dispatchEvent(new Event('pwa:installprompt-ready'))
+  })
+}
 
 function isIOS() {
   return /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
@@ -27,6 +30,7 @@ export function usePWAInstall() {
   const [dismissed, setDismissed] = useState(false)
   const [showIOSGuide, setShowIOSGuide] = useState(false)
   const [showDesktopGuide, setShowDesktopGuide] = useState(false)
+  const [nativePromptReady, setNativePromptReady] = useState(() => !!_deferredPrompt)
 
   const isiOS = isIOS()
 
@@ -47,9 +51,16 @@ export function usePWAInstall() {
     const onInstalled = () => {
       setIsInstalled(true)
       _deferredPrompt = null
+      setNativePromptReady(false)
+      localStorage.removeItem('pwa_dismissed')
     }
+    const onPromptReady = () => setNativePromptReady(!!_deferredPrompt)
+    window.addEventListener('pwa:installprompt-ready', onPromptReady)
     window.addEventListener('appinstalled', onInstalled)
-    return () => window.removeEventListener('appinstalled', onInstalled)
+    return () => {
+      window.removeEventListener('pwa:installprompt-ready', onPromptReady)
+      window.removeEventListener('appinstalled', onInstalled)
+    }
   }, [])
 
   // "설치" 배너 클릭 → 무조건 가이드 모달 표시
@@ -75,6 +86,7 @@ export function usePWAInstall() {
         // prompt already used
       }
       _deferredPrompt = null
+      setNativePromptReady(false)
     }
   }, [])
 
@@ -94,7 +106,7 @@ export function usePWAInstall() {
   }, [])
 
   const canInstall = !isInstalled && !dismissed
-  const hasNativePrompt = !!_deferredPrompt
+  const hasNativePrompt = nativePromptReady
 
   return { canInstall, isInstalled, install, dismiss, isiOS, showIOSGuide, closeIOSGuide, showDesktopGuide, closeDesktopGuide, triggerNativeInstall, hasNativePrompt }
 }

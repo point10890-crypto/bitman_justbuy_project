@@ -1,4 +1,5 @@
 import { Navigate, useNavigate } from 'react-router-dom'
+import { PWAInstallPrompt } from '../components/app/PWAInstallPrompt'
 import { useAuth } from '../contexts/AuthContext'
 
 const previewRows = [
@@ -46,6 +47,12 @@ export default function LandingPage() {
         </button>
         <div>
           <button type="button" onClick={() => navigate('/login')}>로그인</button>
+          <PWAInstallPrompt
+            variant="nav-button"
+            className="bm-install-button"
+            showWhenDismissed
+            label="앱 설치"
+          />
           <button type="button" onClick={() => navigate('/register')}>시작하기</button>
         </div>
       </nav>
@@ -82,6 +89,12 @@ export default function LandingPage() {
           </p>
           <div className="bm-hero-actions">
             <button type="button" onClick={() => navigate('/register')}>무료 가입 후 구독 시작</button>
+            <PWAInstallPrompt
+              variant="hero-button"
+              className="bm-install-button"
+              showWhenDismissed
+              label="앱 설치하기"
+            />
             <button type="button" onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}>기능 보기</button>
           </div>
           <div className="bm-proof-row">

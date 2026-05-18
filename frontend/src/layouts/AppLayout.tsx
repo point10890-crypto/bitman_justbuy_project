@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import type { MainConditionResponse } from '../api/conditionApi'
+import { PWAInstallPrompt } from '../components/app/PWAInstallPrompt'
 import { useMarketData } from '../hooks/useMarketData'
 import { useMainConditions } from '../hooks/useMainConditions'
 
@@ -257,6 +258,13 @@ export default function AppLayout() {
                         <strong>종목분석</strong>
                         <span>AI 종목 분석 엔드포인트</span>
                       </button>
+                      <PWAInstallPrompt
+                        variant="menu-item"
+                        role="menuitem"
+                        showWhenDismissed
+                        label="앱 설치"
+                        description="휴대폰 홈 화면에서 바로 실행"
+                      />
 
                       <span className="header-menu-label header-menu-label-account">계정</span>
                       {isAdmin && (
@@ -315,6 +323,14 @@ export default function AppLayout() {
           </div>
           <button type="button" onClick={goAlerts}>보기</button>
         </div>
+      )}
+
+      {!isAdminPage && (
+        <PWAInstallPrompt
+          variant="banner"
+          label="BitMan 앱 설치"
+          description="홈 화면에 추가해서 빠르게 확인"
+        />
       )}
 
       {!isAdminPage && (

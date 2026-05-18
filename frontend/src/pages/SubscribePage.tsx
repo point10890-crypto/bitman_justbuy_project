@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { PWAInstallPrompt } from '../components/app/PWAInstallPrompt'
 import { useAuth } from '../contexts/AuthContext'
 
 const BANK_ACCOUNT = '2259-02-04-057670'
@@ -19,6 +20,7 @@ function PlanFeature({ children }: { children: React.ReactNode }) {
 function SubscriptionActions({ onManage, onLogout }: { onManage: () => void; onLogout: () => void }) {
   return (
     <div className="subscription-secondary-actions">
+      <PWAInstallPrompt variant="compact" showWhenDismissed label="앱 설치" />
       <button type="button" onClick={onManage}>내 계정 관리</button>
       <button type="button" onClick={onLogout}>로그아웃</button>
     </div>

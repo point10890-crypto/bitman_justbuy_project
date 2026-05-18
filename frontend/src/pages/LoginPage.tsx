@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { PWAInstallPrompt } from '../components/app/PWAInstallPrompt'
 import { isSubscriptionExpired, useAuth } from '../contexts/AuthContext'
 
 export default function LoginPage() {
@@ -124,6 +125,9 @@ export default function LoginPage() {
         <p className="auth-link-row">
           계정이 없나요? <Link to="/register">회원가입</Link>
         </p>
+        <div className="auth-install-row">
+          <PWAInstallPrompt variant="compact" showWhenDismissed label="앱 설치하기" />
+        </div>
       </section>
     </main>
   )
