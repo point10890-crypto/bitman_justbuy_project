@@ -86,6 +86,7 @@ public class PrecomputeScheduler {
             try {
                 var cached = analysisService.getPrecomputed(mode);
                 if (cached != null) {
+                    if (cached.updatedAt() != null) lastRunTimes.put(mode, cached.updatedAt());
                     log.info("[Scheduler] ✅ {} — 캐시 유효, 건너뜀", mode);
                     success++;
                     // ★ v2.8.7 (2026-04-29): 캐시된 결과도 dedup + name disambiguation 적용

@@ -630,20 +630,15 @@ public class KisApiService {
 
         try {
             String today = LocalDate.now(KST).format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-            String url = KIS_BASE + "/uapi/domestic-stock/v1/quotations/inquire-investor-daily-by-stock"
-                + "?FID_COND_MRKT_DIV_CODE=J"
-                + "&FID_COND_SCR_DIV_CODE=16551"
-                + "&FID_INPUT_ISCD=0000"   // 전종목
-                + "&FID_DIV_CLS_CODE=1"     // 외국인
-                + "&FID_INPUT_DATE_1=" + today
-                + "&FID_INPUT_DATE_2=" + today
-                + "&FID_TRGT_CLS_CODE=111111111"
-                + "&FID_TRGT_EXLS_CLS_CODE=000000000"
-                + "&FID_INPUT_PRICE_1=0"
-                + "&FID_INPUT_PRICE_2=0"
-                + "&FID_VOL_CNT=0";
+            String url = KIS_BASE + "/uapi/domestic-stock/v1/quotations/foreign-institution-total"
+                + "?FID_COND_MRKT_DIV_CODE=V"
+                + "&FID_COND_SCR_DIV_CODE=16449"
+                + "&FID_INPUT_ISCD=0000"
+                + "&FID_DIV_CLS_CODE=0"
+                + "&FID_RANK_SORT_CLS_CODE=0"
+                + "&FID_ETC_CLS_CODE=0";
 
-            HttpHeaders headers = buildHeaders("FHKST01010800");
+            HttpHeaders headers = buildHeaders("FHPTJ04400000");
             ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
             if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return "";
 
@@ -695,21 +690,15 @@ public class KisApiService {
         }
 
         try {
-            String today = LocalDate.now(KST).format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-            String url = KIS_BASE + "/uapi/domestic-stock/v1/quotations/inquire-investor-daily-by-stock"
-                + "?FID_COND_MRKT_DIV_CODE=J"
-                + "&FID_COND_SCR_DIV_CODE=16551"
+            String url = KIS_BASE + "/uapi/domestic-stock/v1/quotations/foreign-institution-total"
+                + "?FID_COND_MRKT_DIV_CODE=V"
+                + "&FID_COND_SCR_DIV_CODE=16449"
                 + "&FID_INPUT_ISCD=0000"
-                + "&FID_DIV_CLS_CODE=1"
-                + "&FID_INPUT_DATE_1=" + today
-                + "&FID_INPUT_DATE_2=" + today
-                + "&FID_TRGT_CLS_CODE=111111111"
-                + "&FID_TRGT_EXLS_CLS_CODE=000000000"
-                + "&FID_INPUT_PRICE_1=0"
-                + "&FID_INPUT_PRICE_2=0"
-                + "&FID_VOL_CNT=0";
+                + "&FID_DIV_CLS_CODE=0"
+                + "&FID_RANK_SORT_CLS_CODE=0"
+                + "&FID_ETC_CLS_CODE=0";
 
-            HttpHeaders headers = buildHeaders("FHKST01010800");
+            HttpHeaders headers = buildHeaders("FHPTJ04400000");
             ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
             if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return List.of();
 
@@ -921,8 +910,9 @@ public class KisApiService {
         }
 
         try {
+            String domesticMarketDiv = "0".equals(marketDiv) ? "J" : marketDiv;
             String url = KIS_BASE + path
-                + "?FID_COND_MRKT_DIV_CODE=" + marketDiv
+                + "?FID_COND_MRKT_DIV_CODE=" + domesticMarketDiv
                 + "&FID_COND_SCR_DIV_CODE=20171"
                 + "&FID_INPUT_ISCD=0000"
                 + "&FID_DIV_CLS_CODE=0"
@@ -979,8 +969,9 @@ public class KisApiService {
         if (cached != null && cached.isValid()) return cached.data();
 
         try {
+            String domesticMarketDiv = "0".equals(marketDiv) ? "J" : marketDiv;
             String url = KIS_BASE + path
-                + "?FID_COND_MRKT_DIV_CODE=" + marketDiv
+                + "?FID_COND_MRKT_DIV_CODE=" + domesticMarketDiv
                 + "&FID_COND_SCR_DIV_CODE=20171"
                 + "&FID_INPUT_ISCD=0000"
                 + "&FID_DIV_CLS_CODE=0"

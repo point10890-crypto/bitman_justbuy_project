@@ -105,4 +105,23 @@ class KisApiRetryTest {
             .exchange(contains("FID_COND_MRKT_DIV_CODE=J"),
                 eq(HttpMethod.GET), any(), eq(String.class));
     }
+
+    @Test
+    void fetchForeignNetBuyRankingStocks_usesForeignInstitutionTotalEndpoint() {
+        String rankingBody =
+            "{\"output\":[{\"hts_kor_isnm\":\"삼성전자\",\"mksc_shrn_iscd\":\"005930\","
+            + "\"stck_prpr\":\"70000\",\"prdy_ctrt\":\"1.23\",\"acml_vol\":\"1000000\","
+            + "\"frgn_ntby_qty\":\"12345\",\"orgn_ntby_qty\":\"6789\"}]}";
+        when(restTemplate.exchange(contains("/uapi/domestic-stock/v1/quotations/foreign-institution-total"),
+                eq(HttpMethod.GET), any(), eq(String.class)))
+            .thenReturn(ResponseEntity.ok(rankingBody));
+
+        var result = service.fetchForeignNetBuyRankingStocks(10);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).foreignNetBuy()).isEqualTo(12345L);
+        verify(restTemplate, times(1))
+            .exchange(contains("FID_COND_SCR_DIV_CODE=16449"),
+                eq(HttpMethod.GET), any(), eq(String.class));
+    }
 }
