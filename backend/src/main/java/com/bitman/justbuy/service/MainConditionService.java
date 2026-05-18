@@ -7,6 +7,7 @@ import com.bitman.justbuy.dto.condition.ConditionSectionResponse;
 import com.bitman.justbuy.dto.condition.ConditionSignalDto;
 import com.bitman.justbuy.dto.condition.MainConditionResponse;
 import com.bitman.justbuy.dto.condition.TrackRecordSummary;
+import com.bitman.justbuy.util.StockUniverseFilters;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -256,9 +257,15 @@ public class MainConditionService {
 
         if (picks.isEmpty()) return List.of();
 
+        List<StockPick> eligiblePicks = picks.stream()
+            .filter(pick -> section != ConditionSection.SHORT_TERM
+                || StockUniverseFilters.isKoreanSpotEquity(pick.name(), pick.code()))
+            .limit(3)
+            .toList();
+
         List<ConditionSignalDto> signals = new ArrayList<>();
-        for (int i = 0; i < Math.min(3, picks.size()); i++) {
-            StockPick pick = picks.get(i);
+        for (int i = 0; i < eligiblePicks.size(); i++) {
+            StockPick pick = eligiblePicks.get(i);
             String currentPrice = normalizeDisplay(pick.currentPrice(), "-");
             String targetPrice = normalizeDisplay(pick.targetPrice(), currentPrice);
             String maxReturnPct = calculateReturn(currentPrice, targetPrice);

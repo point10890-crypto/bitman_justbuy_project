@@ -3,6 +3,7 @@ package com.bitman.justbuy.service;
 import com.bitman.justbuy.dto.condition.ConditionSection;
 import com.bitman.justbuy.dto.condition.ConditionSignalDto;
 import com.bitman.justbuy.util.KoreanMarketCalendar;
+import com.bitman.justbuy.util.StockUniverseFilters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -36,6 +37,7 @@ public class ShortTermRealtimeScanner {
     private static final LocalTime SESSION_START = LocalTime.of(9, 0);
     private static final LocalTime SESSION_END = LocalTime.of(15, 20);
     private static final Duration FRESH_TTL = Duration.ofSeconds(95);
+    private static final int RAW_SCAN_LIMIT = 80;
 
     private final KisApiService kisApiService;
     private final Map<String, String> firstSeenByCode = new ConcurrentHashMap<>();
@@ -81,8 +83,8 @@ public class ShortTermRealtimeScanner {
             return latest;
         }
 
-        List<KisApiService.RankedStock> volume = kisApiService.fetchRealtimeVolumeRankingStocks(30);
-        List<KisApiService.RankedStock> gainers = kisApiService.fetchRealtimeGainersRankingStocks(30);
+        List<KisApiService.RankedStock> volume = kisApiService.fetchRealtimeVolumeRankingStocks(RAW_SCAN_LIMIT);
+        List<KisApiService.RankedStock> gainers = kisApiService.fetchRealtimeGainersRankingStocks(RAW_SCAN_LIMIT);
         List<ConditionSignalDto> signals = buildSignals(volume, gainers, now);
         latest = new ScanSnapshot(
             nowKst(now),
@@ -128,6 +130,7 @@ public class ShortTermRealtimeScanner {
 
         List<Candidate> sorted = candidates.values().stream()
             .filter(Candidate::hasUsableCode)
+            .filter(candidate -> StockUniverseFilters.isKoreanSpotEquity(candidate.name, candidate.code))
             .filter(candidate -> candidate.changeRate > 0)
             .peek(Candidate::calculateScore)
             .filter(candidate -> candidate.score >= 58)

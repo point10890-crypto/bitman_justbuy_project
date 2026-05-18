@@ -85,6 +85,26 @@ class MainConditionServiceTest {
         assertThat(section.signals()).containsExactly(liveSignal);
     }
 
+    @Test
+    void shortTermPrecomputedSectionExcludesEtfLikeProducts() {
+        when(conditionSearchPipeline.getPrecomputed("BREAKOUT"))
+            .thenReturn(response("BREAKOUT",
+                stock("KODEX 200선물인버스2X", "252670", "120", "125", "주목"),
+                stock("KODEX 인버스", "114800", "1,146", "1,160", "주목"),
+                stock("TIGER 200선물인버스2X", "252710", "127", "130", "주목"),
+                stock("로보티즈", "108490", "31,200", "34,350", "주목"),
+                stock("디아이", "003160", "7,120", "7,510", "주목"),
+                stock("한미반도체", "042700", "139,000", "145,300", "주목")
+            ));
+
+        MainConditionService service = new MainConditionService(conditionSearchPipeline);
+
+        var section = service.getSection("short-term");
+
+        assertThat(section.signals()).extracting(ConditionSignalDto::stockName)
+            .containsExactly("로보티즈", "디아이", "한미반도체");
+    }
+
     private static AnalysisResponse response(String mode, StockPick... picks) {
         return new AnalysisResponse(
             mode,
