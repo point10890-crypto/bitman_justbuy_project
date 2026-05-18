@@ -31,7 +31,7 @@ bitman:
   # prod CORS: Cloudflare Pages + Tunnel 도메인만 허용 (기본값).
   # 추가 도메인 필요 시 CORS_ORIGINS env 로 override.
   cors:
-    allowed-origins: ${CORS_ORIGINS:https://bitman-justbuy.pages.dev,https://api.bit-man.net}
+    allowed-origins: ${CORS_ORIGINS:https://bitman-justbuy.pages.dev,https://production.bitman-justbuy.pages.dev,https://api.bit-man.net}
   storage:
     # systemd 호환 절대경로 (/var/lib/justbuy 는 justbuy 유저 소유).
     data-dir: ${STORAGE_DIR:/var/lib/justbuy/data}

@@ -53,7 +53,7 @@ bitman:
     app-key: ${BITMAN_KIS_APP_KEY:}
     app-secret: ${BITMAN_KIS_APP_SECRET:}
   cors:
-    allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://localhost:5173,https://bitman-justbuy.pages.dev,https://api.bit-man.net}
+    allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://localhost:5173,https://bitman-justbuy.pages.dev,https://production.bitman-justbuy.pages.dev,https://api.bit-man.net}
   storage:
     data-dir: ${STORAGE_DIR:./data}
   scheduler:
