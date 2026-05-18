@@ -105,6 +105,55 @@ class MainConditionServiceTest {
             .containsExactly("로보티즈", "디아이", "한미반도체");
     }
 
+    @Test
+    void swingLeaderAndThemeSectionsExcludeExchangeTradedProducts() {
+        when(conditionSearchPipeline.getPrecomputed("REVERSAL_EDGE"))
+            .thenReturn(response("REVERSAL_EDGE",
+                stock("KODEX 200선물인버스2X", "252670", "120", "125", "주목"),
+                stock("삼성전자", "005930", "78,100", "82,000", "주목")
+            ));
+        when(conditionSearchPipeline.getPrecomputed("FLOW_LEADER"))
+            .thenReturn(response("FLOW_LEADER",
+                stock("신한 레버리지 WTI원유 선물 ETN", "500019", "1,200", "1,260", "주목"),
+                stock("로보티즈", "108490", "31,200", "34,350", "주목")
+            ));
+        when(conditionSearchPipeline.getPrecomputed("CATALYST_BURST"))
+            .thenReturn(response("CATALYST_BURST",
+                stock("삼성스팩9호", "468510", "2,100", "2,300", "주목"),
+                stock("한미반도체", "042700", "139,000", "145,300", "주목")
+            ));
+
+        MainConditionService service = new MainConditionService(conditionSearchPipeline);
+
+        assertThat(service.getSection("swing").signals()).extracting(ConditionSignalDto::stockName)
+            .containsExactly("삼성전자");
+        assertThat(service.getSection("leaders").signals()).extracting(ConditionSignalDto::stockName)
+            .containsExactly("로보티즈");
+        assertThat(service.getSection("themes").signals()).extracting(ConditionSignalDto::stockName)
+            .containsExactly("한미반도체");
+    }
+
+    @Test
+    void alertsDoNotIncludeExchangeTradedProductsFromAnySection() {
+        when(conditionSearchPipeline.getPrecomputed("BREAKOUT"))
+            .thenReturn(response("BREAKOUT"));
+        when(conditionSearchPipeline.getPrecomputed("REVERSAL_EDGE"))
+            .thenReturn(response("REVERSAL_EDGE",
+                stock("KODEX 200선물인버스2X", "252670", "120", "125", "주목"),
+                stock("삼성전자", "005930", "78,100", "82,000", "주목")
+            ));
+        when(conditionSearchPipeline.getPrecomputed("FLOW_LEADER"))
+            .thenReturn(response("FLOW_LEADER"));
+        when(conditionSearchPipeline.getPrecomputed("CATALYST_BURST"))
+            .thenReturn(response("CATALYST_BURST"));
+
+        MainConditionService service = new MainConditionService(conditionSearchPipeline);
+
+        assertThat(service.getMain().sections().alerts().signals())
+            .extracting(ConditionSignalDto::stockName)
+            .containsExactly("삼성전자");
+    }
+
     private static AnalysisResponse response(String mode, StockPick... picks) {
         return new AnalysisResponse(
             mode,

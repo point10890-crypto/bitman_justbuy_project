@@ -22,13 +22,6 @@ public interface TrackRecordRepository extends JpaRepository<AnalysisTrackRecord
         String stockCode
     );
 
-    boolean existsByModeAndAnalysisDateAndStockCodeAndPriceAtAnalysis(
-        String mode,
-        LocalDate analysisDate,
-        String stockCode,
-        Long priceAtAnalysis
-    );
-
     List<AnalysisTrackRecord> findByModeAndAnalysisDateBetweenOrderByAnalysisDateDescCreatedAtDesc(
         String mode,
         LocalDate from,

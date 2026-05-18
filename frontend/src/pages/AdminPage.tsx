@@ -12,6 +12,7 @@ import {
   refreshAllAnalysis,
   rejectSubscription,
   revokeSubscription,
+  type SystemStatusResponse,
   type UserDto,
 } from '../api/authApi'
 
@@ -128,7 +129,7 @@ export default function AdminPage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [users, setUsers] = useState<UserDto[]>([])
   const [pendingUsers, setPendingUsers] = useState<UserDto[]>([])
-  const [systemStatus, setSystemStatus] = useState<any>(null)
+  const [systemStatus, setSystemStatus] = useState<SystemStatusResponse | null>(null)
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [actionId, setActionId] = useState<string | null>(null)
@@ -412,6 +413,40 @@ export default function AdminPage() {
     { label: '만료일 관리', value: expiringCount, desc: '만료/연장 대상 점검', view: 'subscriptions' as AdminView, focus: 'expiring' as AdminFocus },
   ]
 
+  const onlineAgents = systemStatus?.engines?.filter(engine => engine.online).length ?? 0
+  const totalAgents = systemStatus?.engines?.length ?? systemStatus?.totalAgents ?? 0
+  const cacheList = systemStatus?.cache ?? []
+  const staleCacheCount = cacheList.filter(item => item.status !== 'valid').length
+  const cacheSummary = cacheList.length
+    ? `${cacheList.length - staleCacheCount}/${cacheList.length} valid`
+    : 'cache pending'
+  const systemCards = [
+    {
+      name: 'KIS 조건검색',
+      value: systemStatus?.kisAvailable ? 'ONLINE' : 'CHECK',
+      desc: systemStatus?.kisAvailable ? '실시간/랭킹 API 사용 가능' : 'KIS 키 또는 호출 상태 확인 필요',
+      tone: systemStatus?.kisAvailable ? 'ok' : 'warn',
+    },
+    {
+      name: 'AI 엔진',
+      value: `${onlineAgents}/${totalAgents || '-'}`,
+      desc: systemStatus?.engines?.map(engine => `${engine.name}:${engine.online ? 'on' : 'off'}`).join(' · ') || '엔진 상태 대기',
+      tone: onlineAgents > 0 ? 'ok' : 'warn',
+    },
+    {
+      name: '조건검색 캐시',
+      value: cacheSummary,
+      desc: cacheList.map(item => `${item.mode} ${item.status}${item.elapsed ? ` ${item.elapsed}` : ''}`).join(' · ') || '캐시 상태 대기',
+      tone: staleCacheCount === 0 && cacheList.length > 0 ? 'ok' : 'warn',
+    },
+    {
+      name: '스케줄러',
+      value: systemStatus?.schedulerEnabled ? 'ACTIVE' : 'OFF',
+      desc: systemStatus?.responseTime != null ? `응답 ${systemStatus.responseTime}ms` : '스케줄러 상태 대기',
+      tone: systemStatus?.schedulerEnabled ? 'ok' : 'warn',
+    },
+  ]
+
   return (
     <main className={`admin-page${menuOpen ? ' admin-menu-open' : ''}`}>
       <header className="admin-mobile-topbar">
@@ -693,11 +728,11 @@ export default function AdminPage() {
         {view === 'system' && (
           <AdminPanel title="시스템 관리" description="KIS, DART, DeepSeek, 검색식 캐시 상태를 확인합니다.">
             <div className="system-grid">
-              {['KIS 조건검색', 'OpenDART', 'DeepSeek', '결제/구독 처리'].map(name => (
-                <div className="system-card" key={name}>
-                  <span>{name}</span>
-                  <strong>{systemStatus?.error ? '확인 필요' : '대기/정상'}</strong>
-                  <p>{systemStatus?.error || '연동 상태와 마지막 호출 시간을 백엔드 상태값으로 표시합니다.'}</p>
+              {systemCards.map(card => (
+                <div className={`system-card system-card-${card.tone}`} key={card.name}>
+                  <span>{card.name}</span>
+                  <strong>{systemStatus?.error ? '확인 필요' : card.value}</strong>
+                  <p>{systemStatus?.error || card.desc}</p>
                 </div>
               ))}
             </div>

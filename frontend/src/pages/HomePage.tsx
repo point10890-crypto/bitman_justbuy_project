@@ -164,6 +164,26 @@ function sectionSourceStatus(section: ConditionSectionResponse | undefined) {
   return '조건검색 준비'
 }
 
+function formatKstTime(value?: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleTimeString('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function sectionWarning(section: ConditionSectionResponse | undefined) {
+  if (!section) return ''
+  if (section.sourceStatus === 'STALE_CACHE') return '정규장 실시간 결과가 아니며 최근 저장 결과입니다.'
+  if (section.sourceStatus === 'REALTIME_WAITING') return '정규장 시작 후 실시간 포착이 자동 갱신됩니다.'
+  if (section.sourceStatus === 'REALTIME_EMPTY') return '현재 조건을 통과한 실시간 종목이 없습니다.'
+  const hasRisk = section.signals?.some(signal => signal.riskFlags?.length)
+  return hasRisk ? '신호별 리스크와 무효화 조건을 반드시 확인하세요.' : ''
+}
+
 function ResultPanel({
   query,
   loading,
@@ -348,6 +368,8 @@ export default function HomePage() {
       rows: endpointRows[section.id] || rowsFromCondition(apiSection, section.rows),
       sourceStatus: endpointLoading === section.id ? '기존 엔드포인트 호출 중' : endpointStatus[section.id] || sectionSourceStatus(apiSection),
       asOf: apiSection?.asOf,
+      asOfLabel: formatKstTime(apiSection?.asOf),
+      warning: sectionWarning(apiSection),
     }
   })
 
@@ -368,13 +390,25 @@ export default function HomePage() {
         </div>
       )}
 
+      {mainConditions?.trackRecord && (
+        <div className="condition-track-summary" aria-label="조건검색 성과 요약">
+          <span>검증 신호 {mainConditions.trackRecord.totalSignals}건</span>
+          <span>평균 {mainConditions.trackRecord.avgMaxReturnPct}</span>
+          <span>승률 {mainConditions.trackRecord.winRate5d}</span>
+          {mainConditions.asOf && <span>{formatKstTime(mainConditions.asOf)} 기준</span>}
+        </div>
+      )}
+
       {displayedSections.map(section => (
         <section id={section.id} className="search-rank-card" key={section.id}>
           <div className="rank-card-title-row">
             <CategoryIcon type={section.icon} />
             <div className="rank-title-copy">
               <h2>{section.title}</h2>
-              <span>{conditionsLoading ? '조건검색 갱신 중' : section.sourceStatus}</span>
+              <span>
+                {conditionsLoading ? '조건검색 갱신 중' : section.sourceStatus}
+                {!conditionsLoading && section.asOfLabel ? ` · ${section.asOfLabel} 기준` : ''}
+              </span>
             </div>
             <button
               className="top3-badge"
@@ -384,6 +418,12 @@ export default function HomePage() {
               TOP3
             </button>
           </div>
+
+          {section.warning && (
+            <div className="condition-warning-strip">
+              {section.warning}
+            </div>
+          )}
 
           <div className="rank-table" style={{ ['--rank-cols' as string]: '1.1fr .75fr .75fr .75fr' }}>
             <div className="rank-table-head">

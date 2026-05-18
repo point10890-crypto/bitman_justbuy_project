@@ -2,6 +2,7 @@ package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.StockPick;
+import com.bitman.justbuy.dto.condition.ConditionSignalDto;
 import com.bitman.justbuy.dto.performance.DailyClosePerformanceResponse;
 import com.bitman.justbuy.dto.performance.SwingCumulativePerformanceResponse;
 import com.bitman.justbuy.entity.AnalysisTrackRecord;
@@ -18,6 +19,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -30,6 +32,8 @@ public class TrackRecordService {
     private static final String SHORT_TERM_MODE = "BREAKOUT";
     private static final String SWING_MODE = "REVERSAL_EDGE";
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final LocalTime SHORT_TERM_SESSION_START = LocalTime.of(9, 0);
+    private static final LocalTime SHORT_TERM_CAPTURE_CUTOFF = LocalTime.of(15, 20);
     private static final LocalTime MARKET_CLOSE = LocalTime.of(15, 30);
     private static final DateTimeFormatter KST_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(KST);
 
@@ -53,10 +57,12 @@ public class TrackRecordService {
 
             try {
                 Long priceAtAnalysis = parsePrice(pick.currentPrice());
-                boolean duplicate = priceAtAnalysis == null
-                    ? repository.existsByModeAndAnalysisDateAndStockCode(response.mode(), today, pick.code())
-                    : repository.existsByModeAndAnalysisDateAndStockCodeAndPriceAtAnalysis(
-                        response.mode(), today, pick.code(), priceAtAnalysis);
+                if (SHORT_TERM_MODE.equals(response.mode())
+                    && !isShortTermRecordingWindow(Instant.now().atZone(KST))) {
+                    continue;
+                }
+                boolean duplicate = repository.existsByModeAndAnalysisDateAndStockCode(
+                    response.mode(), today, pick.code());
                 if (duplicate) {
                     continue;
                 }
@@ -89,6 +95,42 @@ public class TrackRecordService {
         log.info("[TrackRecord] Recorded {} picks for mode={}", response.stockPicks().size(), response.mode());
     }
 
+    @Transactional
+    public int recordShortTermRealtimeSignals(List<ConditionSignalDto> signals, ZonedDateTime capturedAt) {
+        if (signals == null || signals.isEmpty()) return 0;
+        ZonedDateTime captureTime = capturedAt != null ? capturedAt.withZoneSameInstant(KST) : ZonedDateTime.now(KST);
+        if (!isShortTermRecordingWindow(captureTime)) return 0;
+
+        LocalDate analysisDate = captureTime.toLocalDate();
+        Set<String> seenInBatch = new HashSet<>();
+        int recorded = 0;
+        for (ConditionSignalDto signal : signals) {
+            if (signal == null || signal.stockCode() == null || !signal.stockCode().matches("\\d{6}")) continue;
+            if (!seenInBatch.add(signal.stockCode())) continue;
+            if (repository.existsByModeAndAnalysisDateAndStockCode(
+                SHORT_TERM_MODE, analysisDate, signal.stockCode())) {
+                continue;
+            }
+
+            Long entryPrice = parsePrice(firstNonBlank(signal.capturePrice(), signal.currentPrice()));
+            if (entryPrice == null || entryPrice <= 0) continue;
+
+            var record = new AnalysisTrackRecord();
+            record.setMode(SHORT_TERM_MODE);
+            record.setAnalysisDate(analysisDate);
+            record.setStockCode(signal.stockCode());
+            record.setStockName(signal.stockName());
+            record.setAction(firstNonBlank(signal.status(), "실시간 포착"));
+            record.setConsensusScore(signal.finalScore());
+            record.setPriceAtAnalysis(entryPrice);
+            record.setTargetPrice(parsePrice(signal.highPrice()));
+
+            repository.save(record);
+            recorded++;
+        }
+        return recorded;
+    }
+
     /** 단타는 당일 마감 후 바로 성과를 검증한다. */
     @Scheduled(cron = "0 40 15 * * MON-FRI", zone = "Asia/Seoul")
     @Transactional
@@ -113,8 +155,8 @@ public class TrackRecordService {
             verifyShortTermClose(targetDate);
         }
 
-        List<AnalysisTrackRecord> records = repository.findByModeAndAnalysisDateOrderByCreatedAtDesc(
-            SHORT_TERM_MODE, targetDate);
+        List<AnalysisTrackRecord> records = normalizedShortTermDailyRecords(
+            repository.findByModeAndAnalysisDateOrderByCreatedAtDesc(SHORT_TERM_MODE, targetDate));
         return buildDailyCloseResponse(targetDate, marketClosed, records);
     }
 
@@ -239,13 +281,14 @@ public class TrackRecordService {
     }
 
     private boolean hasUnverifiedShortTerm(LocalDate date) {
-        return repository.findByModeAndAnalysisDateOrderByCreatedAtDesc(SHORT_TERM_MODE, date).stream()
+        return normalizedShortTermDailyRecords(
+            repository.findByModeAndAnalysisDateOrderByCreatedAtDesc(SHORT_TERM_MODE, date)).stream()
             .anyMatch(record -> record.getClosePrice() == null);
     }
 
     private void verifyShortTermClose(LocalDate date) {
-        List<AnalysisTrackRecord> records = repository.findByModeAndAnalysisDateOrderByCreatedAtDesc(
-            SHORT_TERM_MODE, date);
+        List<AnalysisTrackRecord> records = normalizedShortTermDailyRecords(
+            repository.findByModeAndAnalysisDateOrderByCreatedAtDesc(SHORT_TERM_MODE, date));
         if (records.isEmpty()) return;
 
         int verified = 0;
@@ -278,6 +321,35 @@ public class TrackRecordService {
         }
 
         log.info("[TrackRecord] 단타 마감 검증 완료: date={}, verified={}/{}", date, verified, records.size());
+    }
+
+    private List<AnalysisTrackRecord> normalizedShortTermDailyRecords(List<AnalysisTrackRecord> records) {
+        if (records == null || records.isEmpty()) return List.of();
+
+        Map<String, AnalysisTrackRecord> firstValidByCode = new LinkedHashMap<>();
+        records.stream()
+            .filter(this::isShortTermPerformanceRecord)
+            .sorted(Comparator.comparing(AnalysisTrackRecord::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())))
+            .forEach(record -> firstValidByCode.putIfAbsent(record.getStockCode(), record));
+
+        return firstValidByCode.values().stream()
+            .sorted(Comparator.comparing(AnalysisTrackRecord::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())).reversed())
+            .toList();
+    }
+
+    private boolean isShortTermPerformanceRecord(AnalysisTrackRecord record) {
+        if (record == null || record.getStockCode() == null || record.getCreatedAt() == null) return false;
+        return isShortTermRecordingWindow(record.getCreatedAt().atZone(KST));
+    }
+
+    private boolean isShortTermRecordingWindow(ZonedDateTime capturedAt) {
+        if (capturedAt == null) return false;
+        ZonedDateTime kst = capturedAt.withZoneSameInstant(KST);
+        LocalDate date = kst.toLocalDate();
+        LocalTime time = kst.toLocalTime();
+        return KoreanMarketCalendar.isTradingDay(date)
+            && !time.isBefore(SHORT_TERM_SESSION_START)
+            && !time.isAfter(SHORT_TERM_CAPTURE_CUTOFF);
     }
 
     private DailyClosePerformanceResponse buildDailyCloseResponse(LocalDate date, boolean marketClosed,

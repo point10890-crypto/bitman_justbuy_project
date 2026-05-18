@@ -3,6 +3,7 @@ package com.bitman.justbuy.service;
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.StockPick;
 import com.bitman.justbuy.util.KoreanMarketCalendar;
+import com.bitman.justbuy.util.StockUniverseFilters;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -228,6 +229,20 @@ public class PrecomputeScheduler {
                 mode, nameFixedCount, invalidCodeDropped, notFoundDropped);
         }
         picks = nameFixed;
+        int exchangeTradedDropped = 0;
+        List<StockPick> spotOnly = new java.util.ArrayList<>(picks.size());
+        for (StockPick p : picks) {
+            if (p.name() != null && StockUniverseFilters.isExchangeTradedProductName(p.name())) {
+                exchangeTradedDropped++;
+                continue;
+            }
+            spotOnly.add(p);
+        }
+        if (exchangeTradedDropped > 0) {
+            log.info("[Scheduler] {} exchange-traded product filter: {} picks dropped",
+                mode, exchangeTradedDropped);
+        }
+        picks = spotOnly;
         // 모든 픽이 제거됐으면 dedup 진행 X — 원본 result 그대로 반환 방지를 위해 빈 result 저장
         if (picks.isEmpty()) {
             AnalysisResponse emptied = new AnalysisResponse(

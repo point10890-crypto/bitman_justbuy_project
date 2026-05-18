@@ -258,8 +258,7 @@ public class MainConditionService {
         if (picks.isEmpty()) return List.of();
 
         List<StockPick> eligiblePicks = picks.stream()
-            .filter(pick -> section != ConditionSection.SHORT_TERM
-                || StockUniverseFilters.isKoreanSpotEquity(pick.name(), pick.code()))
+            .filter(pick -> isEligiblePick(section, pick))
             .limit(3)
             .toList();
 
@@ -293,6 +292,16 @@ public class MainConditionService {
             ));
         }
         return signals;
+    }
+
+    private boolean isEligiblePick(ConditionSection section, StockPick pick) {
+        if (pick == null || pick.code() == null || !pick.code().matches("\\d{6}")) return false;
+        if (section == ConditionSection.SHORT_TERM) {
+            return StockUniverseFilters.isKoreanSpotEquity(pick.name(), pick.code());
+        }
+        return pick.name() != null
+            && !pick.name().isBlank()
+            && !StockUniverseFilters.isExchangeTradedProductName(pick.name());
     }
 
     private List<ConditionSignalDto> fallbackSignals(ConditionSection section) {

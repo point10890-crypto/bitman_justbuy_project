@@ -6,6 +6,8 @@ import com.bitman.justbuy.util.KoreanMarketCalendar;
 import com.bitman.justbuy.util.StockUniverseFilters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -40,6 +42,7 @@ public class ShortTermRealtimeScanner {
     private static final int RAW_SCAN_LIMIT = 80;
 
     private final KisApiService kisApiService;
+    private final TrackRecordService trackRecordService;
     private final Map<String, String> firstSeenByCode = new ConcurrentHashMap<>();
     private volatile LocalDate firstSeenDate = LocalDate.MIN;
     private volatile ScanSnapshot latest = ScanSnapshot.empty();
@@ -48,7 +51,18 @@ public class ShortTermRealtimeScanner {
     private long freshTtlMs = 240_000L;
 
     public ShortTermRealtimeScanner(KisApiService kisApiService) {
+        this(kisApiService, (TrackRecordService) null);
+    }
+
+    @Autowired
+    public ShortTermRealtimeScanner(KisApiService kisApiService,
+                                    ObjectProvider<TrackRecordService> trackRecordServiceProvider) {
+        this(kisApiService, trackRecordServiceProvider.getIfAvailable());
+    }
+
+    ShortTermRealtimeScanner(KisApiService kisApiService, TrackRecordService trackRecordService) {
         this.kisApiService = kisApiService;
+        this.trackRecordService = trackRecordService;
     }
 
     public record ScanSnapshot(
@@ -96,9 +110,22 @@ public class ShortTermRealtimeScanner {
             true,
             signals
         );
+        recordTrackableSignals(signals, now);
         log.info("[ShortTermRealtime] scan completed: picks={}, volumeRank={}, gainerRank={}",
             signals.size(), volume.size(), gainers.size());
         return latest;
+    }
+
+    private void recordTrackableSignals(List<ConditionSignalDto> signals, ZonedDateTime now) {
+        if (trackRecordService == null || signals == null || signals.isEmpty()) return;
+        try {
+            int recorded = trackRecordService.recordShortTermRealtimeSignals(signals, now);
+            if (recorded > 0) {
+                log.info("[ShortTermRealtime] recorded {} realtime picks for daily performance", recorded);
+            }
+        } catch (Exception e) {
+            log.warn("[ShortTermRealtime] track record failed: {}", e.getMessage());
+        }
     }
 
     public Optional<ScanSnapshot> latestFresh() {

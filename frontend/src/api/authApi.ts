@@ -13,6 +13,32 @@ export interface UserDto {
   createdAt: string
 }
 
+export interface SystemEngineStatus {
+  name: string
+  online: boolean
+}
+
+export interface SystemCacheStatus {
+  mode: string
+  status: 'valid' | 'expired' | 'missing' | string
+  lastUpdated?: string | null
+  elapsed?: string | null
+}
+
+export interface SystemStatusResponse {
+  status?: string
+  timestamp?: string
+  engines?: SystemEngineStatus[]
+  totalAgents?: number
+  availableAgents?: number
+  cache?: SystemCacheStatus[]
+  kisAvailable?: boolean
+  schedulerEnabled?: boolean
+  responseTime?: number
+  error?: string
+  pipeline?: unknown
+}
+
 export interface AuthResponse {
   token: string
   user: UserDto
@@ -206,7 +232,7 @@ export async function adminResetPassword(token: string, userId: string, newPassw
 
 // ─── Admin: System ───
 
-export async function fetchSystemStatus(token: string) {
+export async function fetchSystemStatus(token: string): Promise<SystemStatusResponse> {
   const res = await apiFetch(`${API_BASE}/api/admin/system/status`, {
     headers: authHeaders(token),
   })
