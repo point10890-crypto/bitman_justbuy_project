@@ -6,6 +6,7 @@ import com.bitman.justbuy.util.KoreanMarketCalendar;
 import com.bitman.justbuy.util.StockUniverseFilters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -36,13 +37,15 @@ public class ShortTermRealtimeScanner {
     private static final DateTimeFormatter KST_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(KST);
     private static final LocalTime SESSION_START = LocalTime.of(9, 0);
     private static final LocalTime SESSION_END = LocalTime.of(15, 20);
-    private static final Duration FRESH_TTL = Duration.ofSeconds(95);
     private static final int RAW_SCAN_LIMIT = 80;
 
     private final KisApiService kisApiService;
     private final Map<String, String> firstSeenByCode = new ConcurrentHashMap<>();
     private volatile LocalDate firstSeenDate = LocalDate.MIN;
     private volatile ScanSnapshot latest = ScanSnapshot.empty();
+
+    @Value("${bitman.short-term.realtime.fresh-ttl-ms:240000}")
+    private long freshTtlMs = 240_000L;
 
     public ShortTermRealtimeScanner(KisApiService kisApiService) {
         this.kisApiService = kisApiService;
@@ -61,7 +64,7 @@ public class ShortTermRealtimeScanner {
     }
 
     @Scheduled(
-        fixedDelayString = "${bitman.short-term.realtime.interval-ms:60000}",
+        fixedDelayString = "${bitman.short-term.realtime.interval-ms:180000}",
         initialDelayString = "${bitman.short-term.realtime.initial-delay-ms:45000}"
     )
     public void scheduledScan() {
@@ -102,10 +105,14 @@ public class ShortTermRealtimeScanner {
         ScanSnapshot snapshot = latest;
         if (snapshot.signals().isEmpty()) return Optional.empty();
         if (!"REALTIME_SCAN".equals(snapshot.sourceStatus())) return Optional.empty();
-        if (Duration.between(snapshot.scannedAt(), Instant.now()).compareTo(FRESH_TTL) > 0) {
+        if (Duration.between(snapshot.scannedAt(), Instant.now()).compareTo(freshTtl()) > 0) {
             return Optional.empty();
         }
         return Optional.of(snapshot);
+    }
+
+    Duration freshTtl() {
+        return Duration.ofMillis(Math.max(freshTtlMs, 180_000L));
     }
 
     public ScanSnapshot latest() {

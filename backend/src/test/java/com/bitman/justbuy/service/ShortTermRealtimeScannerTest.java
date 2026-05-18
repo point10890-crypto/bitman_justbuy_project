@@ -2,7 +2,9 @@ package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.dto.condition.ConditionSignalDto;
 import org.junit.jupiter.api.Test;
+import org.springframework.scheduling.annotation.Scheduled;
 
+import java.time.Duration;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
@@ -10,6 +12,18 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ShortTermRealtimeScannerTest {
+
+    @Test
+    void scheduledScanRunsEveryThreeMinutesByDefault() throws NoSuchMethodException {
+        Scheduled scheduled = ShortTermRealtimeScanner.class
+            .getMethod("scheduledScan")
+            .getAnnotation(Scheduled.class);
+
+        assertThat(scheduled.fixedDelayString())
+            .isEqualTo("${bitman.short-term.realtime.interval-ms:180000}");
+        assertThat(new ShortTermRealtimeScanner(null).freshTtl())
+            .isEqualTo(Duration.ofMinutes(4));
+    }
 
     @Test
     void buildSignalsRanksStocksThatOverlapVolumeAndGainerLists() {
