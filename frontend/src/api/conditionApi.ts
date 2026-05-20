@@ -32,6 +32,27 @@ export interface ConditionSectionResponse {
   signals: ConditionSignal[]
 }
 
+export interface ConditionCaptureTime {
+  section: string
+  slug: string
+  title: string
+  mode: string
+  rank: number
+  stockName: string
+  stockCode: string
+  capturedAt: string
+  capturedTime: string
+  sourceStatus: string
+}
+
+export interface ConditionCaptureTimesResponse {
+  asOf: string
+  endpoint: string
+  sourceStatus: string
+  totalCount: number
+  captures: ConditionCaptureTime[]
+}
+
 export interface TrackRecordSummary {
   totalSignals: number
   avgMaxReturnPct: string
@@ -75,4 +96,14 @@ export async function fetchConditionSection(sectionSlug: string, token?: string)
     headers: authHeaders(token),
   })
   return readJson<ConditionSectionResponse>(res)
+}
+
+export async function fetchConditionCaptureTimes(sectionSlug?: string, token?: string): Promise<ConditionCaptureTimesResponse> {
+  const path = sectionSlug
+    ? `/api/conditions/${encodeURIComponent(sectionSlug)}/capture-times`
+    : '/api/conditions/capture-times'
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: authHeaders(token),
+  })
+  return readJson<ConditionCaptureTimesResponse>(res)
 }

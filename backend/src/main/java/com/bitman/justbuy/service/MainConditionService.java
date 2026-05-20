@@ -2,6 +2,8 @@ package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.StockPick;
+import com.bitman.justbuy.dto.condition.ConditionCaptureTimeDto;
+import com.bitman.justbuy.dto.condition.ConditionCaptureTimesResponse;
 import com.bitman.justbuy.dto.condition.ConditionSection;
 import com.bitman.justbuy.dto.condition.ConditionSectionResponse;
 import com.bitman.justbuy.dto.condition.ConditionSignalDto;
@@ -13,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -28,6 +31,9 @@ public class MainConditionService {
 
     private static final DateTimeFormatter KST_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME
         .withZone(ZoneId.of("Asia/Seoul"));
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final DateTimeFormatter CAPTURE_TIME_FORMATTER =
+        DateTimeFormatter.ofPattern("a hh:mm", Locale.KOREA);
 
     private static final String NOTICE =
         "조건검색 결과는 투자 참고용 정보이며, 특정 종목의 매수/매도 추천이나 수익 보장을 의미하지 않습니다.";
@@ -75,6 +81,28 @@ public class MainConditionService {
 
     public ConditionSectionResponse getSection(String slug) {
         return getSection(ConditionSection.fromSlug(slug));
+    }
+
+    public ConditionCaptureTimesResponse getCaptureTimes() {
+        ConditionSectionResponse shortTerm = getSection(ConditionSection.SHORT_TERM);
+        ConditionSectionResponse swing = getSection(ConditionSection.SWING);
+        ConditionSectionResponse leaders = getSection(ConditionSection.LEADERS);
+        ConditionSectionResponse themes = getSection(ConditionSection.THEMES);
+        return captureTimesResponse(
+            "/api/conditions/capture-times",
+            alertSourceStatus(shortTerm, swing, leaders, themes),
+            List.of(shortTerm, swing, leaders, themes)
+        );
+    }
+
+    public ConditionCaptureTimesResponse getCaptureTimes(String slug) {
+        ConditionSection section = ConditionSection.fromSlug(slug);
+        ConditionSectionResponse response = getSection(section);
+        return captureTimesResponse(
+            "/api/conditions/" + section.slug() + "/capture-times",
+            response.sourceStatus(),
+            List.of(response)
+        );
     }
 
     public ConditionSectionResponse getSection(ConditionSection section) {
@@ -172,6 +200,55 @@ public class MainConditionService {
             alerts.isEmpty() ? "READY" : sourceStatus,
             alerts
         );
+    }
+
+    private ConditionCaptureTimesResponse captureTimesResponse(String endpoint,
+                                                              String sourceStatus,
+                                                              List<ConditionSectionResponse> sections) {
+        List<ConditionCaptureTimeDto> captures = new ArrayList<>();
+        for (ConditionSectionResponse section : sections) {
+            if (section == null || section.signals() == null) continue;
+            for (ConditionSignalDto signal : section.signals()) {
+                String capturedAt = normalizeDisplay(signal.capturedAt(), section.asOf());
+                captures.add(new ConditionCaptureTimeDto(
+                    section.key(),
+                    section.slug(),
+                    section.title(),
+                    section.mode(),
+                    signal.rank(),
+                    signal.stockName(),
+                    signal.stockCode(),
+                    capturedAt,
+                    formatCapturedTime(capturedAt),
+                    section.sourceStatus()
+                ));
+            }
+        }
+
+        return new ConditionCaptureTimesResponse(
+            nowKst(),
+            endpoint,
+            sourceStatus,
+            captures.size(),
+            captures
+        );
+    }
+
+    private String formatCapturedTime(String capturedAt) {
+        if (capturedAt == null || capturedAt.isBlank()) return "";
+        try {
+            return OffsetDateTime.parse(capturedAt)
+                .atZoneSameInstant(KST)
+                .format(CAPTURE_TIME_FORMATTER);
+        } catch (Exception ignored) {
+            try {
+                return Instant.parse(capturedAt)
+                    .atZone(KST)
+                    .format(CAPTURE_TIME_FORMATTER);
+            } catch (Exception ignoredAgain) {
+                return "";
+            }
+        }
     }
 
     private Optional<ShortTermRealtimeScanner.ScanSnapshot> latestShortTermRealtime() {

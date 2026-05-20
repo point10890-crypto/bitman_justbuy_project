@@ -106,6 +106,28 @@ class MainConditionServiceTest {
     }
 
     @Test
+    void captureTimeEndpointReturnsPerSignalCaptureTimes() {
+        when(conditionSearchPipeline.getPrecomputed("BREAKOUT"))
+            .thenReturn(response("BREAKOUT",
+                stock("Robotis", "108490", "31,200", "34,350", "watch"),
+                stock("DI", "003160", "7,120", "7,510", "watch")
+            ));
+
+        MainConditionService service = new MainConditionService(conditionSearchPipeline);
+
+        var response = service.getCaptureTimes("short-term");
+
+        assertThat(response.endpoint()).isEqualTo("/api/conditions/short-term/capture-times");
+        assertThat(response.totalCount()).isEqualTo(2);
+        assertThat(response.captures()).extracting(capture -> capture.stockCode())
+            .containsExactly("108490", "003160");
+        assertThat(response.captures()).extracting(capture -> capture.capturedAt())
+            .containsOnly("2026-05-17T09:10:00+09:00");
+        assertThat(response.captures()).extracting(capture -> capture.capturedTime())
+            .containsOnly("\uC624\uC804 09:10");
+    }
+
+    @Test
     void swingLeaderAndThemeSectionsExcludeExchangeTradedProducts() {
         when(conditionSearchPipeline.getPrecomputed("REVERSAL_EDGE"))
             .thenReturn(response("REVERSAL_EDGE",

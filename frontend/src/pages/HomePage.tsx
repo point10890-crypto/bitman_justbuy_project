@@ -12,7 +12,7 @@ type Section = {
   mode?: string
   query?: string
   columns: string[]
-  rows: Array<{ name: string; a: string; b: string; c: string; code?: string; summary?: string }>
+  rows: Array<{ name: string; a: string; b: string; c: string; code?: string; summary?: string; capturedAt?: string; captureTime?: string }>
 }
 
 const sections: Section[] = [
@@ -102,6 +102,8 @@ function rowsFromCondition(section: ConditionSectionResponse | undefined, fallba
     b: signal.highPrice || signal.currentPrice || '-',
     c: signal.maxReturnPct && signal.maxReturnPct !== '-' ? signal.maxReturnPct : signal.status,
     summary: signal.summary,
+    capturedAt: signal.capturedAt,
+    captureTime: formatKstTime(signal.capturedAt),
   }))
 }
 
@@ -127,6 +129,8 @@ function rowsFromEndpointResult(section: Section, result: AnalysisResult): Secti
         b: percent || targetPrice,
         c: action,
         summary: pick.reason,
+        capturedAt: result.updatedAt,
+        captureTime: formatKstTime(result.updatedAt),
       }
     }
 
@@ -138,6 +142,8 @@ function rowsFromEndpointResult(section: Section, result: AnalysisResult): Secti
         b: currentPrice,
         c: percent || action,
         summary: pick.reason,
+        capturedAt: result.updatedAt,
+        captureTime: formatKstTime(result.updatedAt),
       }
     }
 
@@ -148,6 +154,8 @@ function rowsFromEndpointResult(section: Section, result: AnalysisResult): Secti
       b: targetPrice,
       c: section.id === 'short-term' ? percent || action : action,
       summary: pick.reason,
+      capturedAt: result.updatedAt,
+      captureTime: formatKstTime(result.updatedAt),
     }
   })
 }
@@ -436,7 +444,13 @@ export default function HomePage() {
                 key={`${section.id}-${row.name}`}
                 onClick={() => section.mode && runAnalysis(`${row.name} ${section.title} 상세 분석`, section.mode)}
               >
-                <span className="rank-name"><strong>{index + 1}</strong><span>{locked ? maskValue(row.name) : row.name}</span></span>
+                <span className="rank-name">
+                  <strong>{index + 1}</strong>
+                  <span className="rank-name-copy">
+                    <span>{locked ? maskValue(row.name) : row.name}</span>
+                    {row.captureTime && <em>포착 {row.captureTime}</em>}
+                  </span>
+                </span>
                 <span>{locked ? maskValue(row.a) : row.a}</span>
                 <span>{locked ? maskValue(row.b) : row.b}</span>
                 <span className={row.c.startsWith('+') ? 'profit-text' : ''}>{locked ? maskValue(row.c) : row.c}</span>

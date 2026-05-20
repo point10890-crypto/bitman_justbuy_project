@@ -1809,6 +1809,29 @@
   text-align: right;
 }
 
+.rank-table-row .rank-name-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow: visible;
+  white-space: normal;
+}
+
+.rank-table-row .rank-name-copy > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank-name-copy em {
+  color: #aeb4c3;
+  font-size: clamp(10px, .48em, 13px);
+  line-height: 1.1;
+  font-style: normal;
+  font-weight: 900;
+}
+
 .profit-text {
   color: var(--maker-red);
 }

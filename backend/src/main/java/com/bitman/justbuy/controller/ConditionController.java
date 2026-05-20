@@ -1,5 +1,6 @@
 package com.bitman.justbuy.controller;
 
+import com.bitman.justbuy.dto.condition.ConditionCaptureTimesResponse;
 import com.bitman.justbuy.dto.condition.ConditionSectionResponse;
 import com.bitman.justbuy.dto.condition.MainConditionResponse;
 import com.bitman.justbuy.entity.SubscriptionStatus;
@@ -38,6 +39,19 @@ public class ConditionController {
     public ResponseEntity<MainConditionResponse> main(@AuthenticationPrincipal UUID userId) {
         requireProSubscription(userId);
         return ResponseEntity.ok(mainConditionService.getMain());
+    }
+
+    @GetMapping("/conditions/capture-times")
+    public ResponseEntity<ConditionCaptureTimesResponse> captureTimes(@AuthenticationPrincipal UUID userId) {
+        requireProSubscription(userId);
+        return ResponseEntity.ok(mainConditionService.getCaptureTimes());
+    }
+
+    @GetMapping("/conditions/{section}/capture-times")
+    public ResponseEntity<ConditionCaptureTimesResponse> sectionCaptureTimes(@AuthenticationPrincipal UUID userId,
+                                                                             @PathVariable String section) {
+        requireProSubscription(userId);
+        return ResponseEntity.ok(mainConditionService.getCaptureTimes(section));
     }
 
     @GetMapping("/conditions/{section}")
