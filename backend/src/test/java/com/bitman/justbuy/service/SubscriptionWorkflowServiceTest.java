@@ -116,4 +116,61 @@ class SubscriptionWorkflowServiceTest {
             .isInstanceOf(IllegalStateException.class)
             .hasMessageContaining("관리자");
     }
+
+    @Test
+    void approvePendingRenewalExtendsFromCurrentEndDate() {
+        UUID userId = UUID.randomUUID();
+        User user = new User("renewal@example.com", "renewal", "hash");
+        LocalDate currentEndDate = LocalDate.now().plusDays(10);
+        user.setSubscription(SubscriptionStatus.PENDING);
+        user.setSubscriptionEndDate(currentEndDate);
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.save(user)).thenReturn(user);
+
+        var dto = service.approveSubscription(userId);
+
+        assertThat(dto.subscription()).isEqualTo("PRO");
+        assertThat(user.getSubscriptionEndDate()).isEqualTo(currentEndDate.plusMonths(1));
+        assertThat(user.getSubscriptionApprovedAt()).isNotNull();
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void rejectPendingRenewalRestoresExistingProAccess() {
+        UUID userId = UUID.randomUUID();
+        User user = new User("renewal-reject@example.com", "renewal", "hash");
+        LocalDate currentEndDate = LocalDate.now().plusDays(10);
+        user.setSubscription(SubscriptionStatus.PENDING);
+        user.setSubscriptionEndDate(currentEndDate);
+        user.setDepositorName("payer");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.save(user)).thenReturn(user);
+
+        var dto = service.rejectSubscription(userId);
+
+        assertThat(dto.subscription()).isEqualTo("PRO");
+        assertThat(user.getSubscriptionEndDate()).isEqualTo(currentEndDate);
+        assertThat(user.getDepositorName()).isNull();
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void revokeSubscriptionClearsProAccessWindow() {
+        UUID userId = UUID.randomUUID();
+        User user = new User("pro-revoke@example.com", "pro", "hash");
+        user.setSubscription(SubscriptionStatus.PRO);
+        user.setSubscriptionEndDate(LocalDate.now().plusDays(10));
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.save(user)).thenReturn(user);
+
+        var dto = service.revokeSubscription(userId);
+
+        assertThat(dto.subscription()).isEqualTo("FREE");
+        assertThat(user.getSubscriptionEndDate()).isNull();
+        assertThat(user.getSubscriptionApprovedAt()).isNull();
+        verify(userRepository).save(user);
+    }
 }

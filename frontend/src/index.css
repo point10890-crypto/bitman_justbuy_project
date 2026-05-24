@@ -2487,6 +2487,38 @@
   font-weight: 900;
 }
 
+.admin-refresh-button {
+  min-width: 118px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 2px;
+}
+
+.admin-refresh-button strong,
+.admin-refresh-button span {
+  display: block;
+  line-height: 1.1;
+}
+
+.admin-refresh-button strong {
+  color: #f8f5ed;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.admin-refresh-button span {
+  color: #aab3bf;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.admin-refresh-button.is-refreshing {
+  border-color: rgba(255,216,23,.55);
+  color: #ffd817;
+  box-shadow: 0 0 0 3px rgba(255,216,23,.08);
+}
+
 .admin-message {
   padding: 12px 14px;
   border-radius: 8px;
@@ -2495,6 +2527,49 @@
   color: #bfdbfe;
   font-size: 13px;
   font-weight: 800;
+}
+
+.admin-refresh-status {
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid #28313d;
+  border-radius: 8px;
+  background: rgba(17,22,31,.85);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #aab3bf;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admin-refresh-status span {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 14px rgba(34,197,94,.55);
+}
+
+.admin-refresh-status.is-refreshing span {
+  background: #ffd817;
+  animation: adminRefreshPulse 1s ease-in-out infinite;
+}
+
+.admin-refresh-status strong {
+  color: #f8f5ed;
+  font-weight: 950;
+}
+
+.admin-refresh-status em {
+  margin-left: auto;
+  color: #8e96a3;
+  font-style: normal;
+}
+
+@keyframes adminRefreshPulse {
+  0%, 100% { opacity: .45; transform: scale(.8); }
+  50% { opacity: 1; transform: scale(1.15); }
 }
 
 .admin-kpi-grid {
@@ -2576,6 +2651,13 @@
 
 .admin-toolbar {
   margin-bottom: 14px;
+}
+
+.admin-result-summary {
+  margin: -4px 0 12px;
+  color: #aab3bf;
+  font-size: 12px;
+  font-weight: 850;
 }
 
 .admin-toolbar input {
@@ -3021,6 +3103,32 @@
 .admin-subscription-actions {
   margin-top: 0;
   margin-bottom: 14px;
+}
+
+.admin-filter-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.admin-filter-tabs button {
+  min-height: 36px;
+  border: 1px solid #303744;
+  border-radius: 999px;
+  background: #151a23;
+  color: #aab3bf;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.admin-filter-tabs button.active,
+.admin-filter-tabs button:focus-visible {
+  outline: none;
+  border-color: rgba(255,216,23,.55);
+  background: rgba(255,216,23,.1);
+  color: #ffd817;
 }
 
 .admin-action-row button {
@@ -6693,6 +6801,64 @@ body,
 
   .admin-toolbar {
     margin-bottom: 10px;
+  }
+
+  .admin-mobile-topbar .admin-refresh-button {
+    min-width: 0;
+    width: 100%;
+    padding: 0 6px;
+  }
+
+  .admin-mobile-topbar .admin-refresh-button strong {
+    font-size: 11px;
+  }
+
+  .admin-mobile-topbar .admin-refresh-button span {
+    margin-top: 2px;
+    font-size: 9px;
+    letter-spacing: 0;
+    color: #aab3bf;
+  }
+
+  .admin-refresh-status {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 5px 9px;
+    min-height: 0;
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  .admin-refresh-status strong,
+  .admin-refresh-status em {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .admin-refresh-status em {
+    grid-column: 2;
+    margin-left: 0;
+  }
+
+  .admin-filter-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .admin-filter-tabs button {
+    min-width: 0;
+    min-height: 36px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+
+  .admin-result-summary {
+    margin: -2px 0 10px;
+    font-size: 12px;
   }
 
   .admin-toolbar input {

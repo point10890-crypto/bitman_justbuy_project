@@ -116,6 +116,28 @@ function formatDate(value?: string | null) {
   return new Date(value).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })
 }
 
+function formatTime(value?: string | null) {
+  if (!value) return '미갱신'
+  return new Date(value).toLocaleTimeString('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function matchesUserSearch(user: UserDto, rawQuery: string) {
+  const q = rawQuery.trim().toLowerCase()
+  if (!q) return true
+  return [
+    user.name,
+    user.email,
+    user.id,
+    user.depositorName ?? '',
+    user.subscription,
+    user.subscriptionEndDate ?? '',
+  ].some(value => value.toLowerCase().includes(q))
+}
+
 function StatusBadge({ status }: { status: string }) {
   return <span className={`admin-status admin-status-${status.toLowerCase()}`}>{status}</span>
 }
@@ -137,11 +159,18 @@ export default function AdminPage() {
   const [editingUser, setEditingUser] = useState<UserDto | null>(null)
   const [editForm, setEditForm] = useState({ name: '', email: '', subscription: 'FREE' })
   const [resetPassword, setResetPassword] = useState('')
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null)
+  const [lastRefreshLabel, setLastRefreshLabel] = useState('관리자 데이터')
 
-  const loadUsers = async () => {
+  const markRefreshed = (label: string) => {
+    setLastRefreshLabel(label)
+    setLastRefreshedAt(new Date().toISOString())
+  }
+
+  const loadUsers = async (showSpinner = true) => {
     const token = getStoredToken()
-    if (!token) return
-    setLoading(true)
+    if (!token) return false
+    if (showSpinner) setLoading(true)
     try {
       const [all, pending] = await Promise.all([
         fetchAllUsers(token),
@@ -149,26 +178,33 @@ export default function AdminPage() {
       ])
       setUsers(all)
       setPendingUsers(pending)
+      return true
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '관리자 데이터를 불러오지 못했습니다.')
+      return false
     } finally {
-      setLoading(false)
+      if (showSpinner) setLoading(false)
     }
   }
 
   const loadSystem = async () => {
     const token = getStoredToken()
-    if (!token) return
+    if (!token) return false
     try {
       setSystemStatus(await fetchSystemStatus(token))
+      return true
     } catch (error) {
       setSystemStatus({ error: error instanceof Error ? error.message : '시스템 상태 조회 실패' })
+      return false
     }
   }
 
   useEffect(() => {
-    loadUsers()
-    loadSystem()
+    const bootstrap = async () => {
+      await Promise.all([loadUsers(), loadSystem()])
+      markRefreshed('관리자 데이터')
+    }
+    bootstrap()
   }, [])
 
   useEffect(() => {
@@ -192,14 +228,12 @@ export default function AdminPage() {
   }, [menuOpen])
 
   const filteredUsers = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return users
-    return users.filter(user =>
-      user.name.toLowerCase().includes(q) ||
-      user.email.toLowerCase().includes(q) ||
-      user.id.toLowerCase().includes(q)
-    )
+    return users.filter(user => matchesUserSearch(user, search))
   }, [search, users])
+
+  const filteredPendingUsers = useMemo(() => {
+    return pendingUsers.filter(user => matchesUserSearch(user, search))
+  }, [pendingUsers, search])
 
   const subscriptionUsers = useMemo(() => {
     const tierRank = (user: UserDto) => {
@@ -221,6 +255,12 @@ export default function AdminPage() {
       return a.name.localeCompare(b.name, 'ko-KR')
     })
   }, [filteredUsers, focus])
+
+  const visibleSubscriptionUsers = useMemo(() => {
+    if (focus === 'active') return subscriptionUsers.filter(user => user.subscription === 'PRO')
+    if (focus === 'expiring') return subscriptionUsers.filter(user => user.subscription === 'PRO' && user.subscriptionEndDate)
+    return subscriptionUsers
+  }, [focus, subscriptionUsers])
 
   const activeCount = users.filter(user => user.subscription === 'PRO').length
   const freeCount = users.filter(user => user.subscription === 'FREE').length
@@ -259,6 +299,7 @@ export default function AdminPage() {
       if (action === 'revoke') await revokeSubscription(token, user.id)
       setMessage(`${user.name} 회원의 상태가 처리되었습니다.`)
       await loadUsers()
+      markRefreshed('회원/구독 데이터')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '처리에 실패했습니다.')
     } finally {
@@ -288,6 +329,7 @@ export default function AdminPage() {
       setMessage(`${editForm.name} 회원 정보가 저장되었습니다.`)
       setEditingUser(null)
       await loadUsers()
+      markRefreshed('회원/구독 데이터')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '회원 정보 저장에 실패했습니다.')
     } finally {
@@ -337,6 +379,7 @@ export default function AdminPage() {
       await adminUpdateUser(token, user.id, { subscription })
       setMessage(`${user.name} 회원 등급이 ${subscription} 상태로 변경되었습니다.`)
       await loadUsers()
+      markRefreshed('회원/구독 데이터')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '등급 변경에 실패했습니다.')
     } finally {
@@ -352,6 +395,7 @@ export default function AdminPage() {
       await refreshAllAnalysis(token)
       setMessage('검색식과 분석 캐시 갱신을 요청했습니다.')
       await loadSystem()
+      markRefreshed('시스템/검색식 캐시')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '시스템 갱신에 실패했습니다.')
     } finally {
@@ -374,6 +418,7 @@ export default function AdminPage() {
       setMessage(`만료 처리 완료: 대상 ${result.targetCount}명, 전환 ${result.expiredCount}명, 실패 ${result.failedCount}명`)
       await loadUsers()
       await loadSystem()
+      markRefreshed('구독 만료 데이터')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '구독 만료 처리에 실패했습니다.')
     } finally {
@@ -403,6 +448,31 @@ export default function AdminPage() {
 
   const openHomeSection = (section: string) => {
     navigate(`/#${section}`)
+  }
+
+  const refreshCurrentView = async () => {
+    const label = view === 'system'
+      ? '시스템 상태'
+      : view === 'dashboard'
+        ? '관리자 데이터'
+        : '회원/구독 데이터'
+    setActionId('admin-refresh')
+    setMessage(`${label} 새로고침 중입니다...`)
+    try {
+      const ok = view === 'system'
+        ? await loadSystem()
+        : view === 'dashboard'
+          ? (await Promise.all([loadUsers(false), loadSystem()])).every(Boolean)
+          : await loadUsers(false)
+      if (ok) {
+        markRefreshed(label)
+        setMessage(`${label} 새로고침 완료 · ${formatTime(new Date().toISOString())} 기준`)
+      } else {
+        setMessage(`${label} 새로고침 중 일부 항목을 확인하지 못했습니다.`)
+      }
+    } finally {
+      setActionId(null)
+    }
   }
 
   const meta = viewMeta[view]
@@ -446,6 +516,10 @@ export default function AdminPage() {
       tone: systemStatus?.schedulerEnabled ? 'ok' : 'warn',
     },
   ]
+  const isRefreshing = actionId === 'admin-refresh'
+  const refreshSummary = view === 'system'
+    ? `${onlineAgents}/${totalAgents || '-'} AI 엔진 · 캐시 ${cacheSummary}`
+    : `전체 ${users.length}명 · 승인대기 ${pendingCount}건 · PRO ${activeCount}명`
 
   return (
     <main className={`admin-page${menuOpen ? ' admin-menu-open' : ''}`}>
@@ -466,7 +540,7 @@ export default function AdminPage() {
           <strong>{meta.label}</strong>
           <span>{meta.kicker}</span>
         </div>
-        <button type="button" onClick={view === 'system' ? loadSystem : loadUsers}>새로고침</button>
+        <AdminRefreshButton busy={isRefreshing} lastRefreshedAt={lastRefreshedAt} onRefresh={refreshCurrentView} />
       </header>
 
       <button
@@ -508,10 +582,16 @@ export default function AdminPage() {
             <h1>{meta.label}</h1>
             <span>{meta.desc}</span>
           </div>
-          <button type="button" onClick={view === 'system' ? loadSystem : loadUsers}>새로고침</button>
+          <AdminRefreshButton busy={isRefreshing} lastRefreshedAt={lastRefreshedAt} onRefresh={refreshCurrentView} />
         </header>
 
         {message && <div className="admin-message">{message}</div>}
+
+        <div className={`admin-refresh-status${isRefreshing ? ' is-refreshing' : ''}`}>
+          <span />
+          <strong>{isRefreshing ? '새로고침 중...' : `${lastRefreshLabel} · ${formatTime(lastRefreshedAt)} 기준`}</strong>
+          <em>{refreshSummary}</em>
+        </div>
 
         {view !== 'system' && (
           <div className="admin-kpi-grid">
@@ -597,11 +677,15 @@ export default function AdminPage() {
                 <span>3. 승인 또는 반려</span>
                 <span>4. 사용자 권한 자동 활성화</span>
               </div>
+              <AdminToolbar search={search} onSearch={setSearch} placeholder="승인대기 회원명, 이메일, 입금자명, ID 검색" />
+              <div className="admin-result-summary">
+                승인대기 검색 결과 {filteredPendingUsers.length}명 / 전체 {pendingUsers.length}명
+              </div>
               <AdminTable
                 columns={['회원', '이메일', '입금자명', '신청일', '상태', '액션']}
-                emptyText={loading ? '불러오는 중입니다.' : '승인 대기 회원이 없습니다.'}
+                emptyText={loading ? '불러오는 중입니다.' : search.trim() ? '검색된 승인 대기 회원이 없습니다.' : '승인 대기 회원이 없습니다.'}
               >
-                {pendingUsers.map(user => (
+                {filteredPendingUsers.map(user => (
                   <tr key={user.id}>
                     <td>{user.name}</td>
                     <td>{user.email}</td>
@@ -639,9 +723,19 @@ export default function AdminPage() {
 
         {view === 'subscriptions' && (
           <AdminPanel title="구독 관리" description="정상 구독, 만료 예정, 수동 해제를 관리합니다.">
+            <div className="admin-filter-tabs" aria-label="구독 관리 필터">
+              <button type="button" className={!focus ? 'active' : ''} onClick={() => goAdminView('subscriptions')}>전체</button>
+              <button type="button" className={focus === 'active' ? 'active' : ''} onClick={() => goAdminView('subscriptions', search, 'active')}>활성 PRO</button>
+              <button type="button" className={focus === 'expiring' ? 'active' : ''} onClick={() => goAdminView('subscriptions', search, 'expiring')}>만료일순</button>
+              <button type="button" onClick={() => goAdminView('approvals', search)}>승인대기</button>
+              <button type="button" onClick={() => goAdminView('members', search)}>전체 회원</button>
+            </div>
             <AdminToolbar search={search} onSearch={setSearch} placeholder="회원명, 이메일, ID 검색" />
-            {focus === 'active' && <div className="admin-filter-banner">활성 PRO 구독자를 먼저 정렬했습니다.</div>}
-            {focus === 'expiring' && <div className="admin-filter-banner">PRO 구독자를 만료일이 가까운 순서로 정렬했습니다.</div>}
+            {focus === 'active' && <div className="admin-filter-banner">활성 PRO 구독자만 표시합니다.</div>}
+            {focus === 'expiring' && <div className="admin-filter-banner">만료일이 있는 PRO 구독자를 만료일이 가까운 순서로 표시합니다.</div>}
+            <div className="admin-result-summary">
+              구독 목록 {visibleSubscriptionUsers.length}명 / 전체 회원 {users.length}명
+            </div>
             <div className="admin-action-row admin-subscription-actions">
               <button type="button" disabled={actionId === 'expire-now'} onClick={runExpiryNow}>
                 만료 구독 즉시 처리
@@ -651,7 +745,7 @@ export default function AdminPage() {
               </button>
             </div>
             <AdminTable columns={['회원', '입금자명', '플랜', '승인일', '만료일', '상태', '액션']} emptyText="회원이 없습니다.">
-              {subscriptionUsers.map(user => (
+              {visibleSubscriptionUsers.map(user => (
                 <tr key={user.id}>
                   <td>{user.name}</td>
                   <td>{user.depositorName || '-'}</td>
@@ -689,6 +783,9 @@ export default function AdminPage() {
         {view === 'members' && (
           <AdminPanel title="회원 관리" description="회원 상태, 가입일, 구독권한을 빠르게 확인합니다.">
             <AdminToolbar search={search} onSearch={setSearch} placeholder="회원명, 이메일, ID 검색" />
+            <div className="admin-result-summary">
+              회원 검색 결과 {filteredUsers.length}명 / 전체 {users.length}명
+            </div>
             <AdminTable columns={['회원ID', '회원', '이메일', '역할', '구독', '가입일', '액션']} emptyText="회원이 없습니다.">
               {filteredUsers.map(user => (
                 <tr key={user.id}>
@@ -866,6 +963,23 @@ function AdminPanel({ title, description, children }: { title: string; descripti
       </div>
       {children}
     </section>
+  )
+}
+
+function AdminRefreshButton({
+  busy,
+  lastRefreshedAt,
+  onRefresh,
+}: {
+  busy: boolean
+  lastRefreshedAt: string | null
+  onRefresh: () => void
+}) {
+  return (
+    <button className={`admin-refresh-button${busy ? ' is-refreshing' : ''}`} type="button" disabled={busy} onClick={onRefresh}>
+      <strong>{busy ? '갱신중' : '새로고침'}</strong>
+      <span>{busy ? '데이터 확인' : `${formatTime(lastRefreshedAt)} 기준`}</span>
+    </button>
   )
 }
 
