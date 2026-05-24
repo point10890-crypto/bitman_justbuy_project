@@ -112,6 +112,22 @@ function Stop-JustBuy {
     throw "Unable to stop MiniPC JustBuy process before deploy."
   }
 }
+function Set-LongRunningTaskSettings {
+  param([string]`$TaskName)
+  try {
+    `$settings = New-ScheduledTaskSettingsSet `
+      -AllowStartIfOnBatteries `
+      -DontStopIfGoingOnBatteries `
+      -StartWhenAvailable `
+      -MultipleInstances IgnoreNew `
+      -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
+      -RestartCount 999 `
+      -RestartInterval (New-TimeSpan -Minutes 1)
+    Set-ScheduledTask -TaskName `$TaskName -Settings `$settings | Out-Null
+  } catch {
+    Write-Warning ("Unable to update scheduled task settings for " + `$TaskName + ": " + `$_.Exception.Message)
+  }
+}
 function Move-WithRetry {
   param(
     [string]`$Source,
@@ -134,6 +150,8 @@ function Start-JustBuy {
   `$taskName = 'BitMan-JustBuy-Api'
   `$taskCommand = 'C:\Windows\System32\cmd.exe /c C:\bitman_justbuy\scripts\start-springboot.bat'
   schtasks /Create /TN `$taskName /TR `$taskCommand /SC ONSTART /RU SYSTEM /RL HIGHEST /F | Out-Null
+  Set-LongRunningTaskSettings `$taskName
+  Set-LongRunningTaskSettings 'JustBuy-Watchdog'
   schtasks /Run /TN `$taskName | Out-Null
 }
 
