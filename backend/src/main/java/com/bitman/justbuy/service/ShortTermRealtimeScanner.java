@@ -40,6 +40,7 @@ public class ShortTermRealtimeScanner {
     private static final LocalTime SESSION_START = LocalTime.of(9, 0);
     private static final LocalTime SESSION_END = LocalTime.of(15, 20);
     private static final int RAW_SCAN_LIMIT = 80;
+    private static final int FOREIGN_SCAN_LIMIT = 40;
 
     private final KisApiService kisApiService;
     private final TrackRecordService trackRecordService;
@@ -102,7 +103,9 @@ public class ShortTermRealtimeScanner {
 
         List<KisApiService.RankedStock> volume = kisApiService.fetchRealtimeVolumeRankingStocks(RAW_SCAN_LIMIT);
         List<KisApiService.RankedStock> gainers = kisApiService.fetchRealtimeGainersRankingStocks(RAW_SCAN_LIMIT);
-        List<ConditionSignalDto> signals = buildSignals(volume, gainers, now);
+        List<KisApiService.RankedStock> foreignNetBuy =
+            kisApiService.fetchForeignNetBuyRankingStocks(FOREIGN_SCAN_LIMIT);
+        List<ConditionSignalDto> signals = buildSignals(volume, gainers, foreignNetBuy, now);
         latest = new ScanSnapshot(
             nowKst(now),
             now.toInstant(),
@@ -111,8 +114,8 @@ public class ShortTermRealtimeScanner {
             signals
         );
         recordTrackableSignals(signals, now);
-        log.info("[ShortTermRealtime] scan completed: picks={}, volumeRank={}, gainerRank={}",
-            signals.size(), volume.size(), gainers.size());
+        log.info("[ShortTermRealtime] scan completed: picks={}, volumeRank={}, gainerRank={}, foreignRank={}",
+            signals.size(), volume.size(), gainers.size(), foreignNetBuy.size());
         return latest;
     }
 
@@ -149,6 +152,13 @@ public class ShortTermRealtimeScanner {
     List<ConditionSignalDto> buildSignals(List<KisApiService.RankedStock> volume,
                                           List<KisApiService.RankedStock> gainers,
                                           ZonedDateTime now) {
+        return buildSignals(volume, gainers, List.of(), now);
+    }
+
+    List<ConditionSignalDto> buildSignals(List<KisApiService.RankedStock> volume,
+                                          List<KisApiService.RankedStock> gainers,
+                                          List<KisApiService.RankedStock> foreignNetBuy,
+                                          ZonedDateTime now) {
         resetDailySeen(now.toLocalDate());
 
         Map<String, Candidate> candidates = new LinkedHashMap<>();
@@ -160,6 +170,13 @@ public class ShortTermRealtimeScanner {
         rank = 1;
         for (KisApiService.RankedStock stock : safeList(gainers)) {
             merge(candidates, stock).gainerRank = rank++;
+        }
+
+        rank = 1;
+        for (KisApiService.RankedStock stock : safeList(foreignNetBuy)) {
+            Candidate candidate = merge(candidates, stock);
+            candidate.foreignRank = rank++;
+            candidate.foreignNetBuy = Math.max(candidate.foreignNetBuy, stock.foreignNetBuy());
         }
 
         List<Candidate> sorted = candidates.values().stream()
@@ -191,6 +208,7 @@ public class ShortTermRealtimeScanner {
         candidate.changeRate = Math.max(candidate.changeRate, parseDouble(stock.changeRate()));
         candidate.volumeText = firstNonBlank(stock.volume(), candidate.volumeText);
         candidate.volume = Math.max(candidate.volume, parseLong(stock.volume()));
+        candidate.foreignNetBuy = Math.max(candidate.foreignNetBuy, stock.foreignNetBuy());
         return candidate;
     }
 
@@ -258,6 +276,10 @@ public class ShortTermRealtimeScanner {
         return (value >= 0 ? "+" : "") + String.format(Locale.US, "%.2f", value) + "%";
     }
 
+    private static String formatShares(long value) {
+        return NumberFormat.getInstance(Locale.KOREA).format(value) + "주";
+    }
+
     private static final class Candidate {
         String name = "";
         String code = "";
@@ -266,23 +288,27 @@ public class ShortTermRealtimeScanner {
         String volumeText = "";
         double changeRate;
         long volume;
+        long foreignNetBuy;
         int volumeRank;
         int gainerRank;
+        int foreignRank;
         int score;
+        ConditionSignalScoring.ScoreBreakdown scoreBreakdown;
 
         boolean hasUsableCode() {
             return code != null && code.matches("\\d{6}") && name != null && !name.isBlank();
         }
 
         void calculateScore() {
-            int next = 48;
-            if (volumeRank > 0) next += Math.max(0, 31 - volumeRank);
-            if (gainerRank > 0) next += Math.max(0, 31 - gainerRank);
-            if (volumeRank > 0 && gainerRank > 0) next += 10;
-            next += (int) Math.min(16, Math.max(0, changeRate * 2.5));
-            if (volume >= 1_000_000) next += 5;
-            else if (volume >= 300_000) next += 3;
-            score = Math.min(99, next);
+            scoreBreakdown = ConditionSignalScoring.shortTerm(
+                volumeRank,
+                gainerRank,
+                foreignRank,
+                changeRate,
+                volume,
+                foreignNetBuy
+            );
+            score = scoreBreakdown.finalScore();
         }
 
         ConditionSignalDto toSignal(int rank, String capturedAt) {
@@ -290,18 +316,35 @@ public class ShortTermRealtimeScanner {
             String pct = changeRateText == null || changeRateText.isBlank()
                 ? formatPercent(changeRate)
                 : normalizePercent(changeRateText);
-            String volumeLabel = volume > 0 ? NumberFormat.getInstance(Locale.KOREA).format(volume) + "주" : firstNonBlank(volumeText, "-");
+            String volumeLabel = volume > 0
+                ? NumberFormat.getInstance(Locale.KOREA).format(volume) + "주"
+                : firstNonBlank(volumeText, "-");
 
             List<String> evidence = new ArrayList<>();
             evidence.add("KIS 정규장 실시간 스캔");
-            if (volumeRank > 0) evidence.add("거래량 상위 " + volumeRank + "위");
-            if (gainerRank > 0) evidence.add("상승률 상위 " + gainerRank + "위");
             evidence.add("거래량 " + volumeLabel);
+            if (scoreBreakdown != null) {
+                evidence.addAll(scoreBreakdown.evidence());
+            }
 
             String summary = "KIS 실시간 랭킹 기반 단타 포착";
             if (volumeRank > 0) summary += " · 거래량 " + volumeRank + "위";
             if (gainerRank > 0) summary += " · 상승률 " + gainerRank + "위";
+            if (foreignRank > 0) summary += " · 외국인 순매수 " + foreignRank + "위";
+            if (foreignNetBuy > 0) summary += " · 외국인 " + formatShares(foreignNetBuy);
             summary += " · 등락률 " + pct;
+
+            List<String> riskFlags = new ArrayList<>(List.of(
+                "단타 변동성 관리",
+                "거래량 급감 시 신호 약화",
+                "추격 매수 주의"
+            ));
+            if (scoreBreakdown != null) {
+                riskFlags.addAll(scoreBreakdown.riskFlags());
+            }
+            int ruleScore = scoreBreakdown != null ? scoreBreakdown.ruleScore() : score;
+            int aiScore = scoreBreakdown != null ? scoreBreakdown.aiScore() : 0;
+            int finalScore = scoreBreakdown != null ? scoreBreakdown.finalScore() : score;
 
             return new ConditionSignalDto(
                 ConditionSection.SHORT_TERM.responseKey(),
@@ -314,12 +357,12 @@ public class ShortTermRealtimeScanner {
                 pct,
                 pct,
                 "실시간 포착",
-                score,
-                0,
-                score,
+                ruleScore,
+                aiScore,
+                finalScore,
                 summary,
-                evidence,
-                List.of("단타 변동성 확대", "거래량 급감 시 신호 약화", "추격 매수 주의"),
+                List.copyOf(evidence),
+                List.copyOf(riskFlags),
                 "상승률 둔화, 거래량 순위 이탈, 고점 대비 급락",
                 capturedAt
             );

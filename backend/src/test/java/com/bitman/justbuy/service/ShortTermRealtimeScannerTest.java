@@ -53,6 +53,35 @@ class ShortTermRealtimeScannerTest {
     }
 
     @Test
+    void buildSignalsBoostsStocksConfirmedByForeignNetBuyRanking() {
+        ShortTermRealtimeScanner scanner = new ShortTermRealtimeScanner(null);
+        ZonedDateTime now = ZonedDateTime.of(2026, 5, 18, 9, 25, 0, 0, ZoneId.of("Asia/Seoul"));
+
+        List<KisApiService.RankedStock> volume = List.of(
+            stock("거래량강세", "111111", "12000", "2.10", "1800000"),
+            stock("수급동반", "222222", "24000", "4.20", "950000"),
+            stock("상승률강세", "333333", "18000", "5.00", "700000")
+        );
+        List<KisApiService.RankedStock> gainers = List.of(
+            stock("상승률강세", "333333", "18000", "5.00", "700000"),
+            stock("수급동반", "222222", "24000", "4.20", "950000"),
+            stock("거래량강세", "111111", "12000", "2.10", "1800000")
+        );
+        List<KisApiService.RankedStock> foreignNetBuy = List.of(
+            stock("수급동반", "222222", "24000", "4.20", "950000", 150000),
+            stock("상승률강세", "333333", "18000", "5.00", "700000", 20000)
+        );
+
+        List<ConditionSignalDto> signals = scanner.buildSignals(volume, gainers, foreignNetBuy, now);
+
+        assertThat(signals).hasSize(3);
+        assertThat(signals.getFirst().stockCode()).isEqualTo("222222");
+        assertThat(signals.getFirst().summary()).contains("외국인 순매수 1위");
+        assertThat(signals.getFirst().evidence()).contains("외국인 순매수 상위 1위");
+        assertThat(signals.getFirst().aiScore()).isGreaterThan(50);
+    }
+
+    @Test
     void buildSignalsExcludesEtfEtfLikeProductsFromShortTermPicks() {
         ShortTermRealtimeScanner scanner = new ShortTermRealtimeScanner(null);
         ZonedDateTime now = ZonedDateTime.of(2026, 5, 18, 9, 20, 0, 0, ZoneId.of("Asia/Seoul"));
@@ -80,5 +109,10 @@ class ShortTermRealtimeScannerTest {
 
     private static KisApiService.RankedStock stock(String name, String code, String price, String change, String volume) {
         return new KisApiService.RankedStock(name, code, price, change, volume, 0);
+    }
+
+    private static KisApiService.RankedStock stock(String name, String code, String price, String change, String volume,
+                                                  long foreignNetBuy) {
+        return new KisApiService.RankedStock(name, code, price, change, volume, foreignNetBuy);
     }
 }

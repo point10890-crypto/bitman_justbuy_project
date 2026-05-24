@@ -24,15 +24,42 @@ function Run-Step {
     Write-Host ""
 }
 
+function Assert-LastExitCode {
+    param([string]$CommandName)
+    if ($LASTEXITCODE -ne 0) {
+        throw "$CommandName failed with exit code $LASTEXITCODE"
+    }
+}
+
 function Invoke-RemotePowerShell {
     param([string]$Script)
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Script))
-    ssh $Remote "powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded"
+    $remoteScript = "C:/Windows/Temp/bitman-remote-$Stamp-$([Guid]::NewGuid().ToString('N')).ps1"
+    $localScript = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetFileName($remoteScript))
+    Set-Content -LiteralPath $localScript -Value $Script -Encoding UTF8
+    try {
+        scp $localScript "${Remote}:$remoteScript"
+        Assert-LastExitCode "scp remote script"
+        ssh $Remote "powershell -NoProfile -ExecutionPolicy Bypass -File $remoteScript"
+        Assert-LastExitCode "remote powershell"
+    } finally {
+        Remove-Item -LiteralPath $localScript -Force -ErrorAction SilentlyContinue
+        $oldPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "SilentlyContinue"
+            ssh $Remote "powershell -NoProfile -Command `"Remove-Item -LiteralPath '$remoteScript' -Force -ErrorAction SilentlyContinue`"" 2>$null | Out-Null
+            $global:LASTEXITCODE = 0
+        } finally {
+            $ErrorActionPreference = $oldPreference
+        }
+    }
 }
 
 Run-Step "Frontend build" {
     Push-Location $FrontendDir
-    try { npm run build } finally { Pop-Location }
+    try {
+        npm run build
+        Assert-LastExitCode "npm run build"
+    } finally { Pop-Location }
 }
 
 Run-Step "Copy frontend dist into Spring static resources" {
@@ -49,13 +76,19 @@ Run-Step "Copy frontend dist into Spring static resources" {
 if (-not $SkipTests) {
     Run-Step "Backend tests" {
         Push-Location $BackendDir
-        try { .\gradlew.bat test } finally { Pop-Location }
+        try {
+            .\gradlew.bat test
+            Assert-LastExitCode "gradlew test"
+        } finally { Pop-Location }
     }
 }
 
 Run-Step "Backend bootJar" {
     Push-Location $BackendDir
-    try { .\gradlew.bat bootJar -x test } finally { Pop-Location }
+    try {
+        .\gradlew.bat bootJar -x test
+        Assert-LastExitCode "gradlew bootJar"
+    } finally { Pop-Location }
     if (-not (Test-Path $JarPath)) {
         throw "JAR build output not found: $JarPath"
     }
@@ -82,6 +115,7 @@ Write-Host "MiniPC preflight OK"
 
 Run-Step "Upload JAR to MiniPC temp" {
     scp $JarPath "${Remote}:$RemoteUpload"
+    Assert-LastExitCode "scp JAR"
 }
 
 Run-Step "Swap JAR and restart MiniPC service" {
@@ -115,14 +149,16 @@ function Stop-JustBuy {
 function Set-LongRunningTaskSettings {
   param([string]`$TaskName)
   try {
-    `$settings = New-ScheduledTaskSettingsSet `
-      -AllowStartIfOnBatteries `
-      -DontStopIfGoingOnBatteries `
-      -StartWhenAvailable `
-      -MultipleInstances IgnoreNew `
-      -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
-      -RestartCount 999 `
-      -RestartInterval (New-TimeSpan -Minutes 1)
+    `$taskSettings = @{
+      AllowStartIfOnBatteries = `$true
+      DontStopIfGoingOnBatteries = `$true
+      StartWhenAvailable = `$true
+      MultipleInstances = 'IgnoreNew'
+      ExecutionTimeLimit = New-TimeSpan -Seconds 0
+      RestartCount = 999
+      RestartInterval = New-TimeSpan -Minutes 1
+    }
+    `$settings = New-ScheduledTaskSettingsSet @taskSettings
     Set-ScheduledTask -TaskName `$TaskName -Settings `$settings | Out-Null
   } catch {
     Write-Warning ("Unable to update scheduled task settings for " + `$TaskName + ": " + `$_.Exception.Message)
