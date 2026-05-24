@@ -9,7 +9,7 @@ export default function LoginPage() {
   const { login, user, isLoading } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [rememberMe, setRememberMe] = useState(() => localStorage.getItem('bitman_remember') === '1')
+  const [rememberMe, setRememberMe] = useState(() => localStorage.getItem('bitman_remember') !== '0')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 

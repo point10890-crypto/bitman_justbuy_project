@@ -510,6 +510,17 @@
   margin-top: 12px;
 }
 
+.bm-price {
+  display: inline-flex;
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255,216,23,.12);
+  color: #ffd817;
+  font-size: 18px;
+  font-weight: 950;
+}
+
 .bm-footer {
   padding: 30px clamp(18px, 5vw, 64px) 46px;
   border-top: 1px solid #17191d;
@@ -708,7 +719,7 @@
   font-weight: 950;
 }
 
-.subscription-title span {
+.subscription-title .subscription-duration {
   display: inline-flex;
   margin-top: 12px;
   min-height: 30px;
@@ -718,6 +729,31 @@
   background: rgba(255,50,23,.12);
   color: #ff8b7b;
   font-size: 12px;
+  font-weight: 950;
+}
+
+.subscription-price {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255,216,23,.35);
+  border-radius: 10px;
+  background: rgba(255,216,23,.08);
+}
+
+.subscription-price span {
+  color: var(--maker-muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.subscription-price strong {
+  color: #ffd817;
+  font-size: 28px;
+  line-height: 1;
   font-weight: 950;
 }
 
@@ -956,7 +992,7 @@
 
 .my-status-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
   margin-bottom: 16px;
 }

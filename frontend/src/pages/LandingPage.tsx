@@ -138,6 +138,7 @@ export default function LandingPage() {
         <div>
           <p className="bm-eyebrow">Monthly Plan</p>
           <h2>월간 이용권</h2>
+          <strong className="bm-price">월 구독료 30,000원</strong>
           <p>구독자는 종목명, 포착가, 최고가, 수익률, AI 요약, 종목 알림이를 모두 확인할 수 있습니다.</p>
         </div>
         <button type="button" onClick={() => navigate('/register')}>구독 시작하기</button>

@@ -96,6 +96,7 @@ export default function MyPage() {
           <div><span>상태</span><strong>{subscriptionLabel(user.subscription, user.subscriptionExpired, user.subscriptionRenewalPending)}</strong></div>
           <div><span>만료일</span><strong>{user.subscriptionEndDate || '-'}</strong></div>
           <div><span>입금자명</span><strong>{user.depositorName || '-'}</strong></div>
+          <div><span>월 구독료</span><strong>30,000원</strong></div>
         </div>
         <button
           className="my-primary-button"

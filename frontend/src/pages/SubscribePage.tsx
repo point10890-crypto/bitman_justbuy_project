@@ -7,6 +7,7 @@ const BANK_ACCOUNT = '2259-02-04-057670'
 const BANK_NAME = '국민은행'
 const ACCOUNT_HOLDER = '이종민'
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
+const MONTHLY_PRICE_LABEL = '30,000원'
 
 function PlanFeature({ children }: { children: React.ReactNode }) {
   return (
@@ -164,7 +165,11 @@ export default function SubscribePage() {
         <div className="subscription-title">
           <p>Monthly Plan</p>
           <h1>{routeState?.renewal ? '월간 이용권 연장' : '월간 이용권'}</h1>
-          <span>30일 구독권</span>
+          <span className="subscription-duration">30일 구독권</span>
+          <div className="subscription-price">
+            <span>월 구독료</span>
+            <strong>{MONTHLY_PRICE_LABEL}</strong>
+          </div>
         </div>
 
         {routeState?.message && <div className="subscription-route-message">{routeState.message}</div>}
