@@ -698,7 +698,7 @@ export default function AdminPage() {
                 <span>4. 사용자 권한 자동 활성화</span>
               </div>
               <AdminToolbar search={search} onSearch={setSearch} placeholder="승인대기 회원명, 이메일, 입금자명, ID 검색" />
-              <div className="admin-result-summary">
+              <div className="admin-result-summary" data-sort="pending-newest-first-v2">
                 최신 신청순 · 승인대기 검색 결과 {filteredPendingUsers.length}명 / 전체 {pendingUsers.length}명
               </div>
               <AdminTable
