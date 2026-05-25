@@ -58,6 +58,18 @@ function emitUnauthorized() {
   }
 }
 
+async function readErrorMessage(res: Response, fallback: string): Promise<string> {
+  const text = await res.text()
+  if (!text) return fallback
+
+  try {
+    const json = JSON.parse(text)
+    return json.error || json.message || fallback
+  } catch {
+    return text || fallback
+  }
+}
+
 /**
  * 공통 에러 처리:
  * - 401 → 전역 unauthorized 이벤트 발송 (AuthContext가 logout 처리)
@@ -73,15 +85,7 @@ async function handleError(res: Response, silent401 = false): Promise<never> {
   if (res.status >= 500) {
     throw new Error('서버에 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해주세요.')
   }
-  const text = await res.text()
-  let msg: string
-  try {
-    const json = JSON.parse(text)
-    msg = json.error || text
-  } catch {
-    msg = text || `HTTP ${res.status}`
-  }
-  throw new Error(msg)
+  throw new Error(await readErrorMessage(res, `HTTP ${res.status}`))
 }
 
 /** fetch 래퍼: 네트워크 에러(TypeError) → 사용자 친화 메시지로 변환 */
@@ -114,7 +118,20 @@ export async function loginUser(email: string, password: string, rememberMe?: bo
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password, rememberMe: !!rememberMe }),
   })
-  if (!res.ok) await handleError(res)
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      const message = await readErrorMessage(
+        res,
+        '이메일 또는 비밀번호가 올바르지 않습니다. PRO 승인된 계정 이메일로 다시 확인해주세요.',
+      )
+      throw new Error(
+        message.includes('비밀번호')
+          ? `${message} PRO 승인된 계정 이메일인지 다시 확인해주세요.`
+          : message,
+      )
+    }
+    await handleError(res)
+  }
   return res.json()
 }
 
