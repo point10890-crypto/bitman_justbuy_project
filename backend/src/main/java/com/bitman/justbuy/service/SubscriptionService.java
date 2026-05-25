@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -101,6 +102,9 @@ public class SubscriptionService {
     public List<UserDto> getPendingSubscriptions() {
         return userRepository.findBySubscription(SubscriptionStatus.PENDING)
             .stream()
+            .sorted(Comparator
+                .comparing(User::getCreatedAt, Comparator.nullsFirst(Comparator.naturalOrder()))
+                .reversed())
             .map(UserDto::from)
             .toList();
     }

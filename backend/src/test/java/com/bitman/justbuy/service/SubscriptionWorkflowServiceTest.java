@@ -11,8 +11,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -53,6 +56,26 @@ class SubscriptionWorkflowServiceTest {
         assertThat(user.getDepositorName()).isEqualTo("Hong Gil Dong");
         assertThat(user.getSubscriptionEndDate()).isNull();
         verify(userRepository).save(user);
+    }
+
+    @Test
+    void getPendingSubscriptionsReturnsNewestMembersFirst() {
+        User older = new User("older@example.com", "older", "hash");
+        older.setSubscription(SubscriptionStatus.PENDING);
+        ReflectionTestUtils.setField(older, "createdAt", LocalDateTime.of(2026, 5, 1, 9, 0));
+
+        User newest = new User("newest@example.com", "newest", "hash");
+        newest.setSubscription(SubscriptionStatus.PENDING);
+        ReflectionTestUtils.setField(newest, "createdAt", LocalDateTime.of(2026, 5, 26, 11, 30));
+
+        when(userRepository.findBySubscription(SubscriptionStatus.PENDING))
+            .thenReturn(List.of(older, newest));
+
+        var pending = service.getPendingSubscriptions();
+
+        assertThat(pending)
+            .extracting(dto -> dto.email())
+            .containsExactly("newest@example.com", "older@example.com");
     }
 
     @Test

@@ -116,6 +116,17 @@ function formatDate(value?: string | null) {
   return new Date(value).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })
 }
 
+function formatDateTime(value?: string | null) {
+  if (!value) return '-'
+  return new Date(value).toLocaleString('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function formatTime(value?: string | null) {
   if (!value) return '미갱신'
   return new Date(value).toLocaleTimeString('ko-KR', {
@@ -136,6 +147,13 @@ function matchesUserSearch(user: UserDto, rawQuery: string) {
     user.subscription,
     user.subscriptionEndDate ?? '',
   ].some(value => value.toLowerCase().includes(q))
+}
+
+function newestUserFirst(a: UserDto, b: UserDto) {
+  const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0
+  const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0
+  if (aCreated !== bCreated) return bCreated - aCreated
+  return a.name.localeCompare(b.name, 'ko-KR')
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -232,7 +250,9 @@ export default function AdminPage() {
   }, [search, users])
 
   const filteredPendingUsers = useMemo(() => {
-    return pendingUsers.filter(user => matchesUserSearch(user, search))
+    return pendingUsers
+      .filter(user => matchesUserSearch(user, search))
+      .sort(newestUserFirst)
   }, [pendingUsers, search])
 
   const subscriptionUsers = useMemo(() => {
@@ -679,7 +699,7 @@ export default function AdminPage() {
               </div>
               <AdminToolbar search={search} onSearch={setSearch} placeholder="승인대기 회원명, 이메일, 입금자명, ID 검색" />
               <div className="admin-result-summary">
-                승인대기 검색 결과 {filteredPendingUsers.length}명 / 전체 {pendingUsers.length}명
+                최신 신청순 · 승인대기 검색 결과 {filteredPendingUsers.length}명 / 전체 {pendingUsers.length}명
               </div>
               <AdminTable
                 columns={['회원', '이메일', '입금자명', '신청일', '상태', '액션']}
@@ -690,7 +710,7 @@ export default function AdminPage() {
                     <td>{user.name}</td>
                     <td>{user.email}</td>
                     <td>{user.depositorName || '-'}</td>
-                    <td>{formatDate(user.createdAt)}</td>
+                    <td>{formatDateTime(user.createdAt)}</td>
                     <td><StatusBadge status={user.subscription} /></td>
                     <td className="admin-row-actions">
                       <button disabled={actionId === user.id} onClick={() => runAction(user, 'approve')}>승인</button>
