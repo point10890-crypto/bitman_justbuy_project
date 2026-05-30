@@ -1732,7 +1732,8 @@
 }
 
 .category-icon-target::before,
-.category-icon-leader::before {
+.category-icon-leader::before,
+.category-icon-close::before {
   width: 36px;
   height: 36px;
   border-radius: 50%;
@@ -1740,7 +1741,8 @@
   top: 20px;
 }
 .category-icon-target::after,
-.category-icon-leader::after {
+.category-icon-leader::after,
+.category-icon-close::after {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -3322,14 +3324,16 @@
     height: 58px;
   }
   .category-icon-target::before,
-  .category-icon-leader::before {
+  .category-icon-leader::before,
+  .category-icon-close::before {
     width: 28px;
     height: 28px;
     left: 15px;
     top: 15px;
   }
   .category-icon-target::after,
-  .category-icon-leader::after {
+  .category-icon-leader::after,
+  .category-icon-close::after {
     left: 26px;
     top: 26px;
   }
@@ -5573,7 +5577,8 @@ body,
   }
 
   .category-icon-target::before,
-  .category-icon-leader::before {
+  .category-icon-leader::before,
+  .category-icon-close::before {
     width: 24px;
     height: 24px;
     left: 10px;
@@ -5582,7 +5587,8 @@ body,
   }
 
   .category-icon-target::after,
-  .category-icon-leader::after {
+  .category-icon-leader::after,
+  .category-icon-close::after {
     width: 5px;
     height: 5px;
     left: 19px;

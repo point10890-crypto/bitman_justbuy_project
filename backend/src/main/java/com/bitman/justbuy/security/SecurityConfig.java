@@ -63,6 +63,7 @@ public class SecurityConfig {
                 // Public API
                 .requestMatchers(new AntPathRequestMatcher("/api/health")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/api/market/**")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/api/kr/jongga-v2/**")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/api/auth/register"),
                                  new AntPathRequestMatcher("/api/auth/login")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/api/analysis/**")).authenticated()

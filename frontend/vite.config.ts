@@ -33,6 +33,10 @@ export default defineConfig({
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
+      '/api/kr': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
       '/api/analysis': {
         target: 'http://localhost:8080',
         changeOrigin: true,

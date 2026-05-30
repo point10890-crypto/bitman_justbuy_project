@@ -66,6 +66,7 @@ export interface MainConditionResponse {
     swing: ConditionSectionResponse
     leaders: ConditionSectionResponse
     themes: ConditionSectionResponse
+    closingBet: ConditionSectionResponse
     alerts: ConditionSectionResponse
   }
   trackRecord: TrackRecordSummary

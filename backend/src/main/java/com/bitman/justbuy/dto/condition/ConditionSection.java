@@ -7,6 +7,7 @@ public enum ConditionSection {
     SWING("swing", "swing", "스윙", "REVERSAL_EDGE"),
     LEADERS("leaders", "leaders", "주도주", "FLOW_LEADER"),
     THEMES("themes", "themes", "테마주", "CATALYST_BURST"),
+    CLOSING_BET("closing-bet", "closingBet", "종가매매", "JONGGA_V2"),
     ALERTS("alerts", "alerts", "종목 알림이", null);
 
     private final String slug;

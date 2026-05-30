@@ -11,6 +11,7 @@ public record MainConditionResponse(
         ConditionSectionResponse swing,
         ConditionSectionResponse leaders,
         ConditionSectionResponse themes,
+        ConditionSectionResponse closingBet,
         ConditionSectionResponse alerts
     ) {}
 }

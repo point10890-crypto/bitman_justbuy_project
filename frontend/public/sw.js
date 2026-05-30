@@ -1,6 +1,6 @@
 /** BitMan Service Worker - freshness-first app shell */
 
-const CACHE_NAME = 'bitman-v20260525-auth-login'
+const CACHE_NAME = 'bitman-v20260530-closing-bet-r2'
 const SHELL_ASSETS = [
   '/manifest.json',
 ]
@@ -16,6 +16,12 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
       .then(() => self.clients.claim())
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then((clients) => {
+        clients.forEach((client) => {
+          if (client.url) client.navigate(client.url)
+        })
+      })
   )
 })
 

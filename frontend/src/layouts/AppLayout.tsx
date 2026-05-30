@@ -240,6 +240,10 @@ export default function AppLayout() {
                         <strong>테마주</strong>
                         <span>공시 · 뉴스 테마</span>
                       </button>
+                      <button type="button" role="menuitem" onClick={() => goHomeSection('closing-bet')}>
+                        <strong>종가매매</strong>
+                        <span>장마감 후보 조건검색</span>
+                      </button>
                       <button type="button" role="menuitem" onClick={() => goHomeSection('alerts')}>
                         <strong>종목 알림이</strong>
                         <span>관심 종목 알림</span>
@@ -350,6 +354,14 @@ export default function AppLayout() {
           <button className={isSectionActive('leaders') ? 'active' : ''} aria-current={isSectionActive('leaders') ? 'page' : undefined} type="button" onClick={() => goHomeSection('leaders')}>
             <span className="nav-line-icon chart-icon" />
             <span>주도주</span>
+          </button>
+          <button className={isSectionActive('themes') ? 'active' : ''} aria-current={isSectionActive('themes') ? 'page' : undefined} type="button" onClick={() => goHomeSection('themes')}>
+            <span className="nav-line-icon chart-icon" />
+            <span>테마</span>
+          </button>
+          <button className={isSectionActive('closing-bet') ? 'active' : ''} aria-current={isSectionActive('closing-bet') ? 'page' : undefined} type="button" onClick={() => goHomeSection('closing-bet')}>
+            <span className="nav-line-icon chart-icon" />
+            <span>종가</span>
           </button>
           <button
             className={`${isSectionActive('alerts') ? 'active' : ''}${hasNewAlert ? ' has-new-alert' : ''}`}

@@ -10,6 +10,7 @@ import com.bitman.justbuy.dto.condition.ConditionSignalDto;
 import com.bitman.justbuy.dto.condition.MainConditionResponse;
 import com.bitman.justbuy.dto.condition.TrackRecordSummary;
 import com.bitman.justbuy.util.StockUniverseFilters;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -40,21 +41,32 @@ public class MainConditionService {
 
     private final ConditionSearchPipeline conditionSearchPipeline;
     private final ShortTermRealtimeScanner shortTermRealtimeScanner;
+    private final JonggaV2SearchService jonggaV2SearchService;
 
     public MainConditionService(ConditionSearchPipeline conditionSearchPipeline) {
-        this(conditionSearchPipeline, (ShortTermRealtimeScanner) null);
+        this(conditionSearchPipeline, (ShortTermRealtimeScanner) null, null);
     }
 
     @Autowired
     public MainConditionService(ConditionSearchPipeline conditionSearchPipeline,
-                                ObjectProvider<ShortTermRealtimeScanner> shortTermRealtimeScannerProvider) {
-        this(conditionSearchPipeline, shortTermRealtimeScannerProvider.getIfAvailable());
+                                ObjectProvider<ShortTermRealtimeScanner> shortTermRealtimeScannerProvider,
+                                ObjectProvider<JonggaV2SearchService> jonggaV2SearchServiceProvider) {
+        this(conditionSearchPipeline,
+            shortTermRealtimeScannerProvider.getIfAvailable(),
+            jonggaV2SearchServiceProvider.getIfAvailable());
     }
 
     MainConditionService(ConditionSearchPipeline conditionSearchPipeline,
                          ShortTermRealtimeScanner shortTermRealtimeScanner) {
+        this(conditionSearchPipeline, shortTermRealtimeScanner, null);
+    }
+
+    MainConditionService(ConditionSearchPipeline conditionSearchPipeline,
+                         ShortTermRealtimeScanner shortTermRealtimeScanner,
+                         JonggaV2SearchService jonggaV2SearchService) {
         this.conditionSearchPipeline = conditionSearchPipeline;
         this.shortTermRealtimeScanner = shortTermRealtimeScanner;
+        this.jonggaV2SearchService = jonggaV2SearchService;
     }
 
     public MainConditionResponse getMain() {
@@ -63,17 +75,19 @@ public class MainConditionService {
         ConditionSectionResponse swing = getSection(ConditionSection.SWING);
         ConditionSectionResponse leaders = getSection(ConditionSection.LEADERS);
         ConditionSectionResponse themes = getSection(ConditionSection.THEMES);
+        ConditionSectionResponse closingBet = getSection(ConditionSection.CLOSING_BET);
 
         List<ConditionSignalDto> allSignals = new ArrayList<>();
         allSignals.addAll(shortTerm.signals());
         allSignals.addAll(swing.signals());
         allSignals.addAll(leaders.signals());
         allSignals.addAll(themes.signals());
-        ConditionSectionResponse alerts = alertsSection(allSignals, alertSourceStatus(shortTerm, swing, leaders, themes));
+        allSignals.addAll(closingBet.signals());
+        ConditionSectionResponse alerts = alertsSection(allSignals, alertSourceStatus(shortTerm, swing, leaders, themes, closingBet));
 
         return new MainConditionResponse(
             asOf,
-            new MainConditionResponse.Sections(shortTerm, swing, leaders, themes, alerts),
+            new MainConditionResponse.Sections(shortTerm, swing, leaders, themes, closingBet, alerts),
             summarize(allSignals),
             NOTICE
         );
@@ -88,10 +102,11 @@ public class MainConditionService {
         ConditionSectionResponse swing = getSection(ConditionSection.SWING);
         ConditionSectionResponse leaders = getSection(ConditionSection.LEADERS);
         ConditionSectionResponse themes = getSection(ConditionSection.THEMES);
+        ConditionSectionResponse closingBet = getSection(ConditionSection.CLOSING_BET);
         return captureTimesResponse(
             "/api/conditions/capture-times",
-            alertSourceStatus(shortTerm, swing, leaders, themes),
-            List.of(shortTerm, swing, leaders, themes)
+            alertSourceStatus(shortTerm, swing, leaders, themes, closingBet),
+            List.of(shortTerm, swing, leaders, themes, closingBet)
         );
     }
 
@@ -111,12 +126,14 @@ public class MainConditionService {
             ConditionSectionResponse swing = getSection(ConditionSection.SWING);
             ConditionSectionResponse leaders = getSection(ConditionSection.LEADERS);
             ConditionSectionResponse themes = getSection(ConditionSection.THEMES);
+            ConditionSectionResponse closingBet = getSection(ConditionSection.CLOSING_BET);
             List<ConditionSignalDto> signals = new ArrayList<>();
             signals.addAll(shortTerm.signals());
             signals.addAll(swing.signals());
             signals.addAll(leaders.signals());
             signals.addAll(themes.signals());
-            return alertsSection(signals, alertSourceStatus(shortTerm, swing, leaders, themes));
+            signals.addAll(closingBet.signals());
+            return alertsSection(signals, alertSourceStatus(shortTerm, swing, leaders, themes, closingBet));
         }
 
         if (section == ConditionSection.SHORT_TERM) {
@@ -133,6 +150,10 @@ public class MainConditionService {
                     snapshot.get().signals()
                 );
             }
+        }
+
+        if (section == ConditionSection.CLOSING_BET) {
+            return closingBetSection();
         }
 
         AnalysisResponse response = null;
@@ -318,8 +339,119 @@ public class MainConditionService {
             case "REVERSAL_EDGE" -> "스윙 포착";
             case "FLOW_LEADER" -> "주도주 포착";
             case "CATALYST_BURST" -> "테마주 포착";
+            case "JONGGA_V2" -> "종가매매 포착";
             default -> "조건 포착";
         };
+    }
+
+    private ConditionSectionResponse closingBetSection() {
+        if (jonggaV2SearchService == null) {
+            return new ConditionSectionResponse(
+                ConditionSection.CLOSING_BET.responseKey(),
+                ConditionSection.CLOSING_BET.slug(),
+                ConditionSection.CLOSING_BET.title(),
+                ConditionSection.CLOSING_BET.legacyMode(),
+                "/api/conditions/" + ConditionSection.CLOSING_BET.slug(),
+                nowKst(),
+                "DATA_UNAVAILABLE",
+                List.of()
+            );
+        }
+
+        JsonNode latest = jonggaV2SearchService.latest();
+        List<ConditionSignalDto> signals = new ArrayList<>();
+        int rank = 1;
+        for (JsonNode signal : latest.path("signals")) {
+            if (rank > 3) break;
+            signals.add(toClosingBetSignal(signal, rank++));
+        }
+
+        String date = latest.path("date").asText("");
+        return new ConditionSectionResponse(
+            ConditionSection.CLOSING_BET.responseKey(),
+            ConditionSection.CLOSING_BET.slug(),
+            ConditionSection.CLOSING_BET.title(),
+            ConditionSection.CLOSING_BET.legacyMode(),
+            "/api/conditions/" + ConditionSection.CLOSING_BET.slug(),
+            closingBetAsOf(date),
+            signals.isEmpty() ? "DATA_UNAVAILABLE" : "PRECOMPUTED",
+            signals
+        );
+    }
+
+    private ConditionSignalDto toClosingBetSignal(JsonNode signal, int rank) {
+        int score = signal.path("score").path("total").asInt(70);
+        String entry = formatNumber(signal.path("entry_price").asLong(signal.path("current_price").asLong(0)));
+        String current = formatNumber(signal.path("current_price").asLong(signal.path("entry_price").asLong(0)));
+        String target = formatNumber(signal.path("target_price").asLong(0));
+        String grade = signal.path("grade").asText("포착");
+        String stockName = normalizeDisplay(signal.path("stock_name").asText(""), "종가 후보");
+        String summary = normalizeDisplay(
+            signal.path("score").path("llm_reason").asText(""),
+            firstNewsTitle(signal.path("news_items"), stockName + " 종가매매 조건검색 후보입니다.")
+        );
+
+        return new ConditionSignalDto(
+            ConditionSection.CLOSING_BET.responseKey(),
+            ConditionSection.CLOSING_BET.legacyMode(),
+            rank,
+            stockName,
+            signal.path("stock_code").asText(""),
+            entry,
+            current,
+            target,
+            calculateReturn(entry, target),
+            grade,
+            score,
+            score,
+            score,
+            summary,
+            closingBetEvidence(signal),
+            List.of("종가 변동성", "익일 갭 리스크", "거래대금 급감"),
+            "종가 기준 진입가 이탈, 거래대금 둔화, 뉴스 모멘텀 약화",
+            closingBetAsOf(signal.path("signal_date").asText(""))
+        );
+    }
+
+    private List<String> closingBetEvidence(JsonNode signal) {
+        List<String> evidence = new ArrayList<>();
+        evidence.add("종가매매 V2");
+        String grade = signal.path("grade").asText("");
+        if (!grade.isBlank()) evidence.add("등급 " + grade);
+        String market = signal.path("market").asText("");
+        if (!market.isBlank()) evidence.add(market);
+        signal.path("themes").forEach(theme -> {
+            String value = theme.asText("");
+            if (!value.isBlank()) evidence.add(value);
+        });
+        if (signal.path("foreign_5d").asLong(0) > 0) evidence.add("외국인 5일 순매수");
+        if (signal.path("inst_5d").asLong(0) > 0) evidence.add("기관 5일 순매수");
+        return evidence;
+    }
+
+    private static String firstNewsTitle(JsonNode newsItems, String fallback) {
+        if (newsItems != null && newsItems.isArray() && newsItems.size() > 0) {
+            String title = newsItems.get(0).path("title").asText("");
+            if (!title.isBlank()) return title;
+        }
+        return fallback;
+    }
+
+    private static String closingBetAsOf(String date) {
+        if (date == null || date.isBlank()) return nowKst();
+        String normalized = date.trim();
+        if (normalized.matches("\\d{8}")) {
+            normalized = normalized.substring(0, 4) + "-" + normalized.substring(4, 6) + "-" + normalized.substring(6, 8);
+        }
+        if (normalized.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            return normalized + "T15:10:00+09:00";
+        }
+        return nowKst();
+    }
+
+    private static String formatNumber(long value) {
+        if (value <= 0) return "-";
+        return String.format(Locale.KOREA, "%,d", value);
     }
 
     private String alertKey(ConditionSignalDto signal) {
@@ -503,6 +635,14 @@ public class MainConditionService {
                 "대장주 판별",
                 "대장주"
             );
+            case CLOSING_BET -> List.of(
+                "종가매매 V2",
+                "뉴스",
+                "거래대금",
+                "차트",
+                "수급",
+                "등급"
+            );
             default -> List.of("조건검색 섹션 진입", "목표 조건 도달", "알림 후보");
         };
     }
@@ -513,6 +653,7 @@ public class MainConditionService {
             case SWING -> "눌림목 지지선 이탈, 추세선 훼손, 주도 섹터 약화";
             case LEADERS -> "외국인/기관 수급 이탈, 거래대금 감소, 섹터 강도 하락";
             case THEMES -> "DART/뉴스 재료 소멸, 관련주 동반 반응 약화, 대장주 교체";
+            case CLOSING_BET -> "종가 기준 진입가 이탈, 거래대금 둔화, 뉴스 모멘텀 약화";
             default -> "사용자 알림 조건 해제";
         };
     }

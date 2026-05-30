@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAnalysis, type AnalysisResult } from '../hooks/useAnalysis'
-import { useAuth } from '../contexts/AuthContext'
+import { getStoredToken, useAuth } from '../contexts/AuthContext'
 import { useMainConditions } from '../hooks/useMainConditions'
-import type { ConditionSectionResponse } from '../api/conditionApi'
+import { fetchConditionSection, type ConditionSectionResponse } from '../api/conditionApi'
 
 type Section = {
   id: string
-  icon: 'target' | 'swing' | 'leader' | 'theme' | 'alert'
+  icon: 'target' | 'swing' | 'leader' | 'theme' | 'alert' | 'close'
   title: string
   mode?: string
   query?: string
@@ -69,6 +69,17 @@ const sections: Section[] = [
     ],
   },
   {
+    id: 'closing-bet',
+    icon: 'close',
+    title: '종가매매',
+    mode: 'JONGGA_V2',
+    query: '오늘 종가매매 후보 분석',
+    columns: ['종목명', '진입가', '목표가', '등급'],
+    rows: [
+      { name: '종가 후보', a: '준비중', b: '준비중', c: '-' },
+    ],
+  },
+  {
     id: 'alerts',
     icon: 'alert',
     title: '종목 알림이',
@@ -105,59 +116,6 @@ function rowsFromCondition(section: ConditionSectionResponse | undefined, fallba
     capturedAt: signal.capturedAt,
     captureTime: formatKstTime(signal.capturedAt),
   }))
-}
-
-function extractPercent(text?: string) {
-  if (!text) return ''
-  return text.match(/[+-]\d+(?:\.\d+)?%/)?.[0] || ''
-}
-
-function rowsFromEndpointResult(section: Section, result: AnalysisResult): Section['rows'] {
-  if (!result.stockPicks?.length) return []
-  return result.stockPicks.slice(0, 3).map(pick => {
-    const name = pick.name || pick.code || '포착 종목'
-    const currentPrice = pick.currentPrice || '-'
-    const targetPrice = pick.targetPrice || currentPrice
-    const action = pick.action || '주목'
-    const percent = extractPercent(pick.reason) || extractPercent(result.content)
-
-    if (section.id === 'leaders') {
-      return {
-        name,
-        code: pick.code,
-        a: currentPrice,
-        b: percent || targetPrice,
-        c: action,
-        summary: pick.reason,
-        capturedAt: result.updatedAt,
-        captureTime: formatKstTime(result.updatedAt),
-      }
-    }
-
-    if (section.id === 'themes') {
-      return {
-        name,
-        code: pick.code,
-        a: pick.reason ? 'AI 포착' : '테마 포착',
-        b: currentPrice,
-        c: percent || action,
-        summary: pick.reason,
-        capturedAt: result.updatedAt,
-        captureTime: formatKstTime(result.updatedAt),
-      }
-    }
-
-    return {
-      name,
-      code: pick.code,
-      a: currentPrice,
-      b: targetPrice,
-      c: section.id === 'short-term' ? percent || action : action,
-      summary: pick.reason,
-      capturedAt: result.updatedAt,
-      captureTime: formatKstTime(result.updatedAt),
-    }
-  })
 }
 
 function sectionSourceStatus(section: ConditionSectionResponse | undefined) {
@@ -291,21 +249,17 @@ export default function HomePage() {
     clear()
   }
 
-  const loadLegacyEndpoint = async (section: Section) => {
-    if (!section.mode) return
-    const analysisQuery = section.query || `${section.title} 최신 분석`
-    setActiveQuery(analysisQuery)
-    setPanelOpen(true)
+  const loadConditionEndpoint = async (section: Section) => {
+    if (section.id === 'alerts') return
     setEndpointLoading(section.id)
-    setEndpointStatus(prev => ({ ...prev, [section.id]: '기존 엔드포인트 호출 중' }))
+    setEndpointStatus(prev => ({ ...prev, [section.id]: '조건검색 엔드포인트 호출 중' }))
 
-    const latest = await analyze(analysisQuery, section.mode)
-    if (latest?.stockPicks?.length) {
-      const nextRows = rowsFromEndpointResult(section, latest)
-      setEndpointRows(prev => ({ ...prev, [section.id]: nextRows }))
-      setEndpointStatus(prev => ({ ...prev, [section.id]: latest.isPrecomputed ? '기존 엔드포인트 반영' : '실시간 분석 반영' }))
-    } else {
-      setEndpointStatus(prev => ({ ...prev, [section.id]: '결과 없음' }))
+    try {
+      const latest = await fetchConditionSection(section.id, getStoredToken() || undefined)
+      setEndpointRows(prev => ({ ...prev, [section.id]: rowsFromCondition(latest, section.rows) }))
+      setEndpointStatus(prev => ({ ...prev, [section.id]: latest.signals?.length ? `${latest.title} 엔드포인트 반영` : `${latest.title} 결과 없음` }))
+    } catch (err) {
+      setEndpointStatus(prev => ({ ...prev, [section.id]: err instanceof Error ? err.message : '엔드포인트 호출 실패' }))
     }
     setEndpointLoading(null)
   }
@@ -316,7 +270,7 @@ export default function HomePage() {
 
   const runThemeEndpoint = () => {
     const themeSection = sections.find(section => section.id === 'themes')
-    if (themeSection) loadLegacyEndpoint(themeSection)
+    if (themeSection) loadConditionEndpoint(themeSection)
   }
 
   const runStockEndpoint = () => {
@@ -368,13 +322,14 @@ export default function HomePage() {
       section.id === 'swing' ? mainConditions?.sections.swing :
       section.id === 'leaders' ? mainConditions?.sections.leaders :
       section.id === 'themes' ? mainConditions?.sections.themes :
+      section.id === 'closing-bet' ? mainConditions?.sections.closingBet :
       section.id === 'alerts' ? mainConditions?.sections.alerts :
       undefined
 
     return {
       ...section,
       rows: endpointRows[section.id] || rowsFromCondition(apiSection, section.rows),
-      sourceStatus: endpointLoading === section.id ? '기존 엔드포인트 호출 중' : endpointStatus[section.id] || sectionSourceStatus(apiSection),
+      sourceStatus: endpointLoading === section.id ? '조건검색 엔드포인트 호출 중' : endpointStatus[section.id] || sectionSourceStatus(apiSection),
       asOf: apiSection?.asOf,
       asOfLabel: formatKstTime(apiSection?.asOf),
       warning: sectionWarning(apiSection),
@@ -421,7 +376,7 @@ export default function HomePage() {
             <button
               className="top3-badge"
               type="button"
-              onClick={() => section.mode ? runAnalysis(section.query || section.title, section.mode) : document.getElementById('alerts')?.scrollIntoView({ behavior: 'smooth' })}
+              onClick={() => section.id === 'alerts' ? document.getElementById('alerts')?.scrollIntoView({ behavior: 'smooth' }) : loadConditionEndpoint(section)}
             >
               TOP3
             </button>
@@ -442,7 +397,7 @@ export default function HomePage() {
                 className="rank-table-row"
                 type="button"
                 key={`${section.id}-${row.name}`}
-                onClick={() => section.mode && runAnalysis(`${row.name} ${section.title} 상세 분석`, section.mode)}
+                onClick={() => section.mode && runAnalysis(`${row.name} ${section.title} 상세 분석`, section.mode === 'JONGGA_V2' ? '분석해줘' : section.mode)}
               >
                 <span className="rank-name">
                   <strong>{index + 1}</strong>
@@ -463,14 +418,14 @@ export default function HomePage() {
             )}
           </div>
 
-          {section.mode && (
+          {section.mode && section.id !== 'alerts' && (
             <button
               className="section-endpoint-button"
               type="button"
-              disabled={endpointLoading === section.id || loading}
-              onClick={() => loadLegacyEndpoint(section)}
+              disabled={endpointLoading === section.id}
+              onClick={() => loadConditionEndpoint(section)}
             >
-              {endpointLoading === section.id ? '기존 분석 엔드포인트 호출 중...' : '기존 분석 엔드포인트로 최신 결과 불러오기'}
+              {endpointLoading === section.id ? '조건검색 엔드포인트 호출 중...' : `${section.title} 조건검색 엔드포인트 불러오기`}
             </button>
           )}
         </section>
