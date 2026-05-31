@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -13,6 +14,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -33,16 +35,16 @@ public class JonggaV2SearchService {
     private final ObjectMapper mapper;
     private final List<Path> dataDirs;
 
+    @Autowired
     public JonggaV2SearchService(ObjectMapper mapper,
-                                 @Value("${bitman.storage.data-dir:./data}") String dataDir) {
+                                 @Value("${bitman.storage.data-dir:./data}") String dataDir,
+                                 @Value("${bitman.jongga-v2.extra-data-dirs:C:/bitman_marketfloww/data}") String extraDataDirs) {
         this.mapper = mapper;
-        this.dataDirs = List.of(
-            Path.of(dataDir),
-            Path.of("..", "data"),
-            Path.of("data"),
-            Path.of("..", "frontend", "data-snapshot"),
-            Path.of("frontend", "data-snapshot")
-        );
+        this.dataDirs = buildDataDirs(dataDir, extraDataDirs);
+    }
+
+    JonggaV2SearchService(ObjectMapper mapper, String dataDir) {
+        this(mapper, dataDir, "");
     }
 
     public JsonNode latest() {
@@ -238,5 +240,32 @@ public class JonggaV2SearchService {
     private static int capLimit(Integer limit) {
         if (limit == null || limit <= 0) return DEFAULT_LIMIT;
         return Math.min(limit, MAX_LIMIT);
+    }
+
+    private static List<Path> buildDataDirs(String dataDir, String extraDataDirs) {
+        List<Path> candidates = new ArrayList<>();
+        addExtraDataDirs(candidates, extraDataDirs);
+        candidates.add(Path.of(dataDir));
+        candidates.add(Path.of("..", "data"));
+        candidates.add(Path.of("data"));
+        candidates.add(Path.of("..", "frontend", "data-snapshot"));
+        candidates.add(Path.of("frontend", "data-snapshot"));
+
+        LinkedHashSet<Path> unique = new LinkedHashSet<>();
+        for (Path candidate : candidates) {
+            if (candidate == null) continue;
+            unique.add(candidate.toAbsolutePath().normalize());
+        }
+        return List.copyOf(unique);
+    }
+
+    private static void addExtraDataDirs(List<Path> candidates, String extraDataDirs) {
+        if (extraDataDirs == null || extraDataDirs.isBlank()) return;
+        for (String value : extraDataDirs.split("[,;]")) {
+            String trimmed = value.trim();
+            if (!trimmed.isBlank()) {
+                candidates.add(Path.of(trimmed));
+            }
+        }
     }
 }

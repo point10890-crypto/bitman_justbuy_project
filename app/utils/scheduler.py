@@ -450,7 +450,7 @@ def _run_crypto_pipeline():
 # ============================================================
 
 def _run_round1():
-    """1차 업데이트 (15:10 KST) — 종가베팅 V2"""
+    """1차 업데이트 (15:00 KST) — 종가베팅 V2"""
     if not _is_weekday_kst():
         logger.info("⏭️ 주말 — Round 1 스킵")
         return True
@@ -647,7 +647,7 @@ def _cloud_scheduler_loop():
 
     # KST를 UTC로 변환하는 헬퍼
     def kst_to_utc(kst_time_str: str) -> str:
-        """'15:10' (KST) → '06:10' (UTC) 변환"""
+        """'15:00' (KST) → '06:00' (UTC) 변환"""
         h, m = map(int, kst_time_str.split(':'))
         utc_h = (h - 9) % 24
         return f"{utc_h:02d}:{m:02d}"
@@ -667,8 +667,8 @@ def _cloud_scheduler_loop():
         getattr(sched.every(), day).at(sched_time('04:00')).do(
             _safe_run, _run_us_update, 'US Market Update'
         )
-        # 15:10 KST — KR 종가베팅 V2
-        getattr(sched.every(), day).at(sched_time('15:10')).do(
+        # 15:00 KST — KR 종가베팅 V2
+        getattr(sched.every(), day).at(sched_time('15:00')).do(
             _safe_run, _run_round1, 'KR Round 1 (종가베팅)'
         )
         # 16:00 KST — KR 수급/VCP/리포트
@@ -692,7 +692,7 @@ def _cloud_scheduler_loop():
     logger.info(f"   환경: {'Render (UTC)' if is_render else 'Local (KST)'}")
     logger.info(f"   🌐 매일 07:00 KST → 전체 올 업데이트 (US+KR+Crypto)")
     logger.info(f"   🇺🇸 평일 04:00 KST → US Market")
-    logger.info(f"   🇰🇷 평일 15:10 KST → 종가베팅 V2")
+    logger.info(f"   🇰🇷 평일 15:00 KST → 종가베팅 V2")
     logger.info(f"   🇰🇷 평일 16:00 KST → 수급/VCP")
     logger.info(f"   🪙 매일 4시간마다 → Crypto")
 
@@ -701,7 +701,7 @@ def _cloud_scheduler_loop():
         "<b>⏰ CloudScheduler 시작</b>\n\n"
         f"🌐 매일 07:00 KST → 전체 올 업데이트\n"
         f"🇺🇸 US: 04:00 KST (평일)\n"
-        f"🇰🇷 KR: 15:10, 16:00 KST (평일)\n"
+        f"🇰🇷 KR: 15:00, 16:00 KST (평일)\n"
         f"🪙 Crypto: 4시간마다 (24/7)\n"
         f"📍 {'Render' if is_render else 'Local'}"
     )

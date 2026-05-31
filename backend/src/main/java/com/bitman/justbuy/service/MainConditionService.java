@@ -444,7 +444,7 @@ public class MainConditionService {
             normalized = normalized.substring(0, 4) + "-" + normalized.substring(4, 6) + "-" + normalized.substring(6, 8);
         }
         if (normalized.matches("\\d{4}-\\d{2}-\\d{2}")) {
-            return normalized + "T15:10:00+09:00";
+            return normalized + "T15:00:00+09:00";
         }
         return nowKst();
     }

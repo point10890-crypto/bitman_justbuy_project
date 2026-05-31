@@ -11,6 +11,7 @@ type Section = {
   title: string
   mode?: string
   query?: string
+  scheduleLabel?: string
   columns: string[]
   rows: Array<{ name: string; a: string; b: string; c: string; code?: string; summary?: string; capturedAt?: string; captureTime?: string }>
 }
@@ -74,6 +75,7 @@ const sections: Section[] = [
     title: '종가매매',
     mode: 'JONGGA_V2',
     query: '오늘 종가매매 후보 분석',
+    scheduleLabel: '종목 검출 시간 · 장중 오후 3시 검출',
     columns: ['종목명', '진입가', '목표가', '등급'],
     rows: [
       { name: '종가 후보', a: '준비중', b: '준비중', c: '-' },
@@ -372,6 +374,7 @@ export default function HomePage() {
                 {conditionsLoading ? '조건검색 갱신 중' : section.sourceStatus}
                 {!conditionsLoading && section.asOfLabel ? ` · ${section.asOfLabel} 기준` : ''}
               </span>
+              {section.scheduleLabel && <em className="rank-schedule-label">{section.scheduleLabel}</em>}
             </div>
             <button
               className="top3-badge"
