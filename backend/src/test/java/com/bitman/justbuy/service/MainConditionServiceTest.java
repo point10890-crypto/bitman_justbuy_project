@@ -200,6 +200,21 @@ class MainConditionServiceTest {
         assertThat(signal.stopLoss()).isEqualTo("29,000");
     }
 
+    @Test
+    void swingSectionCalculatesRiskPricesWhenAgentValuesAreMissingOrInvalid() {
+        when(conditionSearchPipeline.getPrecomputed("REVERSAL_EDGE"))
+            .thenReturn(response("REVERSAL_EDGE",
+                new StockPick("LG Display", "034220", "16,690", "16,690", null, "watch", "swing setup")
+            ));
+
+        MainConditionService service = new MainConditionService(conditionSearchPipeline);
+
+        ConditionSignalDto signal = service.getSection("swing").signals().get(0);
+        assertThat(signal.highPrice()).isEqualTo("17,700");
+        assertThat(signal.stopLoss()).isEqualTo("15,850");
+        assertThat(signal.highPrice()).isNotEqualTo(signal.capturePrice());
+    }
+
     private static AnalysisResponse response(String mode, StockPick... picks) {
         return new AnalysisResponse(
             mode,

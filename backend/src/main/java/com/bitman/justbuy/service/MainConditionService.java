@@ -480,13 +480,15 @@ public class MainConditionService {
         for (int i = 0; i < eligiblePicks.size(); i++) {
             StockPick pick = eligiblePicks.get(i);
             String currentPrice = normalizeDisplay(pick.currentPrice(), "-");
-            String targetPrice = normalizeDisplay(
-                firstNonBlank(pick.targetPrice(), extractAgentPrice(response, pick, false)),
-                currentPrice
+            String targetPrice = ensureValidTargetPrice(
+                section,
+                currentPrice,
+                normalizeDisplay(firstNonBlank(pick.targetPrice(), extractAgentPrice(response, pick, false)), "-")
             );
-            String stopLoss = normalizeDisplay(
-                firstNonBlank(pick.stopLoss(), extractAgentPrice(response, pick, true)),
-                "-"
+            String stopLoss = ensureValidStopLoss(
+                section,
+                currentPrice,
+                normalizeDisplay(firstNonBlank(pick.stopLoss(), extractAgentPrice(response, pick, true)), "-")
             );
             String maxReturnPct = calculateReturn(currentPrice, targetPrice);
             int score = Math.max(55, 88 - (i * 7));
@@ -716,6 +718,50 @@ public class MainConditionService {
 
     private static String firstNonBlank(String first, String second) {
         return first != null && !first.isBlank() ? first : second;
+    }
+
+    private static String ensureValidTargetPrice(ConditionSection section, String currentPrice, String targetPrice) {
+        long current = parseLongPrice(currentPrice);
+        long target = parseLongPrice(targetPrice);
+        if (current <= 0) return normalizeDisplay(targetPrice, "-");
+        if (target > current) return formatLongPrice(target);
+
+        double upside = section == ConditionSection.SWING ? 0.06 : 0.05;
+        return formatLongPrice(roundUpToTick(Math.round(current * (1.0 + upside))));
+    }
+
+    private static String ensureValidStopLoss(ConditionSection section, String currentPrice, String stopLoss) {
+        long current = parseLongPrice(currentPrice);
+        long stop = parseLongPrice(stopLoss);
+        if (current <= 0) return normalizeDisplay(stopLoss, "-");
+        if (stop > 0 && stop < current) return formatLongPrice(stop);
+
+        double downside = section == ConditionSection.SWING ? 0.05 : 0.04;
+        return formatLongPrice(roundDownToTick(Math.round(current * (1.0 - downside))));
+    }
+
+    private static long roundUpToTick(long price) {
+        long tick = tickSize(price);
+        return ((price + tick - 1) / tick) * tick;
+    }
+
+    private static long roundDownToTick(long price) {
+        long tick = tickSize(price);
+        return (price / tick) * tick;
+    }
+
+    private static long tickSize(long price) {
+        if (price < 2_000) return 1;
+        if (price < 5_000) return 5;
+        if (price < 20_000) return 10;
+        if (price < 50_000) return 50;
+        if (price < 200_000) return 100;
+        if (price < 500_000) return 500;
+        return 1_000;
+    }
+
+    private static String formatLongPrice(long price) {
+        return String.format(Locale.KOREA, "%,d", price);
     }
 
     private static String calculateReturn(String base, String high) {
