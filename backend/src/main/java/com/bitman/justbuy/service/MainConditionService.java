@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class MainConditionService {
@@ -478,8 +480,14 @@ public class MainConditionService {
         for (int i = 0; i < eligiblePicks.size(); i++) {
             StockPick pick = eligiblePicks.get(i);
             String currentPrice = normalizeDisplay(pick.currentPrice(), "-");
-            String targetPrice = normalizeDisplay(pick.targetPrice(), currentPrice);
-            String stopLoss = normalizeDisplay(pick.stopLoss(), "-");
+            String targetPrice = normalizeDisplay(
+                firstNonBlank(pick.targetPrice(), extractAgentPrice(response, pick, false)),
+                currentPrice
+            );
+            String stopLoss = normalizeDisplay(
+                firstNonBlank(pick.stopLoss(), extractAgentPrice(response, pick, true)),
+                "-"
+            );
             String maxReturnPct = calculateReturn(currentPrice, targetPrice);
             int score = Math.max(55, 88 - (i * 7));
 
@@ -677,6 +685,37 @@ public class MainConditionService {
         if (action.contains("매도")) return "주의";
         if (action.contains("관망")) return "관찰";
         return action;
+    }
+
+    private static String extractAgentPrice(AnalysisResponse response, StockPick pick, boolean stopLoss) {
+        if (response == null || response.finalContent() == null || pick == null) return "";
+        String content = response.finalContent();
+        int start = findStockSectionStart(content, pick);
+        if (start < 0) return "";
+        String section = content.substring(start, Math.min(content.length(), start + 1800));
+        Pattern pattern = stopLoss
+            ? Pattern.compile("(?:손절가|손절)\\s*[:：]?\\s*([0-9][0-9,]{2,})\\s*원?")
+            : Pattern.compile("(?:1차\\s*)?목표(?:가|구간)?\\s*[:：]?\\s*([0-9][0-9,]{2,})\\s*원?");
+        Matcher matcher = pattern.matcher(section);
+        return matcher.find() ? matcher.group(1) : "";
+    }
+
+    private static int findStockSectionStart(String content, StockPick pick) {
+        String name = pick.name();
+        if (name != null && !name.isBlank()) {
+            int index = content.indexOf(name);
+            if (index >= 0) return index;
+        }
+        String code = pick.code();
+        if (code != null && !code.isBlank()) {
+            int index = content.indexOf(code);
+            if (index >= 0) return index;
+        }
+        return -1;
+    }
+
+    private static String firstNonBlank(String first, String second) {
+        return first != null && !first.isBlank() ? first : second;
     }
 
     private static String calculateReturn(String base, String high) {

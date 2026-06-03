@@ -177,6 +177,29 @@ class MainConditionServiceTest {
             .containsExactly("삼성전자");
     }
 
+    @Test
+    void swingSectionBackfillsMissingRiskPricesFromAgentContent() {
+        AnalysisResponse cached = new AnalysisResponse(
+            "REVERSAL_EDGE",
+            "REVERSAL_EDGE query",
+            List.of(),
+            null,
+            "Robotis\n1\uCC28 \uBAA9\uD45C: 34,350\uC6D0\n\uC190\uC808\uAC00: 29,000\uC6D0",
+            List.of(new StockPick("Robotis", "108490", "31,200", null, null, "watch", "swing setup")),
+            null,
+            "2026-05-17T09:10:00+09:00",
+            true,
+            new AnalysisResponse.Metadata(100, 1, 1)
+        );
+        when(conditionSearchPipeline.getPrecomputed("REVERSAL_EDGE")).thenReturn(cached);
+
+        MainConditionService service = new MainConditionService(conditionSearchPipeline);
+
+        ConditionSignalDto signal = service.getSection("swing").signals().get(0);
+        assertThat(signal.highPrice()).isEqualTo("34,350");
+        assertThat(signal.stopLoss()).isEqualTo("29,000");
+    }
+
     private static AnalysisResponse response(String mode, StockPick... picks) {
         return new AnalysisResponse(
             mode,
