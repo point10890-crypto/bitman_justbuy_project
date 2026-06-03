@@ -319,6 +319,7 @@ public class MainConditionService {
             condition,
             normalizeDisplay(signal.currentPrice(), "-"),
             "새 알림",
+            "",
             "앱",
             "새 알림",
             signal.ruleScore(),
@@ -384,6 +385,7 @@ public class MainConditionService {
         String entry = formatNumber(signal.path("entry_price").asLong(signal.path("current_price").asLong(0)));
         String current = formatNumber(signal.path("current_price").asLong(signal.path("entry_price").asLong(0)));
         String target = formatNumber(signal.path("target_price").asLong(0));
+        String stop = formatNumber(signal.path("stop_price").asLong(0));
         String grade = signal.path("grade").asText("포착");
         String stockName = normalizeDisplay(signal.path("stock_name").asText(""), "종가 후보");
         String summary = normalizeDisplay(
@@ -400,6 +402,7 @@ public class MainConditionService {
             entry,
             current,
             target,
+            stop,
             calculateReturn(entry, target),
             grade,
             score,
@@ -476,6 +479,7 @@ public class MainConditionService {
             StockPick pick = eligiblePicks.get(i);
             String currentPrice = normalizeDisplay(pick.currentPrice(), "-");
             String targetPrice = normalizeDisplay(pick.targetPrice(), currentPrice);
+            String stopLoss = normalizeDisplay(pick.stopLoss(), "-");
             String maxReturnPct = calculateReturn(currentPrice, targetPrice);
             int score = Math.max(55, 88 - (i * 7));
 
@@ -488,6 +492,7 @@ public class MainConditionService {
                 currentPrice,
                 currentPrice,
                 targetPrice,
+                stopLoss,
                 maxReturnPct,
                 normalizeStatus(pick.action()),
                 score,
@@ -564,6 +569,7 @@ public class MainConditionService {
             capturePrice,
             capturePrice,
             highPrice,
+            "",
             maxReturnPct,
             status,
             score,

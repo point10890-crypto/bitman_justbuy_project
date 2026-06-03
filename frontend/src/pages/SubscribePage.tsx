@@ -28,14 +28,31 @@ function SubscriptionActions({ onManage, onLogout }: { onManage: () => void; onL
   )
 }
 
+function BankAccountBox({ copied, onCopy }: { copied: boolean; onCopy: () => void }) {
+  return (
+    <div className="bank-box">
+      <div>
+        <span>입금 계좌</span>
+        <strong>{BANK_NAME} {BANK_ACCOUNT}</strong>
+        <small>예금주 {ACCOUNT_HOLDER}</small>
+      </div>
+      <button type="button" onClick={onCopy}>{copied ? '복사됨' : '복사'}</button>
+    </div>
+  )
+}
+
 function SubscriptionPending({
   onRefresh,
   onManage,
   onLogout,
+  copied,
+  onCopyAccount,
 }: {
   onRefresh: () => void
   onManage: () => void
   onLogout: () => void
+  copied: boolean
+  onCopyAccount: () => void
 }) {
   return (
     <main className="subscription-page">
@@ -58,6 +75,7 @@ function SubscriptionPending({
           <div><strong>3</strong><span>이용 시작</span></div>
         </div>
 
+        <BankAccountBox copied={copied} onCopy={onCopyAccount} />
         <button className="auth-submit" type="button" onClick={onRefresh}>승인 상태 새로고침</button>
         <a className="subscription-contact" href={KAKAO_URL} target="_blank" rel="noreferrer">문의하기</a>
         <SubscriptionActions onManage={onManage} onLogout={onLogout} />
@@ -104,12 +122,20 @@ export default function SubscribePage() {
     window.location.replace('/landing')
   }
 
+  const copyAccount = async () => {
+    await navigator.clipboard.writeText(`${BANK_NAME} ${BANK_ACCOUNT} ${ACCOUNT_HOLDER}`)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1600)
+  }
+
   if (user?.subscription === 'pending') {
     return (
       <SubscriptionPending
         onRefresh={refreshUser}
         onManage={() => navigate('/my')}
         onLogout={handleLogout}
+        copied={copied}
+        onCopyAccount={copyAccount}
       />
     )
   }
@@ -120,14 +146,10 @@ export default function SubscribePage() {
         onRefresh={refreshUser}
         onManage={() => navigate('/my')}
         onLogout={handleLogout}
+        copied={copied}
+        onCopyAccount={copyAccount}
       />
     )
-  }
-
-  const copyAccount = async () => {
-    await navigator.clipboard.writeText(`${BANK_NAME} ${BANK_ACCOUNT} ${ACCOUNT_HOLDER}`)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1600)
   }
 
   const handleSubmit = async (event: FormEvent) => {
@@ -181,14 +203,7 @@ export default function SubscribePage() {
           <PlanFeature>KIS/DART 기반 AI 요약 확인</PlanFeature>
         </ul>
 
-        <div className="bank-box">
-          <div>
-            <span>입금 계좌</span>
-            <strong>{BANK_NAME} {BANK_ACCOUNT}</strong>
-            <small>예금주 {ACCOUNT_HOLDER}</small>
-          </div>
-          <button type="button" onClick={copyAccount}>{copied ? '복사됨' : '복사'}</button>
-        </div>
+        <BankAccountBox copied={copied} onCopy={copyAccount} />
 
         {error && <div className="auth-error">{error}</div>}
 

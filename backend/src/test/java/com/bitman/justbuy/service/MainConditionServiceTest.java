@@ -57,6 +57,7 @@ class MainConditionServiceTest {
             "31,200",
             "31,200",
             "+7.50%",
+            "",
             "+7.50%",
             "실시간 포착",
             94,

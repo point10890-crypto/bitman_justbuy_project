@@ -36,7 +36,7 @@ const sections: Section[] = [
     title: '스윙',
     mode: 'REVERSAL_EDGE',
     query: '스윙 눌림목과 반전 후보 분석',
-    columns: ['종목명', '포착가', '목표구간', '상태'],
+    columns: ['종목명', '포착가', '목표가', '손절가'],
     rows: [
       { name: '현대무벡스', a: '31,800', b: '35,000', c: '관찰' },
       { name: '범한퓨얼셀', a: '32,500', b: '38,000', c: '1차' },
@@ -76,7 +76,7 @@ const sections: Section[] = [
     mode: 'JONGGA_V2',
     query: '오늘 종가매매 후보 분석',
     scheduleLabel: '종목 검출 시간 · 장중 오후 3시 검출',
-    columns: ['종목명', '진입가', '목표가', '등급'],
+    columns: ['종목명', '진입가', '목표가', '손절가'],
     rows: [
       { name: '종가 후보', a: '준비중', b: '준비중', c: '-' },
     ],
@@ -113,11 +113,15 @@ function rowsFromCondition(section: ConditionSectionResponse | undefined, fallba
     code: signal.stockCode,
     a: signal.capturePrice || signal.currentPrice || '-',
     b: signal.highPrice || signal.currentPrice || '-',
-    c: signal.maxReturnPct && signal.maxReturnPct !== '-' ? signal.maxReturnPct : signal.status,
+    c: usesRiskPriceColumns(section) ? signal.stopLoss || '-' : signal.maxReturnPct && signal.maxReturnPct !== '-' ? signal.maxReturnPct : signal.status,
     summary: signal.summary,
     capturedAt: signal.capturedAt,
     captureTime: formatKstTime(signal.capturedAt),
   }))
+}
+
+function usesRiskPriceColumns(section: ConditionSectionResponse) {
+  return section.mode === 'REVERSAL_EDGE' || section.mode === 'JONGGA_V2' || section.slug === 'swing' || section.slug === 'closing-bet'
 }
 
 function sectionSourceStatus(section: ConditionSectionResponse | undefined) {

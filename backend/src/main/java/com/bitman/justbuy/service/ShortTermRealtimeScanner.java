@@ -355,6 +355,7 @@ public class ShortTermRealtimeScanner {
                 price,
                 price,
                 pct,
+                "",
                 pct,
                 "실시간 포착",
                 ruleScore,

@@ -116,6 +116,7 @@ class TrackRecordServiceTest {
             price,
             price,
             price,
+            "",
             "+1.00%",
             "실시간 포착",
             score,

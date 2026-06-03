@@ -11,6 +11,7 @@ public record ConditionSignalDto(
     String capturePrice,
     String currentPrice,
     String highPrice,
+    String stopLoss,
     String maxReturnPct,
     String status,
     int ruleScore,

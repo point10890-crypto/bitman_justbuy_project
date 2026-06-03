@@ -9,6 +9,7 @@ export interface ConditionSignal {
   capturePrice: string
   currentPrice: string
   highPrice: string
+  stopLoss: string
   maxReturnPct: string
   status: string
   ruleScore: number
