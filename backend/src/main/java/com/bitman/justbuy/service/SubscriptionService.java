@@ -102,11 +102,20 @@ public class SubscriptionService {
     public List<UserDto> getPendingSubscriptions() {
         return userRepository.findBySubscription(SubscriptionStatus.PENDING)
             .stream()
-            .sorted(Comparator
-                .comparing(User::getCreatedAt, Comparator.nullsFirst(Comparator.naturalOrder()))
-                .reversed())
+            .sorted(newestApprovalRequestFirst())
             .map(UserDto::from)
             .toList();
+    }
+
+    private static Comparator<User> newestApprovalRequestFirst() {
+        return Comparator
+            .comparing(SubscriptionService::approvalRequestTime, Comparator.nullsFirst(Comparator.naturalOrder()))
+            .reversed()
+            .thenComparing(User::getName, Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER));
+    }
+
+    private static LocalDateTime approvalRequestTime(User user) {
+        return user.getCreatedAt();
     }
 
     @Transactional

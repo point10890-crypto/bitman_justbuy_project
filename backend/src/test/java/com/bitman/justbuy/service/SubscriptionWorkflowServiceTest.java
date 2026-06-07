@@ -59,7 +59,7 @@ class SubscriptionWorkflowServiceTest {
     }
 
     @Test
-    void getPendingSubscriptionsReturnsNewestMembersFirst() {
+    void getPendingSubscriptionsReturnsNewestApprovalRequestsFirst() {
         User older = new User("older@example.com", "older", "hash");
         older.setSubscription(SubscriptionStatus.PENDING);
         ReflectionTestUtils.setField(older, "createdAt", LocalDateTime.of(2026, 5, 1, 9, 0));

@@ -7,6 +7,7 @@ import { useMarketData } from '../hooks/useMarketData'
 import { useMainConditions } from '../hooks/useMainConditions'
 
 const LAST_ALERT_EVENT_KEY = 'bitman_seen_alert_event_key'
+const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
 
 function formatToday() {
   return new Intl.DateTimeFormat('ko-KR', {
@@ -124,6 +125,16 @@ export default function AppLayout() {
   const goMenuRoute = (path: string) => {
     setMenuOpen(false)
     navigate(path)
+  }
+
+  const goAdminMode = () => {
+    setMenuOpen(false)
+    navigate('/admin')
+  }
+
+  const openKakaoContact = () => {
+    setMenuOpen(false)
+    window.open(KAKAO_URL, '_blank', 'noopener,noreferrer')
   }
 
   const goHomeAction = (action: 'usage' | 'theme' | 'stock') => {
@@ -373,6 +384,17 @@ export default function AppLayout() {
             <span>알림</span>
             {hasNewAlert && <span className="nav-alert-dot" aria-hidden="true" />}
           </button>
+          {isAdmin ? (
+            <button type="button" onClick={goAdminMode}>
+              <span className="nav-line-icon admin-icon" />
+              <span>ADMIN</span>
+            </button>
+          ) : (
+            <button className="nav-contact-button" type="button" onClick={openKakaoContact}>
+              <span className="kakao-nav-mark">톡</span>
+              <span>문의</span>
+            </button>
+          )}
         </nav>
       )}
     </div>

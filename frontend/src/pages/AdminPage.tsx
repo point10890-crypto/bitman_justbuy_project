@@ -173,10 +173,14 @@ function matchesUserSearch(user: UserDto, rawQuery: string) {
   ].some(value => value.toLowerCase().includes(q))
 }
 
-function newestUserFirst(a: UserDto, b: UserDto) {
-  const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0
-  const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0
-  if (aCreated !== bCreated) return bCreated - aCreated
+function approvalRequestTime(user: UserDto) {
+  return user.createdAt ? new Date(user.createdAt).getTime() : 0
+}
+
+function newestApprovalRequestFirst(a: UserDto, b: UserDto) {
+  const aRequestTime = approvalRequestTime(a)
+  const bRequestTime = approvalRequestTime(b)
+  if (aRequestTime !== bRequestTime) return bRequestTime - aRequestTime
   return a.name.localeCompare(b.name, 'ko-KR')
 }
 
@@ -276,7 +280,7 @@ export default function AdminPage() {
   const filteredPendingUsers = useMemo(() => {
     return pendingUsers
       .filter(user => matchesUserSearch(user, search))
-      .sort(newestUserFirst)
+      .sort(newestApprovalRequestFirst)
   }, [pendingUsers, search])
 
   const subscriptionUsers = useMemo(() => {
