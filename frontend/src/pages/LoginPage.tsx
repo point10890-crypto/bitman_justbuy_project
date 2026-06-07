@@ -130,6 +130,10 @@ export default function LoginPage() {
         <div className="auth-install-row">
           <PWAInstallPrompt variant="compact" showWhenDismissed label="앱 설치하기" />
         </div>
+        <a className="auth-contact-button" href={KAKAO_URL} target="_blank" rel="noreferrer">
+          <span className="kakao-nav-mark">톡</span>
+          <strong>카카오톡 문의</strong>
+        </a>
       </section>
       <a className="public-contact-bottom" href={KAKAO_URL} target="_blank" rel="noreferrer">
         <span className="kakao-nav-mark">톡</span>
