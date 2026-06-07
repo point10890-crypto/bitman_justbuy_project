@@ -132,11 +132,6 @@ export default function AppLayout() {
     navigate('/admin')
   }
 
-  const openKakaoContact = () => {
-    setMenuOpen(false)
-    window.open(KAKAO_URL, '_blank', 'noopener,noreferrer')
-  }
-
   const goHomeAction = (action: 'usage' | 'theme' | 'stock') => {
     setMenuOpen(false)
     try {
@@ -390,10 +385,10 @@ export default function AppLayout() {
               <span>ADMIN</span>
             </button>
           ) : (
-            <button className="nav-contact-button" type="button" onClick={openKakaoContact}>
+            <a className="nav-contact-button" href={KAKAO_URL} target="_blank" rel="noreferrer" onClick={() => setMenuOpen(false)}>
               <span className="kakao-nav-mark">톡</span>
               <span>문의</span>
-            </button>
+            </a>
           )}
         </nav>
       )}

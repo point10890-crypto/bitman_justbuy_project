@@ -2176,7 +2176,8 @@
   border-top: 2px solid var(--maker-line);
 }
 
-.search-bottom-nav button {
+.search-bottom-nav button,
+.search-bottom-nav a {
   min-width: 0;
   border: 0;
   background: transparent;
@@ -2186,9 +2187,53 @@
   gap: 6px;
   font-size: clamp(12px, 3vw, 20px);
   font-weight: 950;
+  text-decoration: none;
 }
 
-.search-bottom-nav button.active {
+/* ===== Public auth contact shortcut ===== */
+.auth-page.with-public-contact,
+.bm-landing.with-public-contact {
+  padding-bottom: calc(104px + env(safe-area-inset-bottom));
+}
+
+.public-contact-bottom {
+  position: fixed;
+  right: 14px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  left: 14px;
+  z-index: 90;
+  min-height: 58px;
+  border: 1px solid rgba(254, 229, 0, .34);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(254, 229, 0, .09), rgba(255, 255, 255, .015)),
+    #171b22;
+  color: #f8f5ed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-decoration: none;
+  box-shadow: 0 16px 38px rgba(0, 0, 0, .52);
+}
+
+.public-contact-bottom strong {
+  font-size: 17px;
+  font-weight: 950;
+  letter-spacing: 0;
+}
+
+@media (min-width: 620px) {
+  .public-contact-bottom {
+    right: 50%;
+    left: auto;
+    width: 460px;
+    transform: translateX(50%);
+  }
+}
+
+.search-bottom-nav button.active,
+.search-bottom-nav a.active {
   color: #fff;
 }
 
@@ -2246,7 +2291,8 @@
   }
 }
 
-.search-bottom-nav button {
+.search-bottom-nav button,
+.search-bottom-nav a {
   position: relative;
 }
 
@@ -5868,7 +5914,8 @@ body,
     -webkit-backdrop-filter: blur(16px);
   }
 
-  .search-bottom-nav button {
+  .search-bottom-nav button,
+  .search-bottom-nav a {
     gap: 2px;
     font-size: 11px;
   }
@@ -7744,7 +7791,8 @@ body,
     -webkit-backdrop-filter: blur(16px);
   }
 
-  .search-bottom-nav button {
+  .search-bottom-nav button,
+  .search-bottom-nav a {
     gap: 2px;
     min-height: 50px;
     font-size: 11px;

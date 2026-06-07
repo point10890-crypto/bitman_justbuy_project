@@ -3,6 +3,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { PWAInstallPrompt } from '../components/app/PWAInstallPrompt'
 import { isSubscriptionExpired, useAuth } from '../contexts/AuthContext'
 
+const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
+
 export default function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -72,7 +74,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="auth-page">
+    <main className="auth-page with-public-contact">
       <section className="auth-card">
         <button className="bitman-logo-lockup auth-logo" type="button" onClick={() => navigate('/landing')}>
           <span className="bitman-logo-mark">B<i /><em /></span>
@@ -129,6 +131,10 @@ export default function LoginPage() {
           <PWAInstallPrompt variant="compact" showWhenDismissed label="앱 설치하기" />
         </div>
       </section>
+      <a className="public-contact-bottom" href={KAKAO_URL} target="_blank" rel="noreferrer">
+        <span className="kakao-nav-mark">톡</span>
+        <strong>카카오톡 문의</strong>
+      </a>
     </main>
   )
 }

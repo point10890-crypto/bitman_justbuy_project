@@ -2,6 +2,8 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { PWAInstallPrompt } from '../components/app/PWAInstallPrompt'
 import { useAuth } from '../contexts/AuthContext'
 
+const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
+
 const previewRows = [
   { label: '단타', name: '로XXX', price: '3XXX', high: '3XXX', rate: '+10.09%' },
   { label: '스윙', name: '현XXX', price: '31,800', high: '35,000', rate: '관찰' },
@@ -32,7 +34,7 @@ export default function LandingPage() {
   if (user) return <Navigate to="/" replace />
 
   return (
-    <main className="bm-landing">
+    <main className="bm-landing with-public-contact">
       <nav className="bm-landing-nav">
         <button className="bitman-logo-lockup" type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
           <span className="bitman-logo-mark">
@@ -148,6 +150,10 @@ export default function LandingPage() {
         <strong>BitMan 오늘 뭐사? AI 조건검색기</strong>
         <span>본 서비스는 투자 참고 정보를 제공하며 투자 판단과 책임은 본인에게 있습니다.</span>
       </footer>
+      <a className="public-contact-bottom" href={KAKAO_URL} target="_blank" rel="noreferrer">
+        <span className="kakao-nav-mark">톡</span>
+        <strong>카카오톡 문의</strong>
+      </a>
     </main>
   )
 }
