@@ -1,5 +1,8 @@
 package com.bitman.justbuy.service;
 
+import com.bitman.justbuy.condition.run.ConditionRunEventType;
+import com.bitman.justbuy.condition.run.ConditionRunService;
+import com.bitman.justbuy.condition.run.ConditionRunTrigger;
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.StockPick;
 import com.bitman.justbuy.util.KoreanMarketCalendar;
@@ -52,6 +55,7 @@ public class PrecomputeScheduler {
     private final TelegramNotifier telegramNotifier;
     private final KisApiService kisApiService;
     private final MarketDataService marketDataService;
+    private final ConditionRunService conditionRunService;
     private final Map<String, String> lastRunTimes = new ConcurrentHashMap<>();
 
     public PrecomputeScheduler(AnalysisService analysisService,
@@ -59,12 +63,14 @@ public class PrecomputeScheduler {
                                @org.springframework.beans.factory.annotation.Autowired(required = false)
                                TelegramNotifier telegramNotifier,
                                KisApiService kisApiService,
-                               MarketDataService marketDataService) {
+                               MarketDataService marketDataService,
+                               ConditionRunService conditionRunService) {
         this.analysisService = analysisService;
         this.formulaCatalog = formulaCatalog;
         this.telegramNotifier = telegramNotifier;
         this.kisApiService = kisApiService;
         this.marketDataService = marketDataService;
+        this.conditionRunService = conditionRunService;
         log.info("[Scheduler] 컨셉 모드 4종 스케줄러 초기화 (매시 50분, KST), telegram={}", telegramNotifier != null);
     }
 
@@ -83,32 +89,52 @@ public class PrecomputeScheduler {
         Map<String, String> scheduledModes = formulaCatalog.scheduledQueries();
         for (var entry : scheduledModes.entrySet()) {
             String mode = entry.getKey();
+            String query = entry.getValue();
             total++;
             try {
                 var cached = analysisService.getPrecomputed(mode);
                 if (cached != null) {
-                    if (cached.updatedAt() != null) lastRunTimes.put(mode, cached.updatedAt());
-                    log.info("[Scheduler] ✅ {} — 캐시 유효, 건너뜀", mode);
-                    success++;
-                    // ★ v2.8.7 (2026-04-29): 캐시된 결과도 dedup + name disambiguation 적용
-                    //   — 옛 캐시(중복 포함) 그대로 재발송 방지
-                    cached = postProcessPicks(mode, cached, seenCodes);
-                    // 장 시간(8~15시) 재시작이면 캐시 결과 즉시 발송 — 누락 방지
-                    // v2.8.5 (2026-04-27): 1차 cron(08:50) 결과 텔레그램 발송 허용 (08시 포함)
-                    int kstHour = ZonedDateTime.now(ZoneId.of("Asia/Seoul")).getHour();
-                    if (telegramNotifier != null && kstHour >= 8 && kstHour < 16) {
+                    var run = conditionRunService.create(ConditionRunTrigger.SCHEDULER_STARTUP, mode, query);
+                    try {
+                        if (cached.updatedAt() != null) lastRunTimes.put(mode, cached.updatedAt());
+                        log.info("[Scheduler] ✅ {} — 캐시 유효, 건너뜀", mode);
+                        success++;
+                        // ★ v2.8.7 (2026-04-29): 캐시된 결과도 dedup + name disambiguation 적용
+                        //   — 옛 캐시(중복 포함) 그대로 재발송 방지
+                        cached = postProcessPicks(mode, cached, seenCodes);
+                        conditionRunService.recordEvent(run.runId(), ConditionRunEventType.CACHE_HIT,
+                            "startup precompute cache hit", Map.of("mode", mode));
+                        // 장 시간(8~15시) 재시작이면 캐시 결과 즉시 발송 — 누락 방지
+                        // v2.8.5 (2026-04-27): 1차 cron(08:50) 결과 발송 허용 위해 08시 포함
+                        int kstHour = ZonedDateTime.now(ZoneId.of("Asia/Seoul")).getHour();
+                        boolean isMarketHours = kstHour >= 8 && kstHour < 16;
                         var picks = cached.stockPicks();
                         var meta  = cached.metadata();
+                        int pickCount = picks != null ? picks.size() : 0;
                         int succeeded = meta != null ? meta.agentsSucceeded() : 0;
-                        if (picks != null && !picks.isEmpty() && succeeded > 0) {
+                        if (telegramNotifier != null && isMarketHours && pickCount > 0 && succeeded > 0) {
                             log.info("[Scheduler] 📨 {} — 장중 재시작 감지, 캐시 결과 즉시 발송 (dedup 적용)", mode);
                             telegramNotifier.sendAnalysisResult(mode, cached);
+                            conditionRunService.recordEvent(run.runId(), ConditionRunEventType.NOTIFIED,
+                                "startup cached result sent", Map.of("pickCount", pickCount));
+                        } else {
+                            conditionRunService.recordEvent(run.runId(), ConditionRunEventType.NOTIFICATION_SKIPPED,
+                                "startup cached notification skipped", Map.of(
+                                    "pickCount", pickCount,
+                                    "agentsSucceeded", succeeded,
+                                    "marketHours", isMarketHours,
+                                    "notifierConfigured", telegramNotifier != null
+                                ));
                         }
+                        conditionRunService.markComplete(run.runId(), cached);
+                    } catch (Exception e) {
+                        conditionRunService.markFailed(run.runId(), e.getMessage());
+                        throw e;
                     }
                     continue;
                 }
                 log.info("[Scheduler] ▶ {} — 캐시 없음, 자동 실행", mode);
-                execute(mode, entry.getValue(), seenCodes);
+                execute(mode, query, seenCodes, ConditionRunTrigger.SCHEDULER_STARTUP);
                 success++;
             } catch (Exception e) {
                 log.error("[Scheduler] ❌ {} 시작 시 실행 실패: {}", mode, e.getMessage());
@@ -151,7 +177,7 @@ public class PrecomputeScheduler {
         Map<String, String> scheduledModes = formulaCatalog.scheduledQueries();
         for (var entry : scheduledModes.entrySet()) {
             try {
-                execute(entry.getKey(), entry.getValue(), seenCodes);
+                execute(entry.getKey(), entry.getValue(), seenCodes, ConditionRunTrigger.SCHEDULER_CRON);
                 success++;
             } catch (Exception e) {
                 log.error("[Scheduler] ❌ {}:50 {} 실패: {}", hour, entry.getKey(), e.getMessage());
@@ -335,7 +361,7 @@ public class PrecomputeScheduler {
     }
 
     private void execute(String mode, String query) {
-        execute(mode, query, null);
+        execute(mode, query, null, ConditionRunTrigger.UNKNOWN);
     }
 
     /**
@@ -345,12 +371,20 @@ public class PrecomputeScheduler {
      *                   분석 후 이 set 에 본 모드의 코드들이 추가됨 (다음 모드용).
      */
     private void execute(String mode, String query, Set<String> seenCodes) {
+        execute(mode, query, seenCodes, ConditionRunTrigger.UNKNOWN);
+    }
+
+    private void execute(String mode, String query, Set<String> seenCodes, ConditionRunTrigger trigger) {
         String now = ZonedDateTime.now(ZoneId.of("Asia/Seoul"))
             .format(DateTimeFormatter.ofPattern("HH:mm:ss"));
         log.info("[Scheduler] ▶ {} 실행 시작 ({})", mode, now);
 
+        var run = conditionRunService.create(trigger, mode, query);
         long startMs = System.currentTimeMillis();
         try {
+            conditionRunService.markStarted(run.runId(), "scheduler analysis started");
+            conditionRunService.recordEvent(run.runId(), ConditionRunEventType.AI_STARTED,
+                "scheduler pipeline run started", Map.of("mode", mode));
             AnalysisResponse result = analysisService.runLiveAnalysis(query, mode);
             if (result.updatedAt() != null) lastRunTimes.put(mode, result.updatedAt());
 
@@ -365,6 +399,8 @@ public class PrecomputeScheduler {
             int agentsUsed = meta != null ? meta.agentsUsed() : 0;
             int agentsSucceeded = meta != null ? meta.agentsSucceeded() : 0;
             int picks = result.stockPicks() != null ? result.stockPicks().size() : 0;
+            conditionRunService.recordEvent(run.runId(), ConditionRunEventType.PICKS_PARSED,
+                "scheduler analysis result parsed", Map.of("pickCount", picks));
 
             log.info("[Scheduler] ✅ {} 완료 ({}ms, {}/{} agents)",
                 mode, durationMs, agentsSucceeded, agentsUsed);
@@ -381,12 +417,23 @@ public class PrecomputeScheduler {
             boolean isMarketHours = kstHour >= 8 && kstHour < 16;
             if (telegramNotifier != null && picks > 0 && agentsSucceeded > 0 && isMarketHours) {
                 telegramNotifier.sendAnalysisResult(mode, result);
+                conditionRunService.recordEvent(run.runId(), ConditionRunEventType.NOTIFIED,
+                    "scheduler result sent", Map.of("pickCount", picks));
             } else {
                 log.info("[Scheduler] {} 텔레그램 Skip — picks={}, agents={}/{}, marketHours={}({}시)",
                     mode, picks, agentsSucceeded, agentsUsed, isMarketHours, kstHour);
+                conditionRunService.recordEvent(run.runId(), ConditionRunEventType.NOTIFICATION_SKIPPED,
+                    "scheduler notification skipped", Map.of(
+                        "pickCount", picks,
+                        "agentsSucceeded", agentsSucceeded,
+                        "marketHours", isMarketHours
+                    ));
             }
+            conditionRunService.markComplete(run.runId(), result);
         } catch (Exception e) {
             log.error("[Scheduler] ❌ {} 실패: {}", mode, e.getMessage());
+
+            conditionRunService.markFailed(run.runId(), e.getMessage());
 
             com.bitman.justbuy.controller.MonitorController.recordAnalysis(
                 mode, false, System.currentTimeMillis() - startMs, 0, 0, 0, e.getMessage());
@@ -405,7 +452,7 @@ public class PrecomputeScheduler {
         Set<String> seenCodes = new HashSet<>();  // ★ cross-mode dedup
         for (var entry : formulaCatalog.scheduledQueries().entrySet()) {
             try {
-                execute(entry.getKey(), entry.getValue(), seenCodes);
+                execute(entry.getKey(), entry.getValue(), seenCodes, ConditionRunTrigger.ADMIN_REFRESH);
                 results.put(entry.getKey(), "success");
             } catch (Exception e) {
                 log.error("[Scheduler] {} 새로고침 실패: {}", entry.getKey(), e.getMessage());

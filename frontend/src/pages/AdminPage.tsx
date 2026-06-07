@@ -136,6 +136,30 @@ function formatTime(value?: string | null) {
   })
 }
 
+function formatRunDuration(startedAt?: string | null, finishedAt?: string | null) {
+  if (!startedAt || !finishedAt) return '-'
+  const started = new Date(startedAt).getTime()
+  const finished = new Date(finishedAt).getTime()
+  if (!Number.isFinite(started) || !Number.isFinite(finished) || finished < started) return '-'
+  return `${Math.round((finished - started) / 1000)}s`
+}
+
+function runStatusTone(status?: string | null) {
+  if (status === 'COMPLETE') return 'ok'
+  if (status === 'FAILED' || status === 'CANCELLED' || status === 'EXPIRED') return 'warn'
+  return 'pending'
+}
+
+function runStatusLabel(status?: string | null) {
+  if (!status) return '-'
+  return status.replaceAll('_', ' ')
+}
+
+function runTriggerLabel(trigger?: string | null) {
+  if (!trigger) return '-'
+  return trigger.replaceAll('_', ' ')
+}
+
 function matchesUserSearch(user: UserDto, rawQuery: string) {
   const q = rawQuery.trim().toLowerCase()
   if (!q) return true
@@ -506,6 +530,9 @@ export default function AdminPage() {
   const onlineAgents = systemStatus?.engines?.filter(engine => engine.online).length ?? 0
   const totalAgents = systemStatus?.engines?.length ?? systemStatus?.totalAgents ?? 0
   const cacheList = systemStatus?.cache ?? []
+  const conditionRuns = systemStatus?.conditionRuns ?? []
+  const latestRun = conditionRuns[0]
+  const runningRunCount = conditionRuns.filter(run => !['COMPLETE', 'FAILED', 'CANCELLED', 'EXPIRED'].includes(run.status)).length
   const staleCacheCount = cacheList.filter(item => item.status !== 'valid').length
   const cacheSummary = cacheList.length
     ? `${cacheList.length - staleCacheCount}/${cacheList.length} valid`
@@ -534,6 +561,14 @@ export default function AdminPage() {
       value: systemStatus?.schedulerEnabled ? 'ACTIVE' : 'OFF',
       desc: systemStatus?.responseTime != null ? `응답 ${systemStatus.responseTime}ms` : '스케줄러 상태 대기',
       tone: systemStatus?.schedulerEnabled ? 'ok' : 'warn',
+    },
+    {
+      name: 'ConditionRun',
+      value: latestRun ? runStatusLabel(latestRun.status) : 'READY',
+      desc: latestRun
+        ? `${latestRun.mode || '-'} · ${runTriggerLabel(latestRun.trigger)} · ${formatTime(latestRun.updatedAt)}`
+        : 'No observed condition run yet',
+      tone: runningRunCount > 0 ? 'pending' : latestRun?.status === 'FAILED' ? 'warn' : 'ok',
     },
   ]
   const isRefreshing = actionId === 'admin-refresh'
@@ -853,6 +888,27 @@ export default function AdminPage() {
                 </div>
               ))}
             </div>
+            <div className="admin-run-summary">
+              <strong>ConditionRun timeline</strong>
+              <span>{runningRunCount > 0 ? `${runningRunCount} active` : 'No active run'}</span>
+            </div>
+            <AdminTable
+              columns={['Run', 'Mode', 'Trigger', 'Status', 'Picks', 'Agents', 'Duration', 'Updated']}
+              emptyText="No condition runs observed yet."
+            >
+              {conditionRuns.map(run => (
+                <tr key={run.runId}>
+                  <td className="mono-cell">{run.traceId || run.runId.slice(0, 8)}</td>
+                  <td>{run.mode || '-'}</td>
+                  <td>{runTriggerLabel(run.trigger)}</td>
+                  <td><span className={`admin-run-status admin-run-${runStatusTone(run.status)}`}>{runStatusLabel(run.status)}</span></td>
+                  <td>{run.pickCount ?? '-'}</td>
+                  <td>{run.agentsUsed != null ? `${run.agentsSucceeded ?? 0}/${run.agentsUsed}` : '-'}</td>
+                  <td>{formatRunDuration(run.startedAt, run.finishedAt)}</td>
+                  <td>{formatDateTime(run.updatedAt)}</td>
+                </tr>
+              ))}
+            </AdminTable>
             <button className="admin-primary-action" type="button" disabled={actionId === 'system-refresh'} onClick={refreshSystem}>
               조건검색식 / 분석 캐시 새로고침
             </button>

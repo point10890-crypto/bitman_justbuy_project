@@ -1,6 +1,7 @@
 package com.bitman.justbuy.controller;
 
 import com.bitman.justbuy.ai.agent.AiAgent;
+import com.bitman.justbuy.condition.run.ConditionRunService;
 import com.bitman.justbuy.dto.AdminResetPasswordRequest;
 import com.bitman.justbuy.dto.AdminUpdateUserRequest;
 import com.bitman.justbuy.dto.UserDto;
@@ -34,6 +35,7 @@ public class AdminController {
     private final KisApiService kisApiService;
     private final RuntimeAiConfigService runtimeAiConfigService;
     private final DeepSeekEndpointService deepSeekEndpointService;
+    private final ConditionRunService conditionRunService;
 
     @Autowired(required = false)
     private PrecomputeScheduler precomputeScheduler;
@@ -47,7 +49,8 @@ public class AdminController {
                            List<AiAgent> agents,
                            KisApiService kisApiService,
                            RuntimeAiConfigService runtimeAiConfigService,
-                           DeepSeekEndpointService deepSeekEndpointService) {
+                           DeepSeekEndpointService deepSeekEndpointService,
+                           ConditionRunService conditionRunService) {
         this.subscriptionService = subscriptionService;
         this.analysisService = analysisService;
         this.conditionSearchPipeline = conditionSearchPipeline;
@@ -55,6 +58,7 @@ public class AdminController {
         this.kisApiService = kisApiService;
         this.runtimeAiConfigService = runtimeAiConfigService;
         this.deepSeekEndpointService = deepSeekEndpointService;
+        this.conditionRunService = conditionRunService;
     }
 
     @GetMapping("/subscriptions/pending")
@@ -177,6 +181,7 @@ public class AdminController {
 
         // 스케줄러 상태
         result.put("schedulerEnabled", precomputeScheduler != null);
+        result.put("conditionRuns", conditionRunService.recent(10));
 
         // 응답 시간
         result.put("responseTime", System.currentTimeMillis() - startMs);
@@ -210,6 +215,26 @@ public class AdminController {
     public ResponseEntity<Map<String, Object>> testDeepSeek(@RequestBody(required = false) DeepSeekTestRequest request) {
         String message = request == null ? "ping" : request.message();
         return ResponseEntity.ok(deepSeekEndpointService.test(message));
+    }
+
+    @GetMapping("/condition-runs")
+    public ResponseEntity<Map<String, Object>> conditionRuns(
+            @RequestParam(defaultValue = "50") int limit) {
+        int boundedLimit = Math.max(1, Math.min(limit, 100));
+        return ResponseEntity.ok(Map.of(
+            "limit", boundedLimit,
+            "runs", conditionRunService.recent(boundedLimit)
+        ));
+    }
+
+    @GetMapping("/condition-runs/{runId}/events")
+    public ResponseEntity<Map<String, Object>> conditionRunEvents(@PathVariable UUID runId) {
+        return conditionRunService.find(runId)
+            .<ResponseEntity<Map<String, Object>>>map(run -> ResponseEntity.ok(Map.of(
+                "run", run,
+                "events", conditionRunService.events(runId)
+            )))
+            .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     /**

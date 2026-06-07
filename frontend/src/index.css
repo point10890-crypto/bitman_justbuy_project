@@ -2799,9 +2799,73 @@
   border-color: rgba(245, 158, 11, .32);
 }
 
+.system-card-pending {
+  border-color: rgba(59, 130, 246, .32);
+}
+
+.system-card-pending strong {
+  color: #60a5fa;
+}
+
 .system-card p {
   font-size: 12px;
   line-height: 1.5;
+}
+
+.admin-run-summary {
+  margin-top: 14px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid #28313d;
+  border-radius: 8px;
+  background: rgba(17,22,31,.85);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-run-summary strong {
+  color: #f8f5ed;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.admin-run-summary span {
+  color: #aab3bf;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.admin-run-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 950;
+  border: 1px solid #303744;
+  color: #dbeafe;
+  background: rgba(59, 130, 246, .11);
+}
+
+.admin-run-ok {
+  color: #bbf7d0;
+  border-color: rgba(34, 197, 94, .32);
+  background: rgba(34, 197, 94, .11);
+}
+
+.admin-run-warn {
+  color: #fed7aa;
+  border-color: rgba(245, 158, 11, .35);
+  background: rgba(245, 158, 11, .12);
+}
+
+.admin-run-pending {
+  color: #bfdbfe;
+  border-color: rgba(96, 165, 250, .35);
+  background: rgba(96, 165, 250, .12);
 }
 
 .admin-primary-action {

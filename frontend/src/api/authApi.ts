@@ -25,6 +25,24 @@ export interface SystemCacheStatus {
   elapsed?: string | null
 }
 
+export interface ConditionRunSummary {
+  runId: string
+  traceId: string
+  trigger: string
+  mode: string | null
+  query: string | null
+  status: string
+  attempt: number
+  startedAt: string
+  updatedAt: string
+  finishedAt: string | null
+  errorCode: string | null
+  errorMessage: string | null
+  pickCount: number | null
+  agentsUsed: number | null
+  agentsSucceeded: number | null
+}
+
 export interface SystemStatusResponse {
   status?: string
   timestamp?: string
@@ -34,6 +52,7 @@ export interface SystemStatusResponse {
   cache?: SystemCacheStatus[]
   kisAvailable?: boolean
   schedulerEnabled?: boolean
+  conditionRuns?: ConditionRunSummary[]
   responseTime?: number
   error?: string
   pipeline?: unknown
