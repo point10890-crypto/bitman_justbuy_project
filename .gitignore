@@ -66,6 +66,7 @@ desktop.ini
 # Logs
 *.log
 logs/
+backend/backend-bootrun.*
 
 # Backup files
 *_backup.py
@@ -76,6 +77,9 @@ backups/
 backend/data/*.json
 !backend/data/.gitkeep
 !backend/data/dart_corp_codes.json
+frontend/data-snapshot/*.json
+!frontend/data-snapshot/data-version.json
+!frontend/data-snapshot/health.json
 
 # Archives & binaries
 *.zip
@@ -133,6 +137,9 @@ kill_zombies.ps1
 schtask_result.txt
 .telegram_msg.txt
 tmp/
+tmp-cdp-profile/
+tmp-mobile-qa/
+frontend/next-env.d.ts
 
 # Sensitive incident notes / rotation runbooks stay local unless redacted first
 docs/SECURITY_INCIDENT_REPORT.md
