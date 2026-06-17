@@ -54,6 +54,7 @@ class SubscriptionWorkflowServiceTest {
 
         assertThat(dto.subscription()).isEqualTo("PENDING");
         assertThat(user.getDepositorName()).isEqualTo("Hong Gil Dong");
+        assertThat(user.getSubscriptionRequestedAt()).isNotNull();
         assertThat(user.getSubscriptionEndDate()).isNull();
         verify(userRepository).save(user);
     }
@@ -63,10 +64,12 @@ class SubscriptionWorkflowServiceTest {
         User older = new User("older@example.com", "older", "hash");
         older.setSubscription(SubscriptionStatus.PENDING);
         ReflectionTestUtils.setField(older, "createdAt", LocalDateTime.of(2026, 5, 1, 9, 0));
+        older.setSubscriptionRequestedAt(LocalDateTime.of(2026, 6, 1, 9, 0));
 
         User newest = new User("newest@example.com", "newest", "hash");
         newest.setSubscription(SubscriptionStatus.PENDING);
-        ReflectionTestUtils.setField(newest, "createdAt", LocalDateTime.of(2026, 5, 26, 11, 30));
+        ReflectionTestUtils.setField(newest, "createdAt", LocalDateTime.of(2026, 1, 1, 11, 30));
+        newest.setSubscriptionRequestedAt(LocalDateTime.of(2026, 6, 17, 11, 30));
 
         when(userRepository.findBySubscription(SubscriptionStatus.PENDING))
             .thenReturn(List.of(older, newest));
@@ -93,6 +96,7 @@ class SubscriptionWorkflowServiceTest {
         assertThat(dto.subscription()).isEqualTo("PENDING");
         assertThat(user.getSubscriptionEndDate()).isEqualTo(currentEndDate);
         assertThat(user.getDepositorName()).isEqualTo("payer");
+        assertThat(user.getSubscriptionRequestedAt()).isNotNull();
 
         user.setSubscription(SubscriptionStatus.FREE);
         assertThatThrownBy(() -> service.applyForSubscription(userId, "   "))
@@ -113,11 +117,13 @@ class SubscriptionWorkflowServiceTest {
 
         var pending = service.adminUpdateUser(userId, null, null, "PENDING");
         assertThat(pending.subscription()).isEqualTo("PENDING");
+        assertThat(user.getSubscriptionRequestedAt()).isNotNull();
         assertThat(user.getSubscriptionEndDate()).isNull();
         assertThat(user.getDepositorName()).isEqualTo("payer");
 
         var free = service.adminUpdateUser(userId, null, null, "FREE");
         assertThat(free.subscription()).isEqualTo("FREE");
+        assertThat(user.getSubscriptionRequestedAt()).isNull();
         assertThat(user.getSubscriptionEndDate()).isNull();
         assertThat(user.getDepositorName()).isNull();
     }
@@ -156,6 +162,7 @@ class SubscriptionWorkflowServiceTest {
         assertThat(dto.subscription()).isEqualTo("PRO");
         assertThat(user.getSubscriptionEndDate()).isEqualTo(currentEndDate.plusMonths(1));
         assertThat(user.getSubscriptionApprovedAt()).isNotNull();
+        assertThat(user.getSubscriptionRequestedAt()).isNull();
         verify(userRepository).save(user);
     }
 
@@ -176,6 +183,7 @@ class SubscriptionWorkflowServiceTest {
         assertThat(dto.subscription()).isEqualTo("PRO");
         assertThat(user.getSubscriptionEndDate()).isEqualTo(currentEndDate);
         assertThat(user.getDepositorName()).isNull();
+        assertThat(user.getSubscriptionRequestedAt()).isNull();
         verify(userRepository).save(user);
     }
 
@@ -194,6 +202,7 @@ class SubscriptionWorkflowServiceTest {
         assertThat(dto.subscription()).isEqualTo("FREE");
         assertThat(user.getSubscriptionEndDate()).isNull();
         assertThat(user.getSubscriptionApprovedAt()).isNull();
+        assertThat(user.getSubscriptionRequestedAt()).isNull();
         verify(userRepository).save(user);
     }
 }

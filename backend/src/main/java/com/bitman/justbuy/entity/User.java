@@ -32,6 +32,8 @@ public class User {
 
     private String depositorName;
 
+    private LocalDateTime subscriptionRequestedAt;
+
     private LocalDate subscriptionEndDate;
 
     private LocalDateTime subscriptionApprovedAt;
@@ -65,6 +67,8 @@ public class User {
     public void setSubscription(SubscriptionStatus subscription) { this.subscription = subscription; }
     public String getDepositorName() { return depositorName; }
     public void setDepositorName(String depositorName) { this.depositorName = depositorName; }
+    public LocalDateTime getSubscriptionRequestedAt() { return subscriptionRequestedAt; }
+    public void setSubscriptionRequestedAt(LocalDateTime subscriptionRequestedAt) { this.subscriptionRequestedAt = subscriptionRequestedAt; }
     public LocalDate getSubscriptionEndDate() { return subscriptionEndDate; }
     public void setSubscriptionEndDate(LocalDate subscriptionEndDate) { this.subscriptionEndDate = subscriptionEndDate; }
     public LocalDateTime getSubscriptionApprovedAt() { return subscriptionApprovedAt; }

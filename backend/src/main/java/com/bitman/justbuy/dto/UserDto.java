@@ -13,6 +13,7 @@ public record UserDto(
     String role,
     String subscription,
     String depositorName,
+    LocalDateTime subscriptionRequestedAt,
     LocalDate subscriptionEndDate,
     LocalDateTime subscriptionApprovedAt,
     LocalDateTime createdAt
@@ -25,6 +26,7 @@ public record UserDto(
             user.getRole().name(),
             user.getSubscription().name(),
             user.getDepositorName(),
+            user.getSubscriptionRequestedAt(),
             user.getSubscriptionEndDate(),
             user.getSubscriptionApprovedAt(),
             user.getCreatedAt()

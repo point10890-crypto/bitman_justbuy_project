@@ -169,12 +169,14 @@ function matchesUserSearch(user: UserDto, rawQuery: string) {
     user.id,
     user.depositorName ?? '',
     user.subscription,
+    user.subscriptionRequestedAt ?? '',
     user.subscriptionEndDate ?? '',
   ].some(value => value.toLowerCase().includes(q))
 }
 
 function approvalRequestTime(user: UserDto) {
-  return user.createdAt ? new Date(user.createdAt).getTime() : 0
+  const requestedAt = user.subscriptionRequestedAt ?? user.createdAt
+  return requestedAt ? new Date(requestedAt).getTime() : 0
 }
 
 function newestApprovalRequestFirst(a: UserDto, b: UserDto) {
@@ -737,7 +739,7 @@ export default function AdminPage() {
                 <span>4. 사용자 권한 자동 활성화</span>
               </div>
               <AdminToolbar search={search} onSearch={setSearch} placeholder="승인대기 회원명, 이메일, 입금자명, ID 검색" />
-              <div className="admin-result-summary" data-sort="pending-newest-first-v2">
+              <div className="admin-result-summary" data-sort="pending-requested-at-desc-v3">
                 최신 신청순 · 승인대기 검색 결과 {filteredPendingUsers.length}명 / 전체 {pendingUsers.length}명
               </div>
               <AdminTable
@@ -749,7 +751,7 @@ export default function AdminPage() {
                     <td>{user.name}</td>
                     <td>{user.email}</td>
                     <td>{user.depositorName || '-'}</td>
-                    <td>{formatDateTime(user.createdAt)}</td>
+                    <td>{formatDateTime(user.subscriptionRequestedAt ?? user.createdAt)}</td>
                     <td><StatusBadge status={user.subscription} /></td>
                     <td className="admin-row-actions">
                       <button disabled={actionId === user.id} onClick={() => runAction(user, 'approve')}>승인</button>

@@ -38,6 +38,7 @@ dependencies {
     // H2: Oracle Cloud 배포 시 prod 프로파일에서 DataSource URL 로 사용 안 함 (postgres 로 전환).
     //     JAR에는 포함되지만 (~2.6MB), 로컬 dev 필수라 유지.
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    implementation("org.flywaydb:flyway-core")
     runtimeOnly("org.postgresql:postgresql")
     runtimeOnly("com.h2database:h2")
 

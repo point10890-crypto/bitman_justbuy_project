@@ -58,6 +58,7 @@ public class SubscriptionService {
         // 만료된 PRO/FREE는 신규 신청, 활성 PRO는 기존 이용권을 유지한 채 연장 승인 대기로 전환한다.
         user.setSubscription(SubscriptionStatus.PENDING);
         user.setDepositorName(normalizedDepositorName);
+        user.setSubscriptionRequestedAt(LocalDateTime.now(KST));
         if (!keepCurrentAccess) {
             user.setSubscriptionEndDate(null);
             user.setSubscriptionApprovedAt(null);
@@ -115,7 +116,8 @@ public class SubscriptionService {
     }
 
     private static LocalDateTime approvalRequestTime(User user) {
-        return user.getCreatedAt();
+        LocalDateTime requestedAt = user.getSubscriptionRequestedAt();
+        return requestedAt != null ? requestedAt : user.getCreatedAt();
     }
 
     @Transactional
@@ -139,6 +141,7 @@ public class SubscriptionService {
         user.setSubscription(SubscriptionStatus.PRO);
         user.setSubscriptionEndDate(baseDate.plusMonths(1));
         user.setSubscriptionApprovedAt(LocalDateTime.now(KST));
+        user.setSubscriptionRequestedAt(null);
         userRepository.save(user);
         log.info("Subscription approved: userId={}", userId);
 
@@ -155,6 +158,7 @@ public class SubscriptionService {
         }
 
         user.setDepositorName(null);
+        user.setSubscriptionRequestedAt(null);
         if (hasPendingRenewalAccess(user, LocalDate.now(KST))) {
             user.setSubscription(SubscriptionStatus.PRO);
         } else {
@@ -191,6 +195,7 @@ public class SubscriptionService {
         user.setSubscription(SubscriptionStatus.FREE);
         user.setSubscriptionEndDate(null);
         user.setSubscriptionApprovedAt(null);
+        user.setSubscriptionRequestedAt(null);
         userRepository.save(user);
         log.info("Subscription revoked: userId={}", userId);
 
@@ -231,6 +236,7 @@ public class SubscriptionService {
             }
             user.setSubscription(newStatus);
             if (newStatus == SubscriptionStatus.PRO) {
+                user.setSubscriptionRequestedAt(null);
                 if (user.getRole() == Role.ADMIN) {
                     user.setSubscriptionEndDate(null);
                 } else if (user.getSubscriptionEndDate() == null
@@ -242,10 +248,12 @@ public class SubscriptionService {
                 user.setSubscriptionApprovedAt(LocalDateTime.now(KST));
             }
             if (newStatus == SubscriptionStatus.PENDING) {
+                user.setSubscriptionRequestedAt(LocalDateTime.now(KST));
                 user.setSubscriptionEndDate(null);
                 user.setSubscriptionApprovedAt(null);
             }
             if (newStatus == SubscriptionStatus.FREE) {
+                user.setSubscriptionRequestedAt(null);
                 user.setSubscriptionEndDate(null);
                 user.setSubscriptionApprovedAt(null);
                 user.setDepositorName(null);

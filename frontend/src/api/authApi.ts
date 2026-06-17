@@ -8,6 +8,7 @@ export interface UserDto {
   role: 'USER' | 'ADMIN'
   subscription: 'FREE' | 'PENDING' | 'PRO'
   depositorName: string | null
+  subscriptionRequestedAt: string | null
   subscriptionEndDate: string | null
   subscriptionApprovedAt: string | null  // ⭐ PRO 부여일 (승인일)
   createdAt: string
