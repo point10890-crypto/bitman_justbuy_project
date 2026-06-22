@@ -44,31 +44,42 @@ public class MainConditionService {
     private final ConditionSearchPipeline conditionSearchPipeline;
     private final ShortTermRealtimeScanner shortTermRealtimeScanner;
     private final JonggaV2SearchService jonggaV2SearchService;
+    private final LeaderConditionEngine leaderConditionEngine;
 
     public MainConditionService(ConditionSearchPipeline conditionSearchPipeline) {
-        this(conditionSearchPipeline, (ShortTermRealtimeScanner) null, null);
+        this(conditionSearchPipeline, (ShortTermRealtimeScanner) null, null, null);
     }
 
     @Autowired
     public MainConditionService(ConditionSearchPipeline conditionSearchPipeline,
                                 ObjectProvider<ShortTermRealtimeScanner> shortTermRealtimeScannerProvider,
-                                ObjectProvider<JonggaV2SearchService> jonggaV2SearchServiceProvider) {
+                                ObjectProvider<JonggaV2SearchService> jonggaV2SearchServiceProvider,
+                                ObjectProvider<LeaderConditionEngine> leaderConditionEngineProvider) {
         this(conditionSearchPipeline,
             shortTermRealtimeScannerProvider.getIfAvailable(),
-            jonggaV2SearchServiceProvider.getIfAvailable());
+            jonggaV2SearchServiceProvider.getIfAvailable(),
+            leaderConditionEngineProvider.getIfAvailable());
     }
 
     MainConditionService(ConditionSearchPipeline conditionSearchPipeline,
                          ShortTermRealtimeScanner shortTermRealtimeScanner) {
-        this(conditionSearchPipeline, shortTermRealtimeScanner, null);
+        this(conditionSearchPipeline, shortTermRealtimeScanner, null, null);
     }
 
     MainConditionService(ConditionSearchPipeline conditionSearchPipeline,
                          ShortTermRealtimeScanner shortTermRealtimeScanner,
                          JonggaV2SearchService jonggaV2SearchService) {
+        this(conditionSearchPipeline, shortTermRealtimeScanner, jonggaV2SearchService, null);
+    }
+
+    MainConditionService(ConditionSearchPipeline conditionSearchPipeline,
+                         ShortTermRealtimeScanner shortTermRealtimeScanner,
+                         JonggaV2SearchService jonggaV2SearchService,
+                         LeaderConditionEngine leaderConditionEngine) {
         this.conditionSearchPipeline = conditionSearchPipeline;
         this.shortTermRealtimeScanner = shortTermRealtimeScanner;
         this.jonggaV2SearchService = jonggaV2SearchService;
+        this.leaderConditionEngine = leaderConditionEngine;
     }
 
     public MainConditionResponse getMain() {
@@ -149,6 +160,22 @@ public class MainConditionService {
                     "/api/conditions/" + section.slug(),
                     snapshot.get().asOf(),
                     "REALTIME_SCAN",
+                    snapshot.get().signals()
+                );
+            }
+        }
+
+        if (section == ConditionSection.LEADERS) {
+            Optional<LeaderConditionEngine.LeaderSnapshot> snapshot = latestLeaderSnapshot();
+            if (snapshot.isPresent()) {
+                return new ConditionSectionResponse(
+                    section.responseKey(),
+                    section.slug(),
+                    section.title(),
+                    section.legacyMode(),
+                    "/api/conditions/" + section.slug(),
+                    snapshot.get().asOf(),
+                    snapshot.get().sourceStatus(),
                     snapshot.get().signals()
                 );
             }
@@ -278,6 +305,16 @@ public class MainConditionService {
         if (shortTermRealtimeScanner == null) return Optional.empty();
         try {
             Optional<ShortTermRealtimeScanner.ScanSnapshot> snapshot = shortTermRealtimeScanner.latestFresh();
+            return snapshot == null ? Optional.empty() : snapshot;
+        } catch (Exception ignored) {
+            return Optional.empty();
+        }
+    }
+
+    private Optional<LeaderConditionEngine.LeaderSnapshot> latestLeaderSnapshot() {
+        if (leaderConditionEngine == null) return Optional.empty();
+        try {
+            Optional<LeaderConditionEngine.LeaderSnapshot> snapshot = leaderConditionEngine.latestFresh();
             return snapshot == null ? Optional.empty() : snapshot;
         } catch (Exception ignored) {
             return Optional.empty();
