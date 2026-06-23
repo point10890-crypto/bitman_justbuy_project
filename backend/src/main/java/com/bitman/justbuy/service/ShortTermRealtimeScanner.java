@@ -2,6 +2,8 @@ package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.dto.condition.ConditionSection;
 import com.bitman.justbuy.dto.condition.ConditionSignalDto;
+import com.bitman.justbuy.dto.condition.EvidencePacket;
+import com.bitman.justbuy.dto.condition.EvidenceVerdict;
 import com.bitman.justbuy.util.KoreanMarketCalendar;
 import com.bitman.justbuy.util.StockUniverseFilters;
 import org.slf4j.Logger;
@@ -44,6 +46,7 @@ public class ShortTermRealtimeScanner {
 
     private final KisApiService kisApiService;
     private final TrackRecordService trackRecordService;
+    private final DeepSeekConditionVerifier verifier;
     private final Map<String, String> firstSeenByCode = new ConcurrentHashMap<>();
     private volatile LocalDate firstSeenDate = LocalDate.MIN;
     private volatile ScanSnapshot latest = ScanSnapshot.empty();
@@ -52,18 +55,31 @@ public class ShortTermRealtimeScanner {
     private long freshTtlMs = 240_000L;
 
     public ShortTermRealtimeScanner(KisApiService kisApiService) {
-        this(kisApiService, (TrackRecordService) null);
+        this(kisApiService, (TrackRecordService) null, (DeepSeekConditionVerifier) null);
+    }
+
+    public ShortTermRealtimeScanner(KisApiService kisApiService,
+                                    ObjectProvider<TrackRecordService> trackRecordServiceProvider) {
+        this(kisApiService, trackRecordServiceProvider.getIfAvailable(), (DeepSeekConditionVerifier) null);
     }
 
     @Autowired
     public ShortTermRealtimeScanner(KisApiService kisApiService,
-                                    ObjectProvider<TrackRecordService> trackRecordServiceProvider) {
-        this(kisApiService, trackRecordServiceProvider.getIfAvailable());
+                                    ObjectProvider<TrackRecordService> trackRecordServiceProvider,
+                                    ObjectProvider<DeepSeekConditionVerifier> verifierProvider) {
+        this(kisApiService, trackRecordServiceProvider.getIfAvailable(), verifierProvider.getIfAvailable());
     }
 
     ShortTermRealtimeScanner(KisApiService kisApiService, TrackRecordService trackRecordService) {
+        this(kisApiService, trackRecordService, (DeepSeekConditionVerifier) null);
+    }
+
+    ShortTermRealtimeScanner(KisApiService kisApiService,
+                             TrackRecordService trackRecordService,
+                             DeepSeekConditionVerifier verifier) {
         this.kisApiService = kisApiService;
         this.trackRecordService = trackRecordService;
+        this.verifier = verifier;
     }
 
     public record ScanSnapshot(
@@ -106,6 +122,7 @@ public class ShortTermRealtimeScanner {
         List<KisApiService.RankedStock> foreignNetBuy =
             kisApiService.fetchForeignNetBuyRankingStocks(FOREIGN_SCAN_LIMIT);
         List<ConditionSignalDto> signals = buildSignals(volume, gainers, foreignNetBuy, now);
+        signals = verifyAndEnrich(signals, now);
         latest = new ScanSnapshot(
             nowKst(now),
             now.toInstant(),
@@ -196,6 +213,141 @@ public class ShortTermRealtimeScanner {
             signals.add(candidate.toSignal(signalRank++, capturedAt));
         }
         return signals;
+    }
+
+    /**
+     * 룰 기반 단타 신호에 DeepSeek AI 검증/보강을 선택적으로 덧붙인다 (fail-open).
+     *
+     * <p>verifier 가 없거나 비활성이면 입력 신호를 그대로 반환한다. 활성 시 신호별 증거 패킷을 만들어
+     * 한 번에 검증하고, REJECT 판정은 제외하며, 나머지는 룰/AI 점수를 0.6/0.4 로 블렌딩하고
+     * 증거·리스크·요약·무효화 조건을 병합해 새 immutable DTO 로 재구성한다. 어떤 예외든 원본 신호로 폴백한다.
+     */
+    List<ConditionSignalDto> verifyAndEnrich(List<ConditionSignalDto> signals, ZonedDateTime now) {
+        if (signals == null || signals.isEmpty()) return signals;
+        if (verifier == null || !verifier.isAvailable()) return signals;
+
+        try {
+            List<EvidencePacket> packets = new ArrayList<>();
+            for (ConditionSignalDto signal : signals) {
+                Map<String, Object> metrics = new LinkedHashMap<>();
+                metrics.put("rank", signal.rank());
+                metrics.put("maxReturnPct", signal.maxReturnPct());
+                metrics.put("currentPrice", signal.currentPrice());
+                packets.add(new EvidencePacket(
+                    ConditionSection.SHORT_TERM.name(),
+                    ConditionSection.SHORT_TERM.legacyMode(),
+                    nowKst(now),
+                    signal.stockCode(),
+                    signal.stockName(),
+                    signal.currentPrice(),
+                    signal.maxReturnPct(),
+                    signal.ruleScore(),
+                    signal.evidence(),
+                    metrics
+                ));
+            }
+
+            Map<String, EvidenceVerdict> verdicts = verifier.verify(packets);
+            if (verdicts == null || verdicts.isEmpty()) return signals;
+
+            List<ConditionSignalDto> enriched = new ArrayList<>();
+            int rank = 1;
+            for (ConditionSignalDto signal : signals) {
+                EvidenceVerdict verdict = verdicts.get(signal.stockCode());
+                if (verdict == null) {
+                    enriched.add(reRank(signal, rank++));
+                    continue;
+                }
+                if (verdict.rejected()) continue;
+                enriched.add(applyVerdict(signal, verdict, rank++));
+            }
+            return enriched;
+        } catch (Exception e) {
+            log.warn("[ShortTermRealtime] verifyAndEnrich 예외 — 룰 신호 폴백: {}", e.getMessage());
+            return signals;
+        }
+    }
+
+    private static ConditionSignalDto applyVerdict(ConditionSignalDto signal, EvidenceVerdict verdict, int rank) {
+        int aiScore = verdict.aiScore();
+        int finalScore = clamp((int) Math.round(0.6 * signal.ruleScore() + 0.4 * aiScore), 0, 99);
+
+        String status = verdict.displayStatus() != null && !verdict.displayStatus().isBlank()
+            ? verdict.displayStatus()
+            : signal.status();
+
+        List<String> evidence = new ArrayList<>(signal.evidence());
+        if (verdict.evidence() != null) {
+            for (String e : verdict.evidence()) {
+                if (e != null && !e.isBlank() && !evidence.contains(e)) evidence.add(e);
+            }
+        }
+
+        List<String> riskFlags = new ArrayList<>(signal.riskFlags());
+        if (verdict.riskFlags() != null) {
+            for (String r : verdict.riskFlags()) {
+                if (r != null && !r.isBlank() && !riskFlags.contains(r)) riskFlags.add(r);
+            }
+        }
+
+        String summary = verdict.summary() != null && !verdict.summary().isBlank()
+            ? verdict.summary()
+            : signal.summary();
+
+        String invalidation = verdict.invalidation() != null && !verdict.invalidation().isBlank()
+            ? verdict.invalidation()
+            : signal.invalidation();
+
+        return new ConditionSignalDto(
+            signal.section(),
+            signal.mode(),
+            rank,
+            signal.stockName(),
+            signal.stockCode(),
+            signal.capturePrice(),
+            signal.currentPrice(),
+            signal.highPrice(),
+            signal.stopLoss(),
+            signal.maxReturnPct(),
+            status,
+            signal.ruleScore(),
+            aiScore,
+            finalScore,
+            summary,
+            List.copyOf(evidence),
+            List.copyOf(riskFlags),
+            invalidation,
+            signal.capturedAt()
+        );
+    }
+
+    private static ConditionSignalDto reRank(ConditionSignalDto signal, int rank) {
+        if (signal.rank() == rank) return signal;
+        return new ConditionSignalDto(
+            signal.section(),
+            signal.mode(),
+            rank,
+            signal.stockName(),
+            signal.stockCode(),
+            signal.capturePrice(),
+            signal.currentPrice(),
+            signal.highPrice(),
+            signal.stopLoss(),
+            signal.maxReturnPct(),
+            signal.status(),
+            signal.ruleScore(),
+            signal.aiScore(),
+            signal.finalScore(),
+            signal.summary(),
+            signal.evidence(),
+            signal.riskFlags(),
+            signal.invalidation(),
+            signal.capturedAt()
+        );
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     private Candidate merge(Map<String, Candidate> candidates, KisApiService.RankedStock stock) {
