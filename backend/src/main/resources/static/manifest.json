@@ -6,12 +6,16 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",
   "background_color": "#0D1117",
   "theme_color": "#0D1117",
   "categories": ["finance", "business"],
   "lang": "ko",
   "dir": "ltr",
+  "edge_side_panel": {
+    "preferred_width": 420
+  },
   "icons": [
     {
       "src": "/icons/icon-192.png",

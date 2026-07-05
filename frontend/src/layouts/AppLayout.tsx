@@ -384,6 +384,11 @@ export default function AppLayout() {
             <span>알림</span>
             {hasNewAlert && <span className="nav-alert-dot" aria-hidden="true" />}
           </button>
+          <PWAInstallPrompt
+            variant="bottom-nav"
+            showWhenDismissed
+            label="설치"
+          />
           {isAdmin ? (
             <button type="button" onClick={goAdminMode}>
               <span className="nav-line-icon admin-icon" />

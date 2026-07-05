@@ -1,7 +1,7 @@
 import type { AriaRole } from 'react'
 import { usePWAInstall } from '../../hooks/usePWAInstall'
 
-type InstallVariant = 'menu-item' | 'nav-button' | 'hero-button' | 'banner' | 'compact'
+type InstallVariant = 'menu-item' | 'nav-button' | 'hero-button' | 'banner' | 'compact' | 'bottom-nav'
 
 interface PWAInstallPromptProps {
   variant?: InstallVariant
@@ -136,6 +136,23 @@ export function PWAInstallPrompt({
           <button className="pwa-install-action" type="button" onClick={openInstallGuide}>설치</button>
           <button className="pwa-install-dismiss" type="button" aria-label="설치 안내 숨기기" onClick={installState.dismiss}>×</button>
         </div>
+        <InstallGuides {...installState} />
+      </>
+    )
+  }
+
+  if (variant === 'bottom-nav') {
+    return (
+      <>
+        <button
+          className={`pwa-install-trigger pwa-install-bottom-nav ${className}`.trim()}
+          type="button"
+          onClick={openInstallGuide}
+          aria-label={label}
+        >
+          <span className="nav-line-icon install-icon" />
+          <span>{label}</span>
+        </button>
         <InstallGuides {...installState} />
       </>
     )

@@ -2282,8 +2282,14 @@
 .chart-icon::after { width: 14px; height: 28px; right: 3px; top: 3px; border-left: 0; border-top: 0; border-bottom: 0; }
 .bell-icon::before { width: 22px; height: 25px; left: 6px; top: 4px; border-radius: 16px 16px 8px 8px; }
 .bell-icon::after { width: 10px; height: 5px; left: 12px; bottom: 2px; border-radius: 0 0 10px 10px; }
+.install-icon::before { width: 24px; height: 24px; left: 5px; top: 6px; border-radius: 8px; }
+.install-icon::after { width: 12px; height: 12px; left: 11px; top: 3px; border-left: 0; border-bottom: 0; transform: rotate(135deg); }
 .admin-icon::before { width: 26px; height: 24px; left: 4px; top: 6px; border-radius: 7px; }
 .admin-icon::after { width: 12px; height: 8px; left: 11px; top: 13px; border-left: 0; border-right: 0; border-top: 0; }
+
+.search-bottom-nav .pwa-install-bottom-nav {
+  color: #ffe36a;
+}
 
 .search-bottom-nav .nav-contact-button {
   color: #fee500;
