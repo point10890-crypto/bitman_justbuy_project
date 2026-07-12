@@ -159,8 +159,8 @@ export async function fetchCurrentUser(token: string): Promise<UserDto> {
   const res = await apiFetch(`${API_BASE}/api/auth/me`, {
     headers: authHeaders(token),
   })
-  // 초기 토큰 복원 경로 — 401이어도 전역 이벤트는 발송하지 않음 (AuthContext가 자체 처리)
-  if (!res.ok) await handleError(res, true)
+  // Deleted members and invalid tokens must clear all cached authentication.
+  if (!res.ok) await handleError(res)
   return res.json()
 }
 

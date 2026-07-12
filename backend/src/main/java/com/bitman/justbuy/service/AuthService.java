@@ -219,7 +219,7 @@ public class AuthService {
     @Transactional
     public UserDto getCurrentUser(UUID userId) {
         var user = userRepository.findById(userId)
-            .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+            .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "회원정보를 찾을 수 없습니다. 다시 로그인해 주세요."));
 
         ensureAdminPro(user);
 

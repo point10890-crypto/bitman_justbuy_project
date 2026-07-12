@@ -190,6 +190,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('auth:unauthorized', onUnauthorized)
   }, [])
 
+  // Keep long-running browser/PWA sessions aligned with server-side member
+  // deletion and subscription expiry. Refresh as soon as the app is resumed.
+  useEffect(() => {
+    if (!user || !getStoredToken()) return
+
+    const reconcile = () => {
+      const token = getStoredToken()
+      if (!token) return
+      fetchCurrentUser(token)
+        .then(dto => {
+          const nextUser = dtoToUser(dto)
+          setUser(nextUser)
+          setUserData(JSON.stringify(nextUser))
+        })
+        .catch(() => { /* 401 is handled by auth:unauthorized */ })
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') reconcile()
+    }
+    const interval = window.setInterval(reconcile, 60_000)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [user?.id])
+
   const login = async (email: string, password: string, rememberMe?: boolean) => {
     const res = await loginUser(email, password, rememberMe)
     const u = dtoToUser(res.user)

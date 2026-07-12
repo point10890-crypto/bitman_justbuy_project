@@ -87,4 +87,18 @@ class AuthServiceTest {
         assertThat(response.user().subscriptionEndDate()).isEqualTo(endDate);
         verify(jwtService).generateToken(userId, "pro@example.com", "USER", true);
     }
+
+    @Test
+    void deletedMemberTokenReturnsUnauthorized() {
+        UUID deletedUserId = UUID.randomUUID();
+        when(userRepository.findById(deletedUserId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getCurrentUser(deletedUserId))
+            .isInstanceOf(ApiException.class)
+            .satisfies(error -> {
+                ApiException apiError = (ApiException) error;
+                assertThat(apiError.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED);
+                assertThat(apiError.getMessage()).contains("회원정보를 찾을 수 없습니다");
+            });
+    }
 }
