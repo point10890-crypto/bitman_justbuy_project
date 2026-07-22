@@ -10,6 +10,7 @@ import com.bitman.justbuy.repository.UserRepository;
 import com.bitman.justbuy.service.AsyncJobManager;
 import com.bitman.justbuy.service.ConditionSearchPipeline;
 import com.bitman.justbuy.service.SubscriptionService;
+import com.bitman.justbuy.service.TradingResearchViewService;
 import com.bitman.justbuy.service.AsyncJobManager.JobEntry;
 import com.bitman.justbuy.service.AsyncJobManager.JobStatus;
 import jakarta.validation.Valid;
@@ -33,15 +34,18 @@ public class AnalysisController {
     private final AsyncJobManager jobManager;
     private final SubscriptionService subscriptionService;
     private final ConditionRunService conditionRunService;
+    private final TradingResearchViewService tradingResearchViewService;
 
     public AnalysisController(ConditionSearchPipeline conditionSearchPipeline, UserRepository userRepository,
                                AsyncJobManager jobManager, SubscriptionService subscriptionService,
-                               ConditionRunService conditionRunService) {
+                               ConditionRunService conditionRunService,
+                               TradingResearchViewService tradingResearchViewService) {
         this.conditionSearchPipeline = conditionSearchPipeline;
         this.userRepository = userRepository;
         this.jobManager = jobManager;
         this.subscriptionService = subscriptionService;
         this.conditionRunService = conditionRunService;
+        this.tradingResearchViewService = tradingResearchViewService;
     }
 
     private void requireProSubscription(UUID userId) {
@@ -170,5 +174,24 @@ public class AnalysisController {
                 .body(Map.of("status", "error", "error", job.error() != null ? job.error() : "Unknown error"));
             default -> ResponseEntity.ok(Map.of("status", job.status().name().toLowerCase()));
         };
+    }
+
+    @GetMapping("/job/{jobId}/research")
+    public ResponseEntity<?> getTradingResearch(@AuthenticationPrincipal UUID userId,
+                                                 @PathVariable String jobId) {
+        requireProSubscription(userId);
+        JobEntry job = jobManager.getJob(jobId);
+        if (job == null) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "Job not found: " + jobId);
+        }
+        if (job.status() == JobStatus.ERROR) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("status", "error", "errorCode", "ANALYSIS_FAILED"));
+        }
+        if (job.status() != JobStatus.COMPLETE || job.result() == null) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("status", job.status().name().toLowerCase(), "message", "Research result is not ready"));
+        }
+        return ResponseEntity.ok(tradingResearchViewService.build(jobId, job.result()));
     }
 }

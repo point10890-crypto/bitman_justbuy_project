@@ -12,6 +12,7 @@ import com.bitman.justbuy.repository.UserRepository;
 import com.bitman.justbuy.service.AsyncJobManager;
 import com.bitman.justbuy.service.ConditionSearchPipeline;
 import com.bitman.justbuy.service.SubscriptionService;
+import com.bitman.justbuy.service.TradingResearchViewService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -51,7 +53,8 @@ class AnalysisControllerTest {
             userRepository,
             jobManager,
             subscriptionService,
-            conditionRunService
+            conditionRunService,
+            new TradingResearchViewService()
         );
     }
 
@@ -109,6 +112,24 @@ class AnalysisControllerTest {
                 ConditionRunEventType.PICKS_PARSED,
                 ConditionRunEventType.COMPLETED
             );
+    }
+
+    @Test
+    void completedJobExposesTradingAgentsResearchViewWithoutExecution() {
+        UUID userId = allowProUser();
+        AnalysisResponse analysis = response("BREAKOUT");
+        when(jobManager.getJob("job-123")).thenReturn(new AsyncJobManager.JobEntry(
+            AsyncJobManager.JobStatus.COMPLETE, analysis, null, Instant.now()
+        ));
+
+        var response = controller.getTradingResearch(userId, "job-123");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody())
+            .isInstanceOf(com.bitman.justbuy.dto.TradingResearchResponse.class);
+        var body = (com.bitman.justbuy.dto.TradingResearchResponse) response.getBody();
+        assertThat(body.executionAllowed()).isFalse();
+        assertThat(body.informationalRating()).isEqualTo("WATCH");
     }
 
     private UUID allowProUser() {
