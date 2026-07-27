@@ -116,6 +116,16 @@ export default function ClosingBetHistoryPage() {
         </div>
       )}
 
+      {data && data.avgExcessReturnPct !== '-' && (
+        <div className="condition-track-summary" aria-label="시장 대비 성과">
+          <span>시장 평균 {data.avgBenchmarkReturnPct}</span>
+          <span className={returnClass(data.avgExcessReturnPct)}>
+            시장 대비 {data.avgExcessReturnPct}
+          </span>
+          <span>시장 상회 {data.marketBeatRate}</span>
+        </div>
+      )}
+
       {data?.note && <div className="condition-warning-strip history-note">{data.note}</div>}
 
       {loading && !data && <div className="rank-table-empty">히스토리를 불러오는 중입니다.</div>}
@@ -131,12 +141,13 @@ export default function ClosingBetHistoryPage() {
             </div>
           </div>
 
-          <div className="rank-table" style={{ ['--rank-cols' as string]: '1.15fr .7fr .7fr .7fr .6fr' }}>
+          <div className="rank-table" style={{ ['--rank-cols' as string]: '1.05fr .65fr .65fr .6fr .65fr .55fr' }}>
             <div className="rank-table-head">
               <span>종목명</span>
               <span>진입가</span>
               <span>익일 종가</span>
               <span>최대 수익률</span>
+              <span>시장 대비</span>
               <span>결과</span>
             </div>
             {day.rows.map((row: JonggaPerformanceRow) => (
@@ -156,6 +167,12 @@ export default function ClosingBetHistoryPage() {
                   {row.closeReturnPct !== '-' && <em className="history-return">{row.closeReturnPct}</em>}
                 </span>
                 <span className={returnClass(row.maxReturnPct)}>{row.maxReturnPct}</span>
+                <span className={returnClass(row.excessReturnPct)}>
+                  {row.excessReturnPct}
+                  {row.benchmarkReturnPct !== '-' && (
+                    <em className="history-return">시장 {row.benchmarkReturnPct}</em>
+                  )}
+                </span>
                 <span className={`history-result ${resultClass(row.result)}`}>
                   {row.result}
                   {row.hitTarget && <em>목표달성</em>}

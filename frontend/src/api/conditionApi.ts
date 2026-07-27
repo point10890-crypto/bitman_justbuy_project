@@ -86,9 +86,13 @@ export interface JonggaPerformanceRow {
   closePrice: string
   closeReturnPct: string
   maxReturnPct: string
+  /** 같은 구간 시장(지수 추종 ETF) 수익률. 조회 불가 시 '-' */
+  benchmarkReturnPct: string
+  /** 종목 수익률 − 시장 수익률 */
+  excessReturnPct: string
   hitTarget: boolean
   hitStop: boolean
-  result: '승' | '패' | '보합' | '미검증' | string
+  result: '승' | '패' | '보합' | '미검증' | '검증불가' | string
 }
 
 export interface JonggaPerformanceDay {
@@ -113,6 +117,12 @@ export interface JonggaPerformanceResponse {
   winRate: string
   targetHitRate: string
   stopHitRate: string
+  /** 같은 구간 시장 평균 수익률 */
+  avgBenchmarkReturnPct: string
+  /** 시장 대비 초과수익 평균 — 전략이 좋았는지 장이 좋았는지 구분 */
+  avgExcessReturnPct: string
+  /** 시장을 이긴 비율 */
+  marketBeatRate: string
   days: JonggaPerformanceDay[]
   note: string
 }
