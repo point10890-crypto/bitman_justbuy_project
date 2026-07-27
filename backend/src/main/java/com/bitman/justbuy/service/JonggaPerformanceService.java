@@ -35,6 +35,19 @@ public class JonggaPerformanceService {
     private static final int DEFAULT_RANGE_DAYS = 30;
     private static final int MAX_RANGE_DAYS = 365;
 
+    /**
+     * 국내 증시 일일 가격제한폭(±30%). 반올림 여유 0.5%p 를 더해 판정한다.
+     *
+     * <p>이 폭을 넘는 "수익률"은 하루 만에 나올 수 없다. 액면분할·병합·합병 등
+     * corporate action 으로 진입가와 익일 종가의 기준이 달라졌을 때 생긴다
+     * (예: 가온전선 진입 385,500 -> 익일 종가 187,543 = -51.35%).
+     * 이런 값을 성과로 세면 승률·평균수익률이 통째로 왜곡되므로 집계에서 제외한다.
+     */
+    private static final double DAILY_PRICE_LIMIT_PCT = 30.5;
+
+    static final String RESULT_UNVERIFIED = "미검증";
+    static final String RESULT_NOT_MEASURABLE = "검증불가";
+
     private final JonggaV2SearchService jonggaV2SearchService;
     private final TrackRecordRepository repository;
 
@@ -98,6 +111,10 @@ public class JonggaPerformanceService {
         int flats = closeReturns.size() - wins - losses;
         int verifiedCount = closeReturns.size();
 
+        int notMeasurable = (int) rows.stream()
+            .filter(row -> RESULT_NOT_MEASURABLE.equals(row.result()))
+            .count();
+
         String note;
         if (rows.isEmpty()) {
             note = "해당 기간에 종가매매 조건검색 기록이 없습니다.";
@@ -107,6 +124,10 @@ public class JonggaPerformanceService {
             note = "일부 종목은 익일 성과 검증 기록이 없어 미검증으로 표시됩니다.";
         } else {
             note = "진입가 대비 익일 종가 수익률과 익일 고가 기준 최대수익률입니다.";
+        }
+        if (notMeasurable > 0) {
+            note += " 액면분할·합병 등으로 진입가와 기준이 달라진 " + notMeasurable
+                + "건은 검증불가로 분류해 통계에서 제외했습니다.";
         }
 
         return new JonggaPerformanceResponse(
@@ -135,6 +156,9 @@ public class JonggaPerformanceService {
         long stop = signal.path("stop_price").asLong(0);
 
         boolean verified = record != null && record.getClosePrice() != null;
+        boolean measurable = verified
+            && !isPriceLimitViolation(record.getCloseReturn(), record.getMaxReturn1d());
+
         return new PerformanceRow(
             rank,
             signal.path("stock_name").asText("-"),
@@ -144,13 +168,28 @@ public class JonggaPerformanceService {
             formatPrice(entry),
             formatPrice(target),
             formatPrice(stop),
-            verified ? formatPrice(record.getClosePrice()) : "-",
-            verified ? formatPercent(record.getCloseReturn()) : "-",
-            verified ? formatPercent(record.getMaxReturn1d()) : "-",
-            verified && record.isHitTarget(),
-            verified && record.isHitStop(),
-            verified ? resultLabel(record.getCloseReturn()) : "미검증"
+            measurable ? formatPrice(record.getClosePrice()) : "-",
+            measurable ? formatPercent(record.getCloseReturn()) : "-",
+            measurable ? formatPercent(record.getMaxReturn1d()) : "-",
+            measurable && record.isHitTarget(),
+            measurable && record.isHitStop(),
+            verified
+                ? (measurable ? resultLabel(record.getCloseReturn()) : RESULT_NOT_MEASURABLE)
+                : RESULT_UNVERIFIED
         );
+    }
+
+    /**
+     * 하루에 나올 수 없는 수익률인지 판정한다.
+     *
+     * <p>가격제한폭 초과, 또는 고가가 종가보다 낮은 모순(고가 &gt;= 종가 는 항상 성립)이면
+     * 진입가와 익일 시세의 기준이 어긋난 것이므로 성과로 세지 않는다.
+     */
+    static boolean isPriceLimitViolation(Double closeReturn, Double maxReturn) {
+        if (closeReturn != null && Math.abs(closeReturn) > DAILY_PRICE_LIMIT_PCT) return true;
+        if (maxReturn != null && Math.abs(maxReturn) > DAILY_PRICE_LIMIT_PCT) return true;
+        if (closeReturn != null && maxReturn != null && maxReturn < closeReturn - 0.01) return true;
+        return false;
     }
 
     /** 아카이브가 존재하는 날짜만, 최신순으로. */

@@ -147,22 +147,10 @@ public class JonggaTrackRecordService {
 
                 Long high = parsePrice(quote, "고가", null);
                 Long low = parsePrice(quote, "저가", null);
-                long highOrClose = high != null && high > 0 ? high : close;
 
-                record.setClosePrice(close);
-                record.setCloseReturn(returnPct(entry, close));
-                record.setHighPrice1d(highOrClose);
-                record.setMaxReturn1d(returnPct(entry, highOrClose));
-                record.setCloseVerifiedAt(Instant.now());
-
-                if (record.getTargetPrice() != null && highOrClose >= record.getTargetPrice()) {
-                    record.setHitTarget(true);
-                }
-                long lowOrClose = low != null && low > 0 ? low : close;
-                if (record.getStopLoss() != null && lowOrClose <= record.getStopLoss()) {
-                    record.setHitStop(true);
-                }
-                record.setStatus(TrackStatus.COMPLETED);
+                applyOutcome(record, entry, close,
+                    high == null ? 0 : high,
+                    low == null ? 0 : low);
 
                 repository.save(record);
                 verified++;
@@ -292,6 +280,8 @@ public class JonggaTrackRecordService {
         record.setCloseReturn(returnPct(entry, close));
         record.setHighPrice1d(highOrClose);
         record.setMaxReturn1d(returnPct(entry, highOrClose));
+        record.setLowPrice1d(lowOrClose);
+        record.setMinReturn1d(returnPct(entry, lowOrClose));
         record.setCloseVerifiedAt(Instant.now());
 
         if (record.getTargetPrice() != null && highOrClose >= record.getTargetPrice()) {

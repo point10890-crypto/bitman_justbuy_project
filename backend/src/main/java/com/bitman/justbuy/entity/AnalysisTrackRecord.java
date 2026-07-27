@@ -43,6 +43,10 @@ public class AnalysisTrackRecord {
     private Long highPrice1d;
     private Double maxReturn1d;
 
+    // 종가매매 익일 저가 기준 최대낙폭 — 손절폭 임계값을 데이터로 튜닝하기 위해 기록한다.
+    private Long lowPrice1d;
+    private Double minReturn1d;
+
     private boolean hitTarget;
     private boolean hitStop;
 
@@ -116,6 +120,12 @@ public class AnalysisTrackRecord {
 
     public Double getMaxReturn1d() { return maxReturn1d; }
     public void setMaxReturn1d(Double maxReturn1d) { this.maxReturn1d = maxReturn1d; }
+
+    public Long getLowPrice1d() { return lowPrice1d; }
+    public void setLowPrice1d(Long lowPrice1d) { this.lowPrice1d = lowPrice1d; }
+
+    public Double getMinReturn1d() { return minReturn1d; }
+    public void setMinReturn1d(Double minReturn1d) { this.minReturn1d = minReturn1d; }
 
     public boolean isHitTarget() { return hitTarget; }
     public void setHitTarget(boolean hitTarget) { this.hitTarget = hitTarget; }
