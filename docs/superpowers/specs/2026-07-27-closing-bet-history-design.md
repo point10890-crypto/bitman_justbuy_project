@@ -68,8 +68,13 @@ D+1 장마감 후 스케줄 잡이 전일 아카이브를 읽어 `AnalysisTrackR
 
 | 컬럼 | 타입 | 용도 |
 |---|---|---|
-| `high_price_1d` | BIGINT | 익일 장중 고가 |
-| `max_return_1d` | DOUBLE | 진입가 → 익일 고가 최대수익률 |
+| `high_price1d` | BIGINT | 익일 장중 고가 |
+| `max_return1d` | DOUBLE PRECISION | 진입가 → 익일 고가 최대수익률 |
+
+컬럼명은 Hibernate 기본 네이밍(`CamelCaseToUnderscoresNamingStrategy`)을 따른다.
+숫자 앞에는 언더스코어가 붙지 않으므로 `highPrice1d` → `high_price1d` 이며,
+기존 `price1d` / `return1d` 와 같은 규칙이다. 이름이 어긋나면 prod(`ddl-auto: validate`)
+기동이 실패한다.
 
 Flyway 마이그레이션 `V20260727_1200__add_jongga_high_tracking.sql` 추가.
 prod 프로파일은 `ddl-auto: validate`이므로 마이그레이션 없이는 기동이 실패한다.
@@ -135,8 +140,10 @@ prod 프로파일은 `ddl-auto: validate`이므로 마이그레이션 없이는 
 ### 5. 에러 처리
 
 - 아카이브 파일 없음 → 해당 날짜는 목록에서 제외 (예외 아님)
-- KIS 호출 실패/미설정 → 해당 종목은 미검증 상태로 남기고 다음 잡에서 재시도.
-  `hasUnverified` 판정으로 잡이 다음 영업일에 다시 시도한다
+- KIS 호출 실패/미설정 → 해당 종목은 미검증으로 남는다.
+  재시도는 **같은 평가일 안에서만** 한다 (15:40 1차 / 16:10 2차).
+  다음 영업일에 재시도하면 다른 날 종가를 그날 값으로 기록하게 되므로 하지 않는다.
+  그날 확정하지 못한 레코드는 영구 미검증으로 표시된다
 - 진입가가 0 이하 → 수익률 계산 불가이므로 검증 스킵
 - 프론트 조회 실패 → 페이지에 오류 문구, 홈은 영향 없음
 
