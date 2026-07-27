@@ -160,6 +160,101 @@ public class JonggaTrackRecordService {
         return verified;
     }
 
+    /**
+     * 과거 추천의 소급 성과검증.
+     *
+     * <p>{@link #verifyRecordedSignals}는 KIS 현재가를 쓰므로 평가일 당일에만 유효하다.
+     * 이 메서드는 KIS 일봉({@link KisApiService#fetchDailyOhlc})으로 <b>평가일의 확정 OHLC</b>를
+     * 직접 읽으므로 언제 실행해도 올바른 값을 기록한다. 이미 검증된 레코드는 건드리지 않는다.
+     *
+     * @param from 추천일 시작 (포함)
+     * @param to   추천일 종료 (포함)
+     * @return 이번 실행에서 검증된 건수
+     */
+    @Transactional
+    public int backfillVerification(LocalDate from, LocalDate to) {
+        if (from == null || to == null || from.isAfter(to)) return 0;
+
+        LocalDate today = LocalDate.now(KST);
+        int recorded = 0;
+        int verified = 0;
+        int skipped = 0;
+
+        for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
+            if (!KoreanMarketCalendar.isTradingDay(date)) continue;
+
+            LocalDate evalDate = KoreanMarketCalendar.nextTradingDay(date);
+            if (evalDate == null || !evalDate.isBefore(today)) {
+                // 평가일이 아직 오지 않았거나 오늘이면 확정 일봉이 없다 — 스케줄 잡에 맡긴다.
+                skipped++;
+                continue;
+            }
+
+            recorded += recordArchiveSignals(date);
+            verified += verifyWithDailyCandles(date, evalDate);
+        }
+
+        log.info("[JonggaTrack] 소급검증 완료: 기간={}~{}, 신규기록={}, 검증={}, 대기={}",
+            from, to, recorded, verified, skipped);
+        return verified;
+    }
+
+    /**
+     * 추천일 레코드를 평가일 일봉으로 확정한다.
+     *
+     * @param recommendedDate 추천일
+     * @param evalDate        평가일 (추천일의 다음 거래일)
+     * @return 검증된 건수
+     */
+    @Transactional
+    public int verifyWithDailyCandles(LocalDate recommendedDate, LocalDate evalDate) {
+        List<AnalysisTrackRecord> records =
+            repository.findByModeAndAnalysisDateOrderByCreatedAtDesc(MODE, recommendedDate);
+
+        int verified = 0;
+        for (AnalysisTrackRecord record : records) {
+            if (record.getClosePrice() != null) continue;
+
+            Long entry = record.getPriceAtAnalysis();
+            if (entry == null || entry <= 0 || record.getStockCode() == null) continue;
+
+            try {
+                Map<LocalDate, KisApiService.DailyOhlc> candles =
+                    kisApiService.fetchDailyOhlc(record.getStockCode(), evalDate, evalDate);
+                KisApiService.DailyOhlc candle = candles.get(evalDate);
+                if (candle == null || candle.close() <= 0) continue;
+
+                applyOutcome(record, entry, candle.close(), candle.high(), candle.low());
+                repository.save(record);
+                verified++;
+            } catch (Exception e) {
+                log.debug("[JonggaTrack] 소급검증 실패 {} ({}): {}",
+                    record.getStockCode(), evalDate, e.getMessage());
+            }
+        }
+        return verified;
+    }
+
+    /** 종가/고가/저가로 수익률·목표가 도달·손절 도달을 확정한다. */
+    private static void applyOutcome(AnalysisTrackRecord record, long entry, long close, long high, long low) {
+        long highOrClose = high > 0 ? high : close;
+        long lowOrClose = low > 0 ? low : close;
+
+        record.setClosePrice(close);
+        record.setCloseReturn(returnPct(entry, close));
+        record.setHighPrice1d(highOrClose);
+        record.setMaxReturn1d(returnPct(entry, highOrClose));
+        record.setCloseVerifiedAt(Instant.now());
+
+        if (record.getTargetPrice() != null && highOrClose >= record.getTargetPrice()) {
+            record.setHitTarget(true);
+        }
+        if (record.getStopLoss() != null && lowOrClose <= record.getStopLoss()) {
+            record.setHitStop(true);
+        }
+        record.setStatus(TrackStatus.COMPLETED);
+    }
+
     private JsonNode readArchive(LocalDate recommendedDate) {
         try {
             return jonggaV2SearchService.history(recommendedDate.format(ARCHIVE_DATE));

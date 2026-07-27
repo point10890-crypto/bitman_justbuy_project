@@ -107,4 +107,19 @@ public final class KoreanMarketCalendar {
         }
         return null;
     }
+
+    /**
+     * 기준일 직후의 거래일. 연휴가 길어도 최대 30일까지만 전진한다.
+     * 종가매매 성과는 "추천일 다음 거래일"에 평가하므로 소급 검증에서 사용한다.
+     *
+     * @return 직후 거래일. 30일 내에 없으면 null.
+     */
+    public static LocalDate nextTradingDay(LocalDate date) {
+        LocalDate cursor = date.plusDays(1);
+        for (int i = 0; i < 30; i++) {
+            if (isTradingDay(cursor)) return cursor;
+            cursor = cursor.plusDays(1);
+        }
+        return null;
+    }
 }

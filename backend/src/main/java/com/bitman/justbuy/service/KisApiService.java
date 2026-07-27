@@ -319,6 +319,127 @@ public class KisApiService {
         }
     }
 
+    // ══════════════════════════════════════════════════
+    // 일봉 시세 조회 (과거 OHLC — 소급 성과검증용)
+    // ══════════════════════════════════════════════════
+
+    /** 일봉 한 건. 과거 특정 일자의 확정 시세이므로 값이 바뀌지 않는다. */
+    public record DailyOhlc(
+        LocalDate date,
+        long open,
+        long high,
+        long low,
+        long close,
+        long volume
+    ) {}
+
+    /**
+     * 국내주식 기간별 시세(일봉) 조회 — TR {@code FHKST03010100}.
+     *
+     * <p>현재가 API({@link #fetchCurrentPrice})는 "지금" 값만 주므로 과거 일자의 종가/고가/저가를
+     * 알 수 없다. 종가매매 추천의 소급 성과검증은 이 메서드로 평가일 OHLC를 확보한다.
+     *
+     * <p>과거 확정 시세는 변하지 않으므로 6시간 캐시한다. 실패 시 빈 맵(fail-open).
+     *
+     * @return 일자 -> OHLC. 조회 실패/미설정 시 빈 맵.
+     */
+    public Map<LocalDate, DailyOhlc> fetchDailyOhlc(String stockCode, LocalDate from, LocalDate to) {
+        if (!isAvailable() || stockCode == null || stockCode.isBlank() || from == null || to == null) {
+            return Map.of();
+        }
+        if (from.isAfter(to)) return Map.of();
+
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyyMMdd");
+        String cacheKey = "kis_daily_" + stockCode + "_" + from.format(fmt) + "_" + to.format(fmt);
+        CachedEntry cached = cache.get(cacheKey);
+        if (cached != null && cached.isValid()) {
+            try {
+                List<DailyOhlc> list = objectMapper.readValue(cached.data(),
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, DailyOhlc.class));
+                return toDateMap(list);
+            } catch (Exception ignored) {}
+        }
+
+        String token = getAccessToken();
+        if (token == null) return Map.of();
+
+        String url = KIS_BASE + "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
+            + "?FID_COND_MRKT_DIV_CODE=J"
+            + "&FID_INPUT_ISCD=" + stockCode
+            + "&FID_INPUT_DATE_1=" + from.format(fmt)
+            + "&FID_INPUT_DATE_2=" + to.format(fmt)
+            + "&FID_PERIOD_DIV_CODE=D"
+            + "&FID_ORG_ADJ_PRC=0";
+        HttpHeaders headers = buildHeaders("FHKST03010100");
+
+        String responseBody = null;
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                ResponseEntity<String> resp = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+                if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
+                    if (attempt < MAX_RETRIES) { sleepBackoff(attempt); continue; }
+                    return Map.of();
+                }
+                responseBody = resp.getBody();
+                break;
+            } catch (org.springframework.web.client.HttpStatusCodeException hse) {
+                String body = hse.getResponseBodyAsString();
+                boolean isRateLimit = body != null
+                    && (body.contains("EGW00201") || body.contains("초당") || body.contains("rate"));
+                if (isRateLimit && attempt < MAX_RETRIES) {
+                    sleepBackoff(attempt);
+                    continue;
+                }
+                log.warn("[KIS] 일봉 HTTP {} ({}): {}", hse.getStatusCode(), stockCode,
+                    body != null && body.length() > 200 ? body.substring(0, 200) : body);
+                return Map.of();
+            } catch (Exception e) {
+                if (attempt < MAX_RETRIES) { sleepBackoff(attempt); continue; }
+                log.warn("[KIS] 일봉 조회 실패 ({}): {}", stockCode, e.getMessage());
+                return Map.of();
+            }
+        }
+        if (responseBody == null) return Map.of();
+
+        try {
+            JsonNode output = objectMapper.readTree(responseBody).path("output2");
+            if (!output.isArray() || output.isEmpty()) return Map.of();
+
+            List<DailyOhlc> candles = new ArrayList<>();
+            for (JsonNode item : output) {
+                String day = item.path("stck_bsop_date").asText("");
+                if (day.length() != 8) continue;
+                long close = parseLong(item.path("stck_clpr").asText("0"));
+                if (close <= 0) continue;
+                candles.add(new DailyOhlc(
+                    LocalDate.parse(day, fmt),
+                    parseLong(item.path("stck_oprc").asText("0")),
+                    parseLong(item.path("stck_hgpr").asText("0")),
+                    parseLong(item.path("stck_lwpr").asText("0")),
+                    close,
+                    parseLong(item.path("acml_vol").asText("0"))
+                ));
+            }
+            if (candles.isEmpty()) return Map.of();
+
+            cache.put(cacheKey, new CachedEntry(objectMapper.writeValueAsString(candles),
+                Instant.now().plus(6, ChronoUnit.HOURS)));
+            return toDateMap(candles);
+        } catch (Exception e) {
+            log.warn("[KIS] 일봉 파싱 실패 ({}): {}", stockCode, e.getMessage());
+            return Map.of();
+        }
+    }
+
+    private static Map<LocalDate, DailyOhlc> toDateMap(List<DailyOhlc> candles) {
+        Map<LocalDate, DailyOhlc> result = new LinkedHashMap<>();
+        for (DailyOhlc c : candles) {
+            if (c != null && c.date() != null) result.put(c.date(), c);
+        }
+        return result;
+    }
+
     private static final int MAX_RETRIES = 3;
     private static final long BASE_BACKOFF_MS = 300L;
 
