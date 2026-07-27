@@ -23,6 +23,12 @@ public record JonggaPerformanceResponse(
     String winRate,
     String targetHitRate,
     String stopHitRate,
+    /** 같은 구간 시장(지수 추종 ETF) 평균 수익률. 조회 실패 시 "-". */
+    String avgBenchmarkReturnPct,
+    /** 시장 대비 초과수익 평균. 전략이 좋았는지 장이 좋았는지 구분하는 지표. */
+    String avgExcessReturnPct,
+    /** 시장을 이긴 비율. */
+    String marketBeatRate,
     List<DayGroup> days,
     String note
 ) {
@@ -47,6 +53,10 @@ public record JonggaPerformanceResponse(
         String closePrice,
         String closeReturnPct,
         String maxReturnPct,
+        /** 같은 구간 시장 수익률. */
+        String benchmarkReturnPct,
+        /** 종목 수익률 − 시장 수익률. */
+        String excessReturnPct,
         boolean hitTarget,
         boolean hitStop,
         String result

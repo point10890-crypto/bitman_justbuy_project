@@ -50,11 +50,27 @@ public class JonggaPerformanceService {
 
     private final JonggaV2SearchService jonggaV2SearchService;
     private final TrackRecordRepository repository;
+    private final MarketBenchmarkService benchmarkService;
 
     public JonggaPerformanceService(JonggaV2SearchService jonggaV2SearchService,
                                     TrackRecordRepository repository) {
+        this(jonggaV2SearchService, repository, (MarketBenchmarkService) null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public JonggaPerformanceService(JonggaV2SearchService jonggaV2SearchService,
+                                    TrackRecordRepository repository,
+                                    org.springframework.beans.factory.ObjectProvider<MarketBenchmarkService> benchmarkProvider) {
+        this(jonggaV2SearchService, repository,
+            benchmarkProvider == null ? null : benchmarkProvider.getIfAvailable());
+    }
+
+    JonggaPerformanceService(JonggaV2SearchService jonggaV2SearchService,
+                             TrackRecordRepository repository,
+                             MarketBenchmarkService benchmarkService) {
         this.jonggaV2SearchService = jonggaV2SearchService;
         this.repository = repository;
+        this.benchmarkService = benchmarkService;
     }
 
     public JonggaPerformanceResponse getPerformance(String fromParam, String toParam) {
@@ -76,6 +92,14 @@ public class JonggaPerformanceService {
             recordsByKey.putIfAbsent(key(record.getAnalysisDate(), record.getStockCode()), record);
         }
 
+        // 벤치마크는 구간 전체를 프록시당 한 번만 조회한다 (날짜별 호출은 레이트리밋 위험).
+        Map<String, Map<LocalDate, KisApiService.DailyOhlc>> benchmarkSeries = new LinkedHashMap<>();
+        if (benchmarkService != null) {
+            for (String proxy : List.of(MarketBenchmarkService.KOSPI_PROXY, MarketBenchmarkService.KOSDAQ_PROXY)) {
+                benchmarkSeries.put(proxy, benchmarkService.series(proxy, from, to));
+            }
+        }
+
         List<DayGroup> days = new ArrayList<>();
         List<PerformanceRow> allRows = new ArrayList<>();
         for (LocalDate date : datesInRange(from, to)) {
@@ -87,7 +111,8 @@ public class JonggaPerformanceService {
             int rank = 1;
             for (JsonNode signal : signals) {
                 String stockCode = signal.path("stock_code").asText("");
-                rows.add(toRow(rank++, signal, recordsByKey.get(key(date, stockCode))));
+                Double benchmark = benchmarkFor(benchmarkSeries, signal, date);
+                rows.add(toRow(rank++, signal, recordsByKey.get(key(date, stockCode)), benchmark));
             }
             allRows.addAll(rows);
 
@@ -110,6 +135,16 @@ public class JonggaPerformanceService {
         int losses = (int) closeReturns.stream().filter(value -> value < 0).count();
         int flats = closeReturns.size() - wins - losses;
         int verifiedCount = closeReturns.size();
+
+        List<Double> benchmarks = rows.stream()
+            .map(row -> parsePercent(row.benchmarkReturnPct()))
+            .filter(Objects::nonNull)
+            .toList();
+        List<Double> excesses = rows.stream()
+            .map(row -> parsePercent(row.excessReturnPct()))
+            .filter(Objects::nonNull)
+            .toList();
+        int marketBeats = (int) excesses.stream().filter(value -> value > 0).count();
 
         int notMeasurable = (int) rows.stream()
             .filter(row -> RESULT_NOT_MEASURABLE.equals(row.result()))
@@ -145,12 +180,25 @@ public class JonggaPerformanceService {
             ratioPercent(wins, verifiedCount),
             ratioPercent((int) rows.stream().filter(PerformanceRow::hitTarget).count(), verifiedCount),
             ratioPercent((int) rows.stream().filter(PerformanceRow::hitStop).count(), verifiedCount),
+            avgOf(benchmarks),
+            avgOf(excesses),
+            ratioPercent(marketBeats, excesses.size()),
             days,
             note
         );
     }
 
-    private PerformanceRow toRow(int rank, JsonNode signal, AnalysisTrackRecord record) {
+    /** 시그널의 시장(KOSPI/KOSDAQ)에 맞는 벤치마크 구간수익률. 없으면 null. */
+    private Double benchmarkFor(Map<String, Map<LocalDate, KisApiService.DailyOhlc>> series,
+                                JsonNode signal, LocalDate recommendedDate) {
+        if (series.isEmpty()) return null;
+        String proxy = MarketBenchmarkService.proxyFor(signal.path("market").asText(""));
+        Map<LocalDate, KisApiService.DailyOhlc> proxySeries = series.get(proxy);
+        if (proxySeries == null || proxySeries.isEmpty()) return null;
+        return MarketBenchmarkService.nextSessionReturnPct(proxySeries, recommendedDate).orElse(null);
+    }
+
+    private PerformanceRow toRow(int rank, JsonNode signal, AnalysisTrackRecord record, Double benchmark) {
         long entry = JonggaSignals.entryPrice(signal);
         long target = signal.path("target_price").asLong(0);
         long stop = signal.path("stop_price").asLong(0);
@@ -158,6 +206,10 @@ public class JonggaPerformanceService {
         boolean verified = record != null && record.getClosePrice() != null;
         boolean measurable = verified
             && !isPriceLimitViolation(record.getCloseReturn(), record.getMaxReturn1d());
+
+        Double excess = measurable && benchmark != null && record.getCloseReturn() != null
+            ? Math.round((record.getCloseReturn() - benchmark) * 100.0) / 100.0
+            : null;
 
         return new PerformanceRow(
             rank,
@@ -171,6 +223,8 @@ public class JonggaPerformanceService {
             measurable ? formatPrice(record.getClosePrice()) : "-",
             measurable ? formatPercent(record.getCloseReturn()) : "-",
             measurable ? formatPercent(record.getMaxReturn1d()) : "-",
+            measurable && benchmark != null ? formatPercent(benchmark) : "-",
+            excess != null ? formatPercent(excess) : "-",
             measurable && record.isHitTarget(),
             measurable && record.isHitStop(),
             verified
