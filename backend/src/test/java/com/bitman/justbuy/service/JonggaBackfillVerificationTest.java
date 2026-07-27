@@ -127,6 +127,24 @@ class JonggaBackfillVerificationTest {
         verify(kisApiService, never()).fetchDailyOhlc(anyString(), any(), any());
     }
 
+    @Test
+    void evalDataIsAvailableForPastDaysAndForTodayOnlyAfterCandleIsFixed() {
+        LocalDate today = LocalDate.of(2026, 7, 27);
+        java.time.LocalTime beforeClose = java.time.LocalTime.of(11, 0);
+        java.time.LocalTime afterClose = java.time.LocalTime.of(17, 30);
+
+        // 과거 평가일 — 시각과 무관하게 확정 일봉 존재
+        assertThat(JonggaTrackRecordService.evalDataAvailable(today.minusDays(1), today, beforeClose)).isTrue();
+
+        // 평가일이 오늘 — 장중에는 불가, 마감 후에는 가능
+        assertThat(JonggaTrackRecordService.evalDataAvailable(today, today, beforeClose)).isFalse();
+        assertThat(JonggaTrackRecordService.evalDataAvailable(today, today, afterClose)).isTrue();
+
+        // 미래 평가일 — 언제나 불가
+        assertThat(JonggaTrackRecordService.evalDataAvailable(today.plusDays(1), today, afterClose)).isFalse();
+        assertThat(JonggaTrackRecordService.evalDataAvailable(null, today, afterClose)).isFalse();
+    }
+
     private void stubCandle(String code, long open, long high, long low, long close) {
         when(kisApiService.fetchDailyOhlc(eq(code), any(), any()))
             .thenReturn(Map.of(EVAL, new KisApiService.DailyOhlc(EVAL, open, high, low, close, 1_000_000L)));

@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -37,6 +38,12 @@ public class JonggaTrackRecordService {
     private static final Logger log = LoggerFactory.getLogger(JonggaTrackRecordService.class);
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter ARCHIVE_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+    /** 장마감(15:30) 후 일봉이 확정되는 시각. 이 시각 이후에는 당일도 평가일로 쓸 수 있다. */
+    private static final LocalTime DAILY_CANDLE_READY = LocalTime.of(15, 40);
+
+    /** 스케줄 잡이 매 실행마다 되돌아보며 미검증분을 메우는 구간(일). */
+    private static final int SWEEP_DAYS = 45;
 
     private final TrackRecordRepository repository;
     private final JonggaV2SearchService jonggaV2SearchService;
@@ -75,6 +82,12 @@ public class JonggaTrackRecordService {
         int recorded = recordArchiveSignals(recommendedDate);
         int verified = verifyRecordedSignals(recommendedDate);
         log.info("[JonggaTrack] 검증 완료: 추천일={}, 신규기록={}, 검증={}", recommendedDate, recorded, verified);
+
+        // 놓친 날(서버 중단, 배포, KIS 장애)을 일봉으로 되메운다. 이미 검증된 건은 건너뛴다.
+        int swept = backfillVerification(today.minusDays(SWEEP_DAYS), today);
+        if (swept > 0) {
+            log.info("[JonggaTrack] 미검증분 소급 보정: {}건", swept);
+        }
     }
 
     /**
@@ -176,6 +189,7 @@ public class JonggaTrackRecordService {
         if (from == null || to == null || from.isAfter(to)) return 0;
 
         LocalDate today = LocalDate.now(KST);
+        LocalTime nowKst = LocalTime.now(KST);
         int recorded = 0;
         int verified = 0;
         int skipped = 0;
@@ -184,8 +198,7 @@ public class JonggaTrackRecordService {
             if (!KoreanMarketCalendar.isTradingDay(date)) continue;
 
             LocalDate evalDate = KoreanMarketCalendar.nextTradingDay(date);
-            if (evalDate == null || !evalDate.isBefore(today)) {
-                // 평가일이 아직 오지 않았거나 오늘이면 확정 일봉이 없다 — 스케줄 잡에 맡긴다.
+            if (!evalDataAvailable(evalDate, today, nowKst)) {
                 skipped++;
                 continue;
             }
@@ -233,6 +246,22 @@ public class JonggaTrackRecordService {
             }
         }
         return verified;
+    }
+
+    /**
+     * 평가일의 확정 일봉을 지금 가져올 수 있는지 판단한다.
+     *
+     * <p>과거 평가일은 언제나 가능하다. 평가일이 오늘이면 장이 끝나고 일봉이 확정된 뒤
+     * ({@link #DAILY_CANDLE_READY} 이후)에만 가능하다. 미래 평가일은 불가.
+     *
+     * <p>이 구분이 없으면 배포/재기동 시각에 따라 "장은 끝났는데 평가일이 오늘이라"
+     * 검증이 영구히 빠지는 구멍이 생긴다.
+     */
+    static boolean evalDataAvailable(LocalDate evalDate, LocalDate today, LocalTime nowKst) {
+        if (evalDate == null || today == null) return false;
+        if (evalDate.isAfter(today)) return false;
+        if (evalDate.isBefore(today)) return true;
+        return nowKst != null && !nowKst.isBefore(DAILY_CANDLE_READY);
     }
 
     /** 종가/고가/저가로 수익률·목표가 도달·손절 도달을 확정한다. */
