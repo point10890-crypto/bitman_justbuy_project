@@ -232,9 +232,12 @@ public class JonggaTrackRecordService {
             if (entry == null || entry <= 0 || record.getStockCode() == null) continue;
 
             try {
-                Map<LocalDate, KisApiService.DailyOhlc> candles =
-                    kisApiService.fetchDailyOhlc(record.getStockCode(), evalDate, evalDate);
-                KisApiService.DailyOhlc candle = candles.get(evalDate);
+                // 평가일 하루만 찍어 조회하면, 정적 휴장일 달력이 실제 휴장과 어긋난 날
+                // (달력상 거래일인데 세션이 없던 날)에 일봉이 없어 영구 미검증으로 남는다.
+                // 추천일 다음날부터 한 주를 훑어 "추천일 이후 첫 세션"을 실제 데이터로 정한다.
+                Map<LocalDate, KisApiService.DailyOhlc> candles = kisApiService.fetchDailyOhlc(
+                    record.getStockCode(), recommendedDate.plusDays(1), recommendedDate.plusDays(8));
+                KisApiService.DailyOhlc candle = firstSessionAfter(candles, recommendedDate);
                 if (candle == null || candle.close() <= 0) continue;
 
                 applyOutcome(record, entry, candle.close(), candle.high(), candle.low());
@@ -246,6 +249,22 @@ public class JonggaTrackRecordService {
             }
         }
         return verified;
+    }
+
+    /**
+     * 추천일 이후 실제로 체결이 있었던 첫 세션의 일봉을 고른다.
+     *
+     * <p>KIS 가 돌려준 일봉에만 의존하므로 휴장일 달력이 틀려도 올바른 평가일을 집는다.
+     */
+    static KisApiService.DailyOhlc firstSessionAfter(Map<LocalDate, KisApiService.DailyOhlc> candles,
+                                                     LocalDate recommendedDate) {
+        if (candles == null || candles.isEmpty() || recommendedDate == null) return null;
+        return candles.entrySet().stream()
+            .filter(e -> e.getKey() != null && e.getKey().isAfter(recommendedDate))
+            .filter(e -> e.getValue() != null && e.getValue().close() > 0)
+            .min(Map.Entry.comparingByKey())
+            .map(Map.Entry::getValue)
+            .orElse(null);
     }
 
     /**

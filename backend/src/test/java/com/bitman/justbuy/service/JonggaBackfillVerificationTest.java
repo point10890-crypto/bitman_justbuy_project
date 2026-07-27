@@ -128,6 +128,42 @@ class JonggaBackfillVerificationTest {
     }
 
     @Test
+    void usesFirstActualSessionWhenCalendarEvalDayHadNoTrading() {
+        // 달력상 평가일(07-24)에는 세션이 없고 실제로는 07-27 이 첫 세션인 상황
+        LocalDate actualSession = LocalDate.of(2026, 7, 27);
+        AnalysisTrackRecord record = record("005930", 80_000L, 84_000L, 77_600L);
+        when(repository.findByModeAndAnalysisDateOrderByCreatedAtDesc("JONGGA_V2", RECOMMENDED))
+            .thenReturn(List.of(record));
+        when(kisApiService.fetchDailyOhlc(eq("005930"), any(), any())).thenReturn(Map.of(
+            actualSession, new KisApiService.DailyOhlc(actualSession, 81_000L, 88_000L, 80_500L, 86_000L, 1L)
+        ));
+
+        int verified = service.verifyWithDailyCandles(RECOMMENDED, EVAL);
+
+        assertThat(verified).isEqualTo(1);
+        assertThat(record.getClosePrice()).isEqualTo(86_000L);
+        assertThat(record.isHitTarget()).isTrue();
+    }
+
+    @Test
+    void firstSessionAfterPicksEarliestCandleStrictlyAfterRecommendationDate() {
+        LocalDate d24 = LocalDate.of(2026, 7, 24);
+        LocalDate d27 = LocalDate.of(2026, 7, 27);
+        Map<LocalDate, KisApiService.DailyOhlc> candles = Map.of(
+            RECOMMENDED, new KisApiService.DailyOhlc(RECOMMENDED, 1, 1, 1, 70_000L, 1L),
+            d27, new KisApiService.DailyOhlc(d27, 1, 1, 1, 90_000L, 1L),
+            d24, new KisApiService.DailyOhlc(d24, 1, 1, 1, 80_000L, 1L)
+        );
+
+        KisApiService.DailyOhlc picked =
+            JonggaTrackRecordService.firstSessionAfter(candles, RECOMMENDED);
+
+        assertThat(picked).isNotNull();
+        assertThat(picked.date()).isEqualTo(d24);
+        assertThat(JonggaTrackRecordService.firstSessionAfter(Map.of(), RECOMMENDED)).isNull();
+    }
+
+    @Test
     void evalDataIsAvailableForPastDaysAndForTodayOnlyAfterCandleIsFixed() {
         LocalDate today = LocalDate.of(2026, 7, 27);
         java.time.LocalTime beforeClose = java.time.LocalTime.of(11, 0);
