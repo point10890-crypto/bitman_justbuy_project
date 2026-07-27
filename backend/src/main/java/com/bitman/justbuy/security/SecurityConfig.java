@@ -59,6 +59,8 @@ public class SecurityConfig {
                 .requestMatchers(new AntPathRequestMatcher("/admin")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/admin/**")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/search")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/history")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/history/**")).permitAll()
 
                 // Public API
                 .requestMatchers(new AntPathRequestMatcher("/api/health")).permitAll()

@@ -1936,6 +1936,143 @@
   border-color: #2f3440;
 }
 
+/* ===== 종가매매 히스토리 ===== */
+
+.section-history-button {
+  margin-top: 10px;
+  background: rgba(254, 229, 0, .08);
+  border-color: rgba(254, 229, 0, .28);
+  color: #f8eab0;
+}
+
+.history-page-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 clamp(12px, 2dvh, 18px);
+}
+
+.history-page-head h1 {
+  margin: 0;
+  color: var(--maker-text);
+  font-size: clamp(24px, 5vw, 34px);
+  line-height: 1.1;
+  font-weight: 950;
+}
+
+.history-page-head span {
+  display: inline-flex;
+  margin-top: 6px;
+  color: #aeb4c3;
+  font-size: 13px;
+  line-height: 1.35;
+  font-weight: 800;
+}
+
+.history-back-button {
+  width: 44px;
+  height: 44px;
+  border: 1px solid #383d47;
+  border-radius: 8px;
+  background: #2a2d34;
+  color: #f1f5f9;
+  font-size: 18px;
+  font-weight: 950;
+}
+
+.history-range-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.history-range-tabs button {
+  flex: 1;
+  min-height: 40px;
+  border: 1px solid #383d47;
+  border-radius: 8px;
+  background: #2a2d34;
+  color: #c7cdd7;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.history-range-tabs button.is-active {
+  background: var(--maker-red);
+  border-color: var(--maker-red);
+  color: #fff;
+}
+
+.history-note {
+  margin: 0 0 14px;
+  border-color: rgba(254, 229, 0, .22);
+  background: rgba(254, 229, 0, .07);
+  color: #f8eab0;
+}
+
+.history-day-card {
+  padding: 22px 20px 18px;
+}
+
+.history-day-title-row {
+  grid-template-columns: minmax(0, 1fr);
+  margin-bottom: 16px;
+}
+
+.history-day-title-row h2 {
+  font-size: clamp(18px, 3.6vw, 24px);
+}
+
+.history-day-card .rank-table-head {
+  padding: 0 0 14px 0;
+  font-size: clamp(11px, 2.2vw, 14px);
+}
+
+.history-day-card .rank-table-row {
+  padding: 16px 0;
+  font-size: clamp(13px, 2.6vw, 18px);
+}
+
+.history-day-card .rank-name {
+  gap: 12px;
+}
+
+.history-day-card .rank-name strong {
+  width: 20px;
+}
+
+.history-return {
+  display: block;
+  margin-top: 4px;
+  font-size: clamp(10px, .6em, 13px);
+  font-style: normal;
+  font-weight: 900;
+}
+
+.history-result {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+  font-weight: 950;
+}
+
+.history-result em {
+  font-size: clamp(9px, .5em, 12px);
+  font-style: normal;
+  font-weight: 900;
+  color: #aeb4c3;
+}
+
+.history-result-win { color: var(--maker-red); }
+.history-result-loss { color: #5aa9ff; }
+.history-result-flat { color: #c7cdd7; }
+.history-result-pending { color: #7f8794; }
+
+.loss-text {
+  color: #5aa9ff;
+}
+
 .maker-analysis-panel {
   position: fixed;
   inset: 0;

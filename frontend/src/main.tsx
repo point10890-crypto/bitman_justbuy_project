@@ -14,6 +14,7 @@ import SubscribedRoute from './components/guards/SubscribedRoute'
 import AdminRoute from './components/guards/AdminRoute'
 import PublicOnlyRoute from './components/guards/PublicOnlyRoute'
 import AdminPage from './pages/AdminPage'
+import ClosingBetHistoryPage from './pages/ClosingBetHistoryPage'
 import LandingPage from './pages/LandingPage'
 import './index.css'
 
@@ -59,6 +60,7 @@ createRoot(document.getElementById('root')!).render(
           <Route element={<SubscribedRoute><AppLayout /></SubscribedRoute>}>
             <Route path="/" element={<HomePage />} />
             <Route path="/supply" element={<SupplyPage />} />
+            <Route path="/history/closing-bet" element={<ClosingBetHistoryPage />} />
             <Route path="/my" element={<MyPage />} />
             <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
           </Route>

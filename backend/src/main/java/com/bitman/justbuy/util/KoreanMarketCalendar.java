@@ -94,4 +94,17 @@ public final class KoreanMarketCalendar {
     public static boolean isHoliday(LocalDate date) {
         return !isTradingDay(date);
     }
+
+    /**
+     * 기준일 직전의 거래일. 연휴가 길어도 최대 30일까지만 역산한다.
+     * @return 직전 거래일. 30일 내에 없으면 null.
+     */
+    public static LocalDate previousTradingDay(LocalDate date) {
+        LocalDate cursor = date.minusDays(1);
+        for (int i = 0; i < 30; i++) {
+            if (isTradingDay(cursor)) return cursor;
+            cursor = cursor.minusDays(1);
+        }
+        return null;
+    }
 }

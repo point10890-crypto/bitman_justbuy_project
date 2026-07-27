@@ -43,8 +43,14 @@ public class JonggaV2SearchService {
         this.dataDirs = buildDataDirs(dataDir, extraDataDirs);
     }
 
+    /**
+     * 테스트 전용. 주어진 디렉토리 하나만 본다.
+     * 프로덕션 생성자와 달리 {@code ../data} 등 폴백 경로를 붙이지 않으므로,
+     * 테스트가 실행 환경의 실제 데이터 디렉토리에 영향받지 않는다.
+     */
     JonggaV2SearchService(ObjectMapper mapper, String dataDir) {
-        this(mapper, dataDir, "");
+        this.mapper = mapper;
+        this.dataDirs = List.of(Path.of(dataDir).toAbsolutePath().normalize());
     }
 
     public JsonNode latest() {

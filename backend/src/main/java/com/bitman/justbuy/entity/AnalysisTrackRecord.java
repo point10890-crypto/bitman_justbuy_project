@@ -34,10 +34,14 @@ public class AnalysisTrackRecord {
     private Double return3d;
     private Double return5d;
 
-    // 단타 당일 마감 성과 검증
+    // 단타 당일 마감 성과 검증 / 종가매매 익일 종가 검증
     private Long closePrice;
     private Double closeReturn;
     private Instant closeVerifiedAt;
+
+    // 종가매매 익일 고가 기준 최대수익률
+    private Long highPrice1d;
+    private Double maxReturn1d;
 
     private boolean hitTarget;
     private boolean hitStop;
@@ -106,6 +110,12 @@ public class AnalysisTrackRecord {
 
     public Instant getCloseVerifiedAt() { return closeVerifiedAt; }
     public void setCloseVerifiedAt(Instant closeVerifiedAt) { this.closeVerifiedAt = closeVerifiedAt; }
+
+    public Long getHighPrice1d() { return highPrice1d; }
+    public void setHighPrice1d(Long highPrice1d) { this.highPrice1d = highPrice1d; }
+
+    public Double getMaxReturn1d() { return maxReturn1d; }
+    public void setMaxReturn1d(Double maxReturn1d) { this.maxReturn1d = maxReturn1d; }
 
     public boolean isHitTarget() { return hitTarget; }
     public void setHitTarget(boolean hitTarget) { this.hitTarget = hitTarget; }

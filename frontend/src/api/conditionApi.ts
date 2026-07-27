@@ -74,6 +74,49 @@ export interface MainConditionResponse {
   notice: string
 }
 
+export interface JonggaPerformanceRow {
+  rank: number
+  stockName: string
+  stockCode: string
+  grade: string
+  score: number
+  entryPrice: string
+  targetPrice: string
+  stopLoss: string
+  closePrice: string
+  closeReturnPct: string
+  maxReturnPct: string
+  hitTarget: boolean
+  hitStop: boolean
+  result: '승' | '패' | '보합' | '미검증' | string
+}
+
+export interface JonggaPerformanceDay {
+  date: string
+  verified: boolean
+  avgCloseReturnPct: string
+  rows: JonggaPerformanceRow[]
+}
+
+export interface JonggaPerformanceResponse {
+  from: string
+  to: string
+  mode: string
+  title: string
+  totalSignals: number
+  verifiedCount: number
+  wins: number
+  losses: number
+  flats: number
+  avgCloseReturnPct: string
+  avgMaxReturnPct: string
+  winRate: string
+  targetHitRate: string
+  stopHitRate: string
+  days: JonggaPerformanceDay[]
+  note: string
+}
+
 function authHeaders(token?: string): HeadersInit {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
@@ -98,6 +141,15 @@ export async function fetchConditionSection(sectionSlug: string, token?: string)
     headers: authHeaders(token),
   })
   return readJson<ConditionSectionResponse>(res)
+}
+
+/** 종가매매 추천종목 히스토리 + 익일 성과. from/to 는 YYYY-MM-DD. */
+export async function fetchClosingBetPerformance(from: string, to: string, token?: string): Promise<JonggaPerformanceResponse> {
+  const params = new URLSearchParams({ from, to })
+  const res = await fetch(`${API_BASE}/api/kr/jongga-v2/performance?${params}`, {
+    headers: authHeaders(token),
+  })
+  return readJson<JonggaPerformanceResponse>(res)
 }
 
 export async function fetchConditionCaptureTimes(sectionSlug?: string, token?: string): Promise<ConditionCaptureTimesResponse> {

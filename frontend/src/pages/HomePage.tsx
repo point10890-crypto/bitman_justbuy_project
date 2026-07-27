@@ -435,6 +435,16 @@ export default function HomePage() {
               {endpointLoading === section.id ? '조건검색 엔드포인트 호출 중...' : `${section.title} 조건검색 엔드포인트 불러오기`}
             </button>
           )}
+
+          {section.id === 'closing-bet' && (
+            <button
+              className="section-endpoint-button section-history-button"
+              type="button"
+              onClick={() => navigate('/history/closing-bet')}
+            >
+              종가매매 추천종목 히스토리 보기
+            </button>
+          )}
         </section>
       ))}
 

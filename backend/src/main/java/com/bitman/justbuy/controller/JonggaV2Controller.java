@@ -1,5 +1,7 @@
 package com.bitman.justbuy.controller;
 
+import com.bitman.justbuy.dto.performance.JonggaPerformanceResponse;
+import com.bitman.justbuy.service.JonggaPerformanceService;
 import com.bitman.justbuy.service.JonggaV2SearchService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -15,9 +17,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class JonggaV2Controller {
 
     private final JonggaV2SearchService jonggaV2SearchService;
+    private final JonggaPerformanceService jonggaPerformanceService;
 
-    public JonggaV2Controller(JonggaV2SearchService jonggaV2SearchService) {
+    public JonggaV2Controller(JonggaV2SearchService jonggaV2SearchService,
+                              JonggaPerformanceService jonggaPerformanceService) {
         this.jonggaV2SearchService = jonggaV2SearchService;
+        this.jonggaPerformanceService = jonggaPerformanceService;
     }
 
     @GetMapping("/latest")
@@ -33,6 +38,13 @@ public class JonggaV2Controller {
     @GetMapping("/history/{date}")
     public ResponseEntity<JsonNode> history(@PathVariable String date) {
         return ResponseEntity.ok(jonggaV2SearchService.history(date));
+    }
+
+    /** 추천종목 히스토리 + 익일 성과. 기본 구간은 최근 30일. */
+    @GetMapping("/performance")
+    public ResponseEntity<JonggaPerformanceResponse> performance(@RequestParam(required = false) String from,
+                                                                 @RequestParam(required = false) String to) {
+        return ResponseEntity.ok(jonggaPerformanceService.getPerformance(from, to));
     }
 
     @GetMapping("/search")
