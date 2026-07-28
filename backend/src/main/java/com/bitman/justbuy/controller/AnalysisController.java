@@ -30,38 +30,24 @@ public class AnalysisController {
 
     private static final Logger log = LoggerFactory.getLogger(AnalysisController.class);
     private final ConditionSearchPipeline conditionSearchPipeline;
-    private final UserRepository userRepository;
     private final AsyncJobManager jobManager;
-    private final SubscriptionService subscriptionService;
+    private final SubscriptionAccessGuard subscriptionAccessGuard;
     private final ConditionRunService conditionRunService;
     private final TradingResearchViewService tradingResearchViewService;
 
-    public AnalysisController(ConditionSearchPipeline conditionSearchPipeline, UserRepository userRepository,
-                               AsyncJobManager jobManager, SubscriptionService subscriptionService,
+    public AnalysisController(ConditionSearchPipeline conditionSearchPipeline,
+                               AsyncJobManager jobManager, SubscriptionAccessGuard subscriptionAccessGuard,
                                ConditionRunService conditionRunService,
                                TradingResearchViewService tradingResearchViewService) {
         this.conditionSearchPipeline = conditionSearchPipeline;
-        this.userRepository = userRepository;
         this.jobManager = jobManager;
-        this.subscriptionService = subscriptionService;
+        this.subscriptionAccessGuard = subscriptionAccessGuard;
         this.conditionRunService = conditionRunService;
         this.tradingResearchViewService = tradingResearchViewService;
     }
 
     private void requireProSubscription(UUID userId) {
-        var user = userRepository.findById(userId)
-            .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "사용자를 찾을 수 없습니다."));
-
-        if (!subscriptionService.isActivePro(user)) {
-            // 만료된 PRO인지 일반 FREE인지 구분해서 메시지 제공
-            boolean isExpired = user.getSubscription() == SubscriptionStatus.PRO
-                && user.getSubscriptionEndDate() != null
-                && user.getSubscriptionEndDate().isBefore(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul")));
-            String msg = isExpired
-                ? "PRO 구독이 만료되었습니다. 재구독 신청을 해주세요."
-                : "PRO 구독자만 사용 가능합니다.";
-            throw new ApiException(HttpStatus.FORBIDDEN, msg);
-        }
+        subscriptionAccessGuard.requirePro(userId);
     }
 
     @GetMapping("/pipeline")

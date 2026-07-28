@@ -55,9 +55,13 @@ export function isSubscriptionExpired(endDate?: string | null): boolean {
 }
 
 function dtoToUser(dto: UserDto): User {
-  // PRO 플랜이 만료되었는지 확인
+  // PRO 플랜이 만료되었는지 확인.
+  // 자정 배치가 PRO -> FREE 로 내린 뒤에도 종료일은 남으므로, FREE + 지난 종료일이면
+  // "구독한 적 있는데 만료된 회원"이다. 신규 구독자와 구분해 재구독 안내를 띄운다.
   const rawSubscription = dto.subscription.toLowerCase() as User['subscription']
-  const isExpired = rawSubscription === 'pro' && isSubscriptionExpired(dto.subscriptionEndDate)
+  const isExpired =
+    (rawSubscription === 'pro' || rawSubscription === 'free')
+    && isSubscriptionExpired(dto.subscriptionEndDate)
   const isPendingRenewal =
     rawSubscription === 'pending' &&
     !!dto.subscriptionEndDate &&
@@ -119,7 +123,9 @@ function getStoredUser(): User | null {
       return dtoToUser(parsed as UserDto)
     }
     const user = parsed as User
-    const expired = user.subscription === 'pro' && isSubscriptionExpired(user.subscriptionEndDate)
+    const expired =
+      (user.subscription === 'pro' || user.subscription === 'free')
+      && isSubscriptionExpired(user.subscriptionEndDate)
     return {
       ...user,
       subscription: user.role === 'ADMIN' ? 'pro' : expired ? 'free' : user.subscription,

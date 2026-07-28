@@ -25,12 +25,17 @@ export default function SubscribedRoute({ children }: { children: ReactNode }) {
 
   if (location.pathname === '/my') return <>{children}</>
 
-  const expiredPro = user.subscription === 'pro' && isSubscriptionExpired(user.subscriptionEndDate)
+  // 만료 판정은 두 시점을 모두 덮어야 한다.
+  // 자정 배치 전: PRO + 지난 종료일 / 배치 후: FREE + 지난 종료일(종료일은 보존됨).
+  const expiredPro =
+    (user.subscription === 'pro' || user.subscription === 'free')
+    && isSubscriptionExpired(user.subscriptionEndDate)
+
   if (user.subscription !== 'pro' || expiredPro) {
     const message = user.subscription === 'pending'
       ? '구독 승인 대기 중입니다. 입금 확인 후 관리자가 승인합니다.'
       : expiredPro || user.subscriptionExpired
-        ? '월간 이용권이 만료되었습니다. 구독을 연장해 주세요.'
+        ? '월간 이용권이 만료되었습니다. 재구독 신청을 해주세요.'
         : '월간 이용권 구독 후 이용할 수 있습니다.'
 
     return (

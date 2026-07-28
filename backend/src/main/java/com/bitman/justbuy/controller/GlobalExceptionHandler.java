@@ -19,7 +19,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<Map<String, String>> handleApiException(ApiException e) {
-        return ResponseEntity.status(e.getStatus()).body(Map.of("error", e.getMessage()));
+        // code 는 클라이언트 분기용(예: 구독 만료 -> 재구독 페이지). 없으면 넣지 않는다.
+        Map<String, String> body = new java.util.LinkedHashMap<>();
+        body.put("error", e.getMessage());
+        if (e.getCode() != null) body.put("code", e.getCode());
+        return ResponseEntity.status(e.getStatus()).body(body);
     }
 
     @ExceptionHandler(AnalysisService.DuplicateAnalysisException.class)

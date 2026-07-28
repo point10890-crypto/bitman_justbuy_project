@@ -364,10 +364,12 @@ public class SubscriptionService {
                     continue;
                 }
                 user.setSubscription(SubscriptionStatus.FREE);
-                user.setSubscriptionEndDate(null);
-                user.setSubscriptionApprovedAt(null);
+                // 종료일/승인일은 남긴다. 지우면 "구독한 적 있는데 만료된 회원"과
+                // "구독한 적 없는 회원"을 구분할 수 없어 재구독 안내를 못 한다.
+                // 접근 권한은 subscription 상태(FREE)가 막으므로 남겨도 안전하다.
                 userRepository.save(user);
-                log.info("[Subscription] 만료 처리: userId={}, email={}", user.getId(), user.getEmail());
+                log.info("[Subscription] 만료 처리: userId={}, email={}, 종료일={}",
+                    user.getId(), user.getEmail(), user.getSubscriptionEndDate());
                 ok++;
             } catch (Exception e) {
                 // 단일 유저 실패가 전체 배치를 중단시키지 않도록 격리

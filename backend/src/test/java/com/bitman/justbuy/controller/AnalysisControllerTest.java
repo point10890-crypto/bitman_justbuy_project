@@ -50,9 +50,8 @@ class AnalysisControllerTest {
         conditionRunService = new ConditionRunService();
         controller = new AnalysisController(
             conditionSearchPipeline,
-            userRepository,
             jobManager,
-            subscriptionService,
+            new SubscriptionAccessGuard(userRepository, subscriptionService),
             conditionRunService,
             new TradingResearchViewService()
         );

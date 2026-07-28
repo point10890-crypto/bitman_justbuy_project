@@ -24,15 +24,12 @@ import java.util.UUID;
 public class ConditionController {
 
     private final MainConditionService mainConditionService;
-    private final UserRepository userRepository;
-    private final SubscriptionService subscriptionService;
+    private final SubscriptionAccessGuard subscriptionAccessGuard;
 
     public ConditionController(MainConditionService mainConditionService,
-                               UserRepository userRepository,
-                               SubscriptionService subscriptionService) {
+                               SubscriptionAccessGuard subscriptionAccessGuard) {
         this.mainConditionService = mainConditionService;
-        this.userRepository = userRepository;
-        this.subscriptionService = subscriptionService;
+        this.subscriptionAccessGuard = subscriptionAccessGuard;
     }
 
     @GetMapping("/main")
@@ -62,17 +59,6 @@ public class ConditionController {
     }
 
     private void requireProSubscription(UUID userId) {
-        var user = userRepository.findById(userId)
-            .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "사용자를 찾을 수 없습니다."));
-
-        if (!subscriptionService.isActivePro(user)) {
-            boolean isExpired = user.getSubscription() == SubscriptionStatus.PRO
-                && user.getSubscriptionEndDate() != null
-                && user.getSubscriptionEndDate().isBefore(LocalDate.now(ZoneId.of("Asia/Seoul")));
-            String msg = isExpired
-                ? "PRO 구독이 만료되었습니다. 재구독 신청을 해주세요."
-                : "PRO 구독자만 사용 가능합니다.";
-            throw new ApiException(HttpStatus.FORBIDDEN, msg);
-        }
+        subscriptionAccessGuard.requirePro(userId);
     }
 }
