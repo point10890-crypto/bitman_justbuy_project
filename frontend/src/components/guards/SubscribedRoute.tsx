@@ -31,6 +31,13 @@ export default function SubscribedRoute({ children }: { children: ReactNode }) {
     (user.subscription === 'pro' || user.subscription === 'free')
     && isSubscriptionExpired(user.subscriptionEndDate)
 
+  // NO티어(가입만 하고 구독 이력 없음)는 홈에서 마스킹 미리보기를 볼 수 있게 통과시킨다.
+  // 가치를 한 번도 못 본 채 결제 페이지로 튕기면 그대로 이탈한다.
+  // 실제 종목/가격은 서버가 가려서 내려주므로 통과시켜도 유료 데이터는 노출되지 않는다.
+  // 만료 회원은 이미 가치를 아는 집단이라 재구독 페이지로 바로 보낸다(기존 동작 유지).
+  const neverSubscribed = user.subscription === 'free' && !user.subscriptionEndDate
+  if (location.pathname === '/' && neverSubscribed) return <>{children}</>
+
   if (user.subscription !== 'pro' || expiredPro) {
     const message = user.subscription === 'pending'
       ? '구독 승인 대기 중입니다. 입금 확인 후 관리자가 승인합니다.'

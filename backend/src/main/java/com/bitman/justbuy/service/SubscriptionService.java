@@ -307,11 +307,23 @@ public class SubscriptionService {
             .map(UserDto::from)
             .toList();
 
+        // freeCount 는 "한 번도 구독 안 함"과 "만료됨"이 섞여 있어 유도 대상 파악에 쓸 수 없다.
+        // 티어로 갈라서 각각의 모수를 준다.
+        List<User> members = userRepository.findAll().stream()
+            .filter(u -> u.getRole() != Role.ADMIN)
+            .toList();
+        long neverSubscribedCount = members.stream().filter(u -> tierOf(u) == MemberTier.NONE).count();
+        long expiredCount = members.stream().filter(u -> tierOf(u) == MemberTier.EXPIRED).count();
+        long convertibleCount = neverSubscribedCount + expiredCount;
+
         Map<String, Object> stats = new java.util.LinkedHashMap<>();
         stats.put("totalUsers", totalUsers);
         stats.put("proCount", proCount);
         stats.put("pendingCount", pendingCount);
         stats.put("freeCount", freeCount);
+        stats.put("neverSubscribedCount", neverSubscribedCount);
+        stats.put("expiredCount", expiredCount);
+        stats.put("convertibleCount", convertibleCount);
         stats.put("expiringThisWeek", expiringThisWeek);
         stats.put("expiringThisMonth", expiringThisMonth);
         stats.put("newUsersThisWeek", newUsersThisWeek);
@@ -402,6 +414,45 @@ public class SubscriptionService {
         result.put("expiredCount", ok);
         result.put("failedCount", failed);
         return result;
+    }
+
+    /**
+     * 회원 티어 판정 — 접근 제어와 통계가 같은 기준을 쓰도록 여기 하나로 모은다.
+     *
+     * <p>만료 배치가 종료일을 보존하므로, 배치 전({@code PRO} + 지난 종료일)과
+     * 배치 후({@code FREE} + 지난 종료일)가 모두 {@link MemberTier#EXPIRED} 로 잡힌다.
+     */
+    public MemberTier tierOf(User user) {
+        if (user == null) return MemberTier.NONE;
+        if (isActivePro(user)) return MemberTier.ACTIVE;
+        if (user.getSubscription() == SubscriptionStatus.PENDING) return MemberTier.PENDING;
+
+        LocalDate endDate = user.getSubscriptionEndDate();
+        if (endDate != null && endDate.isBefore(LocalDate.now(KST))) return MemberTier.EXPIRED;
+
+        return MemberTier.NONE;
+    }
+
+    /** 가입만 하고 한 번도 구독한 적 없는 회원(NO티어). 신규 구독 유도 대상. */
+    public List<UserDto> getNeverSubscribedUsers() {
+        return userRepository.findAll().stream()
+            .filter(user -> user.getRole() != Role.ADMIN)
+            .filter(user -> tierOf(user) == MemberTier.NONE)
+            .sorted(Comparator.comparing(User::getCreatedAt,
+                Comparator.nullsLast(Comparator.reverseOrder())))
+            .map(UserDto::from)
+            .toList();
+    }
+
+    /** 구독했다가 만료된 회원. 재구독 유도 대상. */
+    public List<UserDto> getExpiredUsers() {
+        return userRepository.findAll().stream()
+            .filter(user -> user.getRole() != Role.ADMIN)
+            .filter(user -> tierOf(user) == MemberTier.EXPIRED)
+            .sorted(Comparator.comparing(User::getSubscriptionEndDate,
+                Comparator.nullsLast(Comparator.reverseOrder())))
+            .map(UserDto::from)
+            .toList();
     }
 
     /**

@@ -3,6 +3,7 @@ package com.bitman.justbuy.controller;
 import com.bitman.justbuy.entity.SubscriptionStatus;
 import com.bitman.justbuy.entity.User;
 import com.bitman.justbuy.repository.UserRepository;
+import com.bitman.justbuy.service.MemberTier;
 import com.bitman.justbuy.service.SubscriptionService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -40,6 +41,17 @@ public class SubscriptionAccessGuard {
                                    SubscriptionService subscriptionService) {
         this.userRepository = userRepository;
         this.subscriptionService = subscriptionService;
+    }
+
+    /**
+     * 회원 티어. 막지 않고 판정만 한다 — 미구독자에게 마스킹 미리보기를 내려줄 때 쓴다.
+     *
+     * @throws ApiException 401 사용자를 찾을 수 없을 때
+     */
+    public MemberTier tierOf(UUID userId) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "사용자를 찾을 수 없습니다."));
+        return subscriptionService.tierOf(user);
     }
 
     /**

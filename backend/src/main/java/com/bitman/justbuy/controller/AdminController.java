@@ -81,6 +81,18 @@ public class AdminController {
         return ResponseEntity.ok(subscriptionService.rejectSubscription(userId));
     }
 
+    /** 가입만 하고 한 번도 구독한 적 없는 회원(NO티어) — 신규 구독 유도 대상. */
+    @GetMapping("/subscriptions/never-subscribed")
+    public ResponseEntity<List<UserDto>> neverSubscribed() {
+        return ResponseEntity.ok(subscriptionService.getNeverSubscribedUsers());
+    }
+
+    /** 구독했다가 만료된 회원 — 재구독 유도 대상. */
+    @GetMapping("/subscriptions/expired")
+    public ResponseEntity<List<UserDto>> expiredMembers() {
+        return ResponseEntity.ok(subscriptionService.getExpiredUsers());
+    }
+
     @GetMapping("/users")
     public ResponseEntity<List<UserDto>> allUsers() {
         return ResponseEntity.ok(subscriptionService.getAllUsers());

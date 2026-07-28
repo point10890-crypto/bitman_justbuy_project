@@ -98,12 +98,100 @@ public class MainConditionService {
         allSignals.addAll(closingBet.signals());
         ConditionSectionResponse alerts = alertsSection(allSignals, alertSourceStatus(shortTerm, swing, leaders, themes, closingBet));
 
-        return new MainConditionResponse(
+        return MainConditionResponse.full(
             asOf,
             new MainConditionResponse.Sections(shortTerm, swing, leaders, themes, closingBet, alerts),
             summarize(allSignals),
             NOTICE
         );
+    }
+
+    /**
+     * 미구독자용 미리보기 — 종목을 특정할 수 있는 값은 <b>서버에서</b> 가린다.
+     *
+     * <p>가치를 보여줘야 구독으로 이어지므로 섹션 구성·포착 시각·건수·성과 요약은 그대로 두고,
+     * 종목명/종목코드/가격만 가린다. 클라이언트에서만 가리면 응답 본문에 원본이 남아
+     * 개발자도구로 그대로 읽히므로 여기서 처리해야 한다.
+     *
+     * @param tier 회원 티어 문자열 (구독 유도 문구 분기에 사용)
+     */
+    public MainConditionResponse getMainPreview(String tier) {
+        MainConditionResponse full = getMain();
+        MainConditionResponse.Sections s = full.sections();
+
+        MainConditionResponse.Sections masked = new MainConditionResponse.Sections(
+            maskSection(s.shortTerm()),
+            maskSection(s.swing()),
+            maskSection(s.leaders()),
+            maskSection(s.themes()),
+            maskSection(s.closingBet()),
+            maskSection(s.alerts())
+        );
+
+        return new MainConditionResponse(
+            full.asOf(),
+            masked,
+            full.trackRecord(),
+            NOTICE,
+            true,
+            tier
+        );
+    }
+
+    private static ConditionSectionResponse maskSection(ConditionSectionResponse section) {
+        if (section == null) return null;
+        List<ConditionSignalDto> masked = section.signals() == null
+            ? List.of()
+            : section.signals().stream().map(MainConditionService::maskSignal).toList();
+        return new ConditionSectionResponse(
+            section.key(),
+            section.slug(),
+            section.title(),
+            section.mode(),
+            section.endpoint(),
+            section.asOf(),
+            section.sourceStatus(),
+            masked
+        );
+    }
+
+    private static ConditionSignalDto maskSignal(ConditionSignalDto signal) {
+        return new ConditionSignalDto(
+            signal.section(),
+            signal.mode(),
+            signal.rank(),
+            maskName(signal.stockName()),
+            "",
+            maskNumber(signal.capturePrice()),
+            maskNumber(signal.currentPrice()),
+            maskNumber(signal.highPrice()),
+            maskNumber(signal.stopLoss()),
+            signal.maxReturnPct(),
+            signal.status(),
+            signal.ruleScore(),
+            signal.aiScore(),
+            signal.finalScore(),
+            "구독 후 상세 분석을 확인할 수 있습니다.",
+            List.of("구독 후 공개"),
+            signal.riskFlags(),
+            signal.invalidation(),
+            signal.capturedAt()
+        );
+    }
+
+    /** 첫 글자만 남기고 가린다. 몇 글자짜리 종목인지까지만 보인다. */
+    private static String maskName(String name) {
+        if (name == null || name.isBlank()) return "○○";
+        String trimmed = name.trim();
+        if (trimmed.length() <= 1) return "○";
+        return trimmed.charAt(0) + "○".repeat(trimmed.length() - 1);
+    }
+
+    /** 자릿수만 남기고 숫자를 가린다. 가격대는 짐작되되 정확한 값은 감춘다. */
+    private static String maskNumber(String value) {
+        if (value == null || value.isBlank() || "-".equals(value)) return "-";
+        if (value.startsWith("+") || value.startsWith("-")) return value;
+        return value.replaceAll("[0-9]", "X");
     }
 
     public ConditionSectionResponse getSection(String slug) {

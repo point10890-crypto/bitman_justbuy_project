@@ -72,6 +72,10 @@ export interface MainConditionResponse {
   }
   trackRecord: TrackRecordSummary
   notice: string
+  /** 미구독자에게 내려간 마스킹 응답인지. 종목명·가격은 서버에서 이미 가려져 있다. */
+  preview?: boolean
+  /** ACTIVE | PENDING | EXPIRED | NONE — 구독 유도 문구 분기용 */
+  tier?: 'ACTIVE' | 'PENDING' | 'EXPIRED' | 'NONE' | string
 }
 
 export interface JonggaPerformanceRow {
