@@ -1,5 +1,6 @@
 package com.bitman.justbuy.security;
 
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -100,6 +101,15 @@ public class SecurityConfig {
 
                 .anyRequest().authenticated()
             )
+            // 인증이 없거나 토큰이 무효면 401. 기본값은 403 이었는데, 403 은 구독 가드가
+            // "PRO 구독자만 사용 가능"에도 쓰는 코드라 프론트가 "다시 로그인" 상황과
+            // "구독 유도" 상황을 구분할 수 없었다.
+            .exceptionHandling(handling -> handling
+                .authenticationEntryPoint((request, response, authException) -> {
+                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    response.setContentType("application/json;charset=UTF-8");
+                    response.getWriter().write("{\"error\":\"인증이 필요합니다. 다시 로그인해 주세요.\"}");
+                }))
             .addFilterBefore(jwtAuthenticationFilter,
                 UsernamePasswordAuthenticationFilter.class);
 
