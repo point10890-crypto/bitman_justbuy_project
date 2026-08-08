@@ -16,6 +16,7 @@ import com.bitman.justbuy.service.SubscriptionService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -24,6 +25,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * 관리자 전용 API.
+ *
+ * <p>{@code SecurityConfig} 의 경로 규칙이 유일한 방어선이었다. 규칙 한 줄이 잘못되면
+ * 회원 비밀번호 초기화까지 열리므로 클래스 단위 권한 검사를 겹쳐 둔다.
+ */
+@PreAuthorize("hasRole('ADMIN')")
 @RestController
 @RequestMapping("/api/admin")
 public class AdminController {

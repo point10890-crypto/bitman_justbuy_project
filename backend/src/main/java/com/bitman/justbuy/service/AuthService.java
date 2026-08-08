@@ -26,6 +26,25 @@ public class AuthService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
+    /** 이 횟수만큼 연속 실패하면 잠시 잠근다. */
+    public static final int MAX_LOGIN_ATTEMPTS = 5;
+    private static final long LOCKOUT_MS = 10 * 60 * 1000L;
+
+    /**
+     * 이메일별 연속 실패 기록.
+     *
+     * <p>로그인은 permitAll 이라 시도 제한이 없으면 온라인 무차별 대입을 막는 게
+     * BCrypt 비용뿐이다. 인스턴스 단위 메모리 카운터라 다중 인스턴스에서는 완전하지
+     * 않지만, 현재 배포는 단일 인스턴스이고 없는 것보다 훨씬 낫다.
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, FailureRecord> loginFailures =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static final class FailureRecord {
+        int count;
+        long lockedUntil;
+    }
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
@@ -133,7 +152,10 @@ public class AuthService {
     public AuthResponse register(RegisterRequest request) {
         String email = normalizeEmail(request.email());
         if (userRepository.existsByEmailIgnoreCase(email)) {
-            throw new IllegalArgumentException("이미 등록된 이메일입니다.");
+            // 미인증 호출자에게 회원 여부를 확인해주지 않는다. 로그인은 이미 통합 문구를
+            // 쓰는데 가입만 노출해 회원 열거가 가능했다.
+            throw new ApiException(HttpStatus.CONFLICT,
+                "가입을 완료할 수 없습니다. 입력하신 정보를 확인하거나 로그인해 주세요.");
         }
 
         var user = new User(
@@ -197,19 +219,53 @@ public class AuthService {
     @Transactional
     public AuthResponse login(AuthRequest request) {
         String email = normalizeEmail(request.email());
+        requireNotLockedOut(email);
+
         var user = userRepository.findFirstByEmailIgnoreCaseOrderByCreatedAtAsc(email)
-            .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."));
+            .orElseThrow(() -> {
+                recordLoginFailure(email);
+                return new ApiException(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다.");
+            });
 
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            recordLoginFailure(email);
             throw new ApiException(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다.");
         }
 
+        loginFailures.remove(email);
         ensureAdminPro(user);
 
         var token = jwtService.generateToken(
             user.getId(), user.getEmail(), user.getRole().name(), request.rememberMe());
 
         return new AuthResponse(token, UserDto.from(user));
+    }
+
+    private void requireNotLockedOut(String email) {
+        FailureRecord record = loginFailures.get(email);
+        if (record == null) return;
+        synchronized (record) {
+            if (record.lockedUntil > System.currentTimeMillis()) {
+                throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
+                    "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.");
+            }
+            if (record.lockedUntil != 0) {
+                // 잠금이 풀렸으면 처음부터 다시 센다.
+                record.lockedUntil = 0;
+                record.count = 0;
+            }
+        }
+    }
+
+    private void recordLoginFailure(String email) {
+        FailureRecord record = loginFailures.computeIfAbsent(email, key -> new FailureRecord());
+        synchronized (record) {
+            record.count++;
+            if (record.count >= MAX_LOGIN_ATTEMPTS) {
+                record.lockedUntil = System.currentTimeMillis() + LOCKOUT_MS;
+                log.warn("[Auth] 로그인 연속 실패로 일시 잠금: email={}, attempts={}", email, record.count);
+            }
+        }
     }
 
     private static String normalizeEmail(String email) {
