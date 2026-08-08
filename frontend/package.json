@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "deploy": "npm run build && npm run deploy:pages:main && npm run deploy:pages:production",
     "deploy:pages:main": "npx wrangler@latest pages deploy dist --project-name bitman-justbuy --branch main",
-    "deploy:pages:production": "npx wrangler@latest pages deploy dist --project-name bitman-justbuy --branch production"
+    "deploy:pages:production": "npx wrangler@latest pages deploy dist --project-name bitman-justbuy --branch production",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "react": "^19.0.0",
@@ -24,6 +26,7 @@
     "@vitejs/plugin-react": "^4.4.1",
     "tailwindcss": "^4.0.0",
     "typescript": "~5.7.0",
-    "vite": "^7.0.0"
+    "vite": "^7.0.0",
+    "vitest": "^4.1.10"
   }
 }

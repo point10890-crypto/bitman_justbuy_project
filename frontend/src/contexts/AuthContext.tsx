@@ -6,6 +6,7 @@ import {
   changePassword as apiChangePassword,
   type UserDto,
 } from '../api/authApi'
+import { memberTierOf } from '../lib/memberTier'
 
 export interface User {
   id: string
@@ -14,6 +15,7 @@ export interface User {
   role: 'USER' | 'ADMIN'
   subscription: 'free' | 'pending' | 'pro'
   subscriptionEndDate?: string
+  subscriptionApprovedAt?: string
   subscriptionExpired?: boolean
   subscriptionRenewalPending?: boolean
   depositorName?: string
@@ -39,33 +41,15 @@ const TOKEN_KEY = 'bitman_token'
 const USER_KEY = 'bitman_auth_user'
 const REMEMBER_KEY = 'bitman_remember'
 
-export function isSubscriptionExpired(endDate?: string | null): boolean {
-  if (!endDate) return false
-  const endDateKey = endDate.slice(0, 10)
-  const parts = new Intl.DateTimeFormat('en', {
-    timeZone: 'Asia/Seoul',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date())
-  const byType = Object.fromEntries(parts.map(p => [p.type, p.value]))
-  const todayKst = `${byType.year}-${byType.month}-${byType.day}`
-  // Backend treats subscriptionEndDate as valid through that KST date.
-  return todayKst > endDateKey
-}
+// 판정은 src/lib/memberTier.ts 한 곳에서만 한다. 여기서는 재수출만 해
+// 기존 임포트 경로를 깨지 않는다.
+export { isSubscriptionExpired } from '../lib/memberTier'
 
 function dtoToUser(dto: UserDto): User {
-  // PRO 플랜이 만료되었는지 확인.
-  // 자정 배치가 PRO -> FREE 로 내린 뒤에도 종료일은 남으므로, FREE + 지난 종료일이면
-  // "구독한 적 있는데 만료된 회원"이다. 신규 구독자와 구분해 재구독 안내를 띄운다.
+  const tier = memberTierOf(dto)
   const rawSubscription = dto.subscription.toLowerCase() as User['subscription']
-  const isExpired =
-    (rawSubscription === 'pro' || rawSubscription === 'free')
-    && isSubscriptionExpired(dto.subscriptionEndDate)
-  const isPendingRenewal =
-    rawSubscription === 'pending' &&
-    !!dto.subscriptionEndDate &&
-    !isSubscriptionExpired(dto.subscriptionEndDate)
+  const isExpired = tier === 'EXPIRED'
+  const isPendingRenewal = tier === 'ACTIVE' && dto.subscription.toLowerCase() === 'pending'
 
   return {
     id: dto.id,
@@ -73,8 +57,9 @@ function dtoToUser(dto: UserDto): User {
     name: dto.name,
     role: dto.role,
     // ADMIN은 무기한 PRO 고정. 연장 승인 대기 중인 기존 PRO는 남은 기간 동안 계속 PRO로 취급한다.
-    subscription: dto.role === 'ADMIN' ? 'pro' : isPendingRenewal ? 'pro' : isExpired ? 'free' : rawSubscription,
+    subscription: tier === 'ACTIVE' ? 'pro' : isExpired ? 'free' : rawSubscription,
     subscriptionEndDate: dto.subscriptionEndDate ?? undefined,
+    subscriptionApprovedAt: dto.subscriptionApprovedAt ?? undefined,
     subscriptionExpired: isExpired,
     subscriptionRenewalPending: isPendingRenewal,
     depositorName: dto.depositorName ?? undefined,
@@ -122,18 +107,15 @@ function getStoredUser(): User | null {
     if (subscription && subscription === subscription.toUpperCase()) {
       return dtoToUser(parsed as UserDto)
     }
+    // 캐시된 사용자도 같은 판정을 다시 통과시킨다. 날짜가 넘어간 뒤 앱을 열면
+    // 저장 시점의 티어가 더 이상 맞지 않는다.
     const user = parsed as User
-    const expired =
-      (user.subscription === 'pro' || user.subscription === 'free')
-      && isSubscriptionExpired(user.subscriptionEndDate)
+    const tier = memberTierOf(user)
     return {
       ...user,
-      subscription: user.role === 'ADMIN' ? 'pro' : expired ? 'free' : user.subscription,
-      subscriptionExpired: expired,
-      subscriptionRenewalPending:
-        user.subscriptionRenewalPending &&
-        !!user.subscriptionEndDate &&
-        !isSubscriptionExpired(user.subscriptionEndDate),
+      subscription: tier === 'ACTIVE' ? 'pro' : tier === 'EXPIRED' ? 'free' : user.subscription,
+      subscriptionExpired: tier === 'EXPIRED',
+      subscriptionRenewalPending: tier === 'ACTIVE' && user.subscription === 'pending',
     }
   } catch {
     return null
@@ -212,10 +194,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         })
         .catch(() => { /* 401 is handled by auth:unauthorized */ })
     }
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') reconcile()
+    // 탭이 보일 때만, 그리고 최소 간격을 두고 확인한다. 이전 구현은 백그라운드
+    // 탭에서도 60초마다 때려 PWA 를 켜둔 사용자 한 명당 하루 1,440회가 나갔다.
+    const MIN_INTERVAL_MS = 10 * 60_000
+    let lastCheckedAt = Date.now()
+    const reconcileIfStale = () => {
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() - lastCheckedAt < MIN_INTERVAL_MS) return
+      lastCheckedAt = Date.now()
+      reconcile()
     }
-    const interval = window.setInterval(reconcile, 60_000)
+    const onVisibilityChange = () => {
+      // 앱으로 돌아온 순간은 서버 상태와 어긋나 있을 확률이 가장 높다 — 즉시 확인.
+      if (document.visibilityState === 'visible') {
+        lastCheckedAt = Date.now()
+        reconcile()
+      }
+    }
+    const interval = window.setInterval(reconcileIfStale, MIN_INTERVAL_MS)
     document.addEventListener('visibilitychange', onVisibilityChange)
     return () => {
       window.clearInterval(interval)
@@ -237,7 +233,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = async (name: string, email: string, password: string) => {
     const res = await registerUser(name, email, password)
-    // 가입 후 자동 로그인: 토큰과 사용자 정보 저장
+    // 가입 후 자동 로그인. REMEMBER_KEY 를 먼저 정해두지 않으면 직전 사용자가 남긴
+    // 값에 따라 토큰이 sessionStorage 로 새어 브라우저를 닫는 순간 로그아웃된다.
+    localStorage.setItem(REMEMBER_KEY, '1')
     setToken(res.token)
     const u = dtoToUser(res.user)
     setUser(u)

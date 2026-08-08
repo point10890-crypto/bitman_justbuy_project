@@ -1,5 +1,6 @@
 import { Navigate } from 'react-router-dom'
-import { getStoredToken, isSubscriptionExpired, useAuth } from '../../contexts/AuthContext'
+import { getStoredToken, useAuth } from '../../contexts/AuthContext'
+import { memberTierOf } from '../../lib/memberTier'
 import type { ReactNode } from 'react'
 
 function LoadingScreen() {
@@ -17,8 +18,10 @@ export default function PublicOnlyRoute({ children }: { children: ReactNode }) {
   if (isLoading && hasToken) return <LoadingScreen />
 
   if (user) {
-    const needsRenewal = user.subscriptionExpired || (user.subscription === 'pro' && isSubscriptionExpired(user.subscriptionEndDate))
-    if (user.role === 'ADMIN' || (user.subscription === 'pro' && !needsRenewal)) {
+    // 판정은 memberTier 한 곳에서만 한다(백엔드 tierOf 와 같은 규칙).
+    const tier = memberTierOf(user)
+    const needsRenewal = tier === 'EXPIRED'
+    if (tier === 'ACTIVE') {
       return <Navigate to="/" replace />
     }
     return (
