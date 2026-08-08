@@ -264,6 +264,8 @@ public class AuthService {
         }
 
         user.setPasswordHash(passwordEncoder.encode(newPassword));
+        // 비밀번호를 바꾸는 이유는 대개 유출이다. 기존 토큰을 살려두면 바꾼 의미가 없다.
+        user.setTokenValidFrom(java.time.LocalDateTime.now(java.time.ZoneId.of("Asia/Seoul")));
         userRepository.save(user);
     }
 }

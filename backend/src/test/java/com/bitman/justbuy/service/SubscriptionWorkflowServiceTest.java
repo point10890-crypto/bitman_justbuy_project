@@ -200,9 +200,12 @@ class SubscriptionWorkflowServiceTest {
         var dto = service.revokeSubscription(userId);
 
         assertThat(dto.subscription()).isEqualTo("FREE");
-        assertThat(user.getSubscriptionEndDate()).isNull();
-        assertThat(user.getSubscriptionApprovedAt()).isNull();
         assertThat(user.getSubscriptionRequestedAt()).isNull();
+        // 접근은 FREE 가 막는다. 종료일/승인일까지 지우면 이 회원이 "구독한 적 없음"으로
+        // 분류돼 재구독 유도 대상에서 빠지므로, 이력은 남기고 종료일만 오늘로 당긴다.
+        // (MemberTierClassificationTest 가 분류 결과 자체를 고정한다.)
+        assertThat(user.getSubscriptionEndDate()).isEqualTo(LocalDate.now());
+        assertThat(service.tierOf(user)).isEqualTo(MemberTier.EXPIRED);
         verify(userRepository).save(user);
     }
 }

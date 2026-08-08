@@ -126,7 +126,7 @@ public class SubscriptionService {
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
         if (user.getRole() == Role.ADMIN) {
-            throw new IllegalStateException("관리자 계정의 구독 상태는 반려할 수 없습니다.");
+            throw new IllegalStateException("관리자 계정은 항상 PRO 이므로 승인 처리할 수 없습니다.");
         }
 
         if (user.getSubscription() != SubscriptionStatus.PENDING) {
@@ -152,6 +152,11 @@ public class SubscriptionService {
     public UserDto rejectSubscription(UUID userId) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+
+        // approve/revoke 와 동일한 보호 — 관리자 계정만 이 가드가 빠져 있었다.
+        if (user.getRole() == Role.ADMIN) {
+            throw new IllegalStateException("관리자 계정의 구독 신청은 반려할 수 없습니다.");
+        }
 
         if (user.getSubscription() != SubscriptionStatus.PENDING) {
             throw new IllegalStateException("승인 대기 상태가 아닙니다.");
@@ -193,8 +198,10 @@ public class SubscriptionService {
         }
 
         user.setSubscription(SubscriptionStatus.FREE);
-        user.setSubscriptionEndDate(null);
-        user.setSubscriptionApprovedAt(null);
+        // 접근은 subscription=FREE 가 막는다. 종료일/승인일은 지우지 않고 "오늘 끝났다"로
+        // 기록한다 — 지우면 이 회원이 EXPIRED 가 아니라 NONE 으로 분류돼
+        // 재구독이 아니라 신규 구독 유도로 새어나간다.
+        user.setSubscriptionEndDate(LocalDate.now(KST));
         user.setSubscriptionRequestedAt(null);
         userRepository.save(user);
         log.info("Subscription revoked: userId={}", userId);
@@ -254,9 +261,15 @@ public class SubscriptionService {
             }
             if (newStatus == SubscriptionStatus.FREE) {
                 user.setSubscriptionRequestedAt(null);
-                user.setSubscriptionEndDate(null);
-                user.setSubscriptionApprovedAt(null);
                 user.setDepositorName(null);
+                // revoke 와 같은 이유로 구독 이력(종료일·승인일)은 보존한다.
+                // 이력이 있는 회원만 종료일을 오늘로 당겨 "여기서 끝났다"를 남긴다.
+                if (user.getSubscriptionApprovedAt() != null || user.getSubscriptionEndDate() != null) {
+                    LocalDate today = LocalDate.now(KST);
+                    if (user.getSubscriptionEndDate() == null || user.getSubscriptionEndDate().isAfter(today)) {
+                        user.setSubscriptionEndDate(today);
+                    }
+                }
             }
         }
 
@@ -270,6 +283,8 @@ public class SubscriptionService {
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
         user.setPasswordHash(passwordEncoder.encode(newPassword));
+        // 관리자 초기화는 계정 탈취 대응인 경우가 많다. 기존 세션을 반드시 끊는다.
+        user.setTokenValidFrom(LocalDateTime.now(KST));
         userRepository.save(user);
         log.info("Admin reset password: userId={}", userId);
     }
@@ -279,10 +294,15 @@ public class SubscriptionService {
     public Map<String, Object> getSubscriptionStats() {
         LocalDate today = LocalDate.now(KST);
 
-        long proCount     = userRepository.findAll().stream().filter(this::isActivePro).count();
-        long pendingCount = userRepository.findBySubscription(SubscriptionStatus.PENDING).size();
-        long freeCount    = userRepository.findBySubscription(SubscriptionStatus.FREE).size();
-        long totalUsers   = userRepository.count();
+        // 회원 목록은 한 번만 읽는다. 이전에는 같은 findAll() 을 세 번 돌렸다.
+        List<User> allUsers = userRepository.findAll();
+
+        // 버킷은 겹치면 안 된다. 연장 신청한 기존 PRO 는 상태가 PENDING 이면서 접근은
+        // 살아 있어 isActivePro/findBySubscription 을 따로 쓰면 양쪽에 중복 계상됐다.
+        long proCount     = allUsers.stream().filter(u -> tierOf(u) == MemberTier.ACTIVE).count();
+        long pendingCount = allUsers.stream().filter(u -> tierOf(u) == MemberTier.PENDING).count();
+        long totalUsers   = allUsers.size();
+        long freeCount    = totalUsers - proCount - pendingCount;
 
         // 이번 주(7일 이내) 만료 예정
         long expiringThisWeek = userRepository.countExpiringBetween(today, today.plusDays(7));
@@ -297,7 +317,7 @@ public class SubscriptionService {
             today.minusDays(30).atStartOfDay());
 
         // 만료 임박 유저 목록 (7일 이내, 상세)
-        List<UserDto> expiringSoon = userRepository.findAll()
+        List<UserDto> expiringSoon = allUsers
             .stream()
             .filter(this::isActivePro)
             .filter(u -> u.getSubscriptionEndDate() != null
@@ -309,7 +329,7 @@ public class SubscriptionService {
 
         // freeCount 는 "한 번도 구독 안 함"과 "만료됨"이 섞여 있어 유도 대상 파악에 쓸 수 없다.
         // 티어로 갈라서 각각의 모수를 준다.
-        List<User> members = userRepository.findAll().stream()
+        List<User> members = allUsers.stream()
             .filter(u -> u.getRole() != Role.ADMIN)
             .toList();
         long neverSubscribedCount = members.stream().filter(u -> tierOf(u) == MemberTier.NONE).count();
@@ -426,11 +446,19 @@ public class SubscriptionService {
         if (user == null) return MemberTier.NONE;
         if (isActivePro(user)) return MemberTier.ACTIVE;
         if (user.getSubscription() == SubscriptionStatus.PENDING) return MemberTier.PENDING;
-
-        LocalDate endDate = user.getSubscriptionEndDate();
-        if (endDate != null && endDate.isBefore(LocalDate.now(KST))) return MemberTier.EXPIRED;
-
+        if (hasSubscriptionHistory(user)) return MemberTier.EXPIRED;
         return MemberTier.NONE;
+    }
+
+    /**
+     * 한 번이라도 구독이 승인된 적이 있는지 — EXPIRED 와 NONE 을 가르는 단일 기준.
+     *
+     * <p>종료일만 보면 관리자가 오늘 해제한 회원(종료일 = 오늘)을 놓친다.
+     * 승인 이력을 함께 보면 만료 배치·해제·강등 어느 경로로 끝났든 같게 잡힌다.
+     */
+    public static boolean hasSubscriptionHistory(User user) {
+        if (user == null) return false;
+        return user.getSubscriptionApprovedAt() != null || user.getSubscriptionEndDate() != null;
     }
 
     /** 가입만 하고 한 번도 구독한 적 없는 회원(NO티어). 신규 구독 유도 대상. */

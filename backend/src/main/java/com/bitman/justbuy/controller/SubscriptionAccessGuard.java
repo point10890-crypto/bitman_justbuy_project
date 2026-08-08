@@ -80,16 +80,14 @@ public class SubscriptionAccessGuard {
     }
 
     /**
-     * 과거에 구독했고 기간이 끝난 회원인지.
+     * 과거에 구독했고 지금은 아닌 회원인지.
      *
-     * <p>만료 배치 전에는 {@code PRO + 지난 종료일}, 배치 후에는 {@code FREE + 지난 종료일} 이다.
-     * 배치가 종료일을 지우면 둘을 구분할 수 없어 재구독 안내를 못 하므로
-     * {@code SubscriptionService} 는 만료 시에도 종료일을 보존한다.
+     * <p>판정 로직을 여기서 따로 갖고 있다가 {@code SubscriptionService.tierOf} 와 갈라졌었다.
+     * 관리자가 해제한 회원이 가드에서는 "구독한 적 없음"으로 잡혀 신규 구독 페이지로 가던
+     * 원인이라, 티어 판정 하나만 쓰도록 합쳤다.
      */
     static boolean hasExpiredSubscription(User user) {
-        LocalDate endDate = user.getSubscriptionEndDate();
-        if (endDate == null) return false;
         if (user.getSubscription() == SubscriptionStatus.PENDING) return false;
-        return endDate.isBefore(LocalDate.now(KST));
+        return SubscriptionService.hasSubscriptionHistory(user);
     }
 }

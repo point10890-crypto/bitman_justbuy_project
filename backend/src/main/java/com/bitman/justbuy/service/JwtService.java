@@ -90,7 +90,11 @@ public class JwtService {
 
     public String generateToken(UUID userId, String email, String role, boolean rememberMe) {
         var now = new Date();
-        long expMs = rememberMe ? REMEMBER_ME_EXPIRATION_MS : Math.max(expirationMs, REMEMBER_ME_EXPIRATION_MS);
+        // rememberMe 를 끈 세션은 짧아야 한다. 이전 구현은 Math.max 라서 어느 쪽이든
+        // 30일이 나왔고 "로그인 유지" 체크박스가 아무 의미가 없었다.
+        long expMs = rememberMe
+            ? REMEMBER_ME_EXPIRATION_MS
+            : Math.min(expirationMs, REMEMBER_ME_EXPIRATION_MS);
         return Jwts.builder()
                 .subject(userId.toString())
                 .claim("email", email)

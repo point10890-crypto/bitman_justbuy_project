@@ -41,6 +41,15 @@ public class User {
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    /**
+     * 이 시각 이전에 발급된 토큰은 무효.
+     *
+     * <p>비밀번호 변경·관리자 초기화 시 갱신한다. 이게 없으면 계정이 털려 비밀번호를
+     * 바꿔도 공격자가 이미 들고 있는 토큰이 만료(최대 30일)까지 그대로 통한다.
+     * null 이면 검사하지 않는다 — 기존 회원은 다음 비밀번호 변경 때부터 적용된다.
+     */
+    private LocalDateTime tokenValidFrom;
+
     protected User() {}
 
     public User(String email, String name, String passwordHash) {
@@ -74,4 +83,6 @@ public class User {
     public LocalDateTime getSubscriptionApprovedAt() { return subscriptionApprovedAt; }
     public void setSubscriptionApprovedAt(LocalDateTime subscriptionApprovedAt) { this.subscriptionApprovedAt = subscriptionApprovedAt; }
     public LocalDateTime getCreatedAt() { return createdAt; }
+    public LocalDateTime getTokenValidFrom() { return tokenValidFrom; }
+    public void setTokenValidFrom(LocalDateTime tokenValidFrom) { this.tokenValidFrom = tokenValidFrom; }
 }
