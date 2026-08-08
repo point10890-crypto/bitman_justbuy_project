@@ -1,4 +1,5 @@
 import { API_BASE } from './config'
+import { failWithApiError } from './subscriptionGate'
 
 export interface DailyCloseRow {
   rank: number
@@ -78,10 +79,9 @@ function authHeaders(token?: string): HeadersInit {
 }
 
 async function readJson<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(text || `API error ${res.status}`)
-  }
+  // 성과 API 도 PRO 가드 뒤에 있다. 실패 처리를 공용 지점으로 보내야
+  // 만료 회원이 "API error 403" 대신 재구독 페이지로 간다.
+  if (!res.ok) await failWithApiError(res)
   return res.json()
 }
 

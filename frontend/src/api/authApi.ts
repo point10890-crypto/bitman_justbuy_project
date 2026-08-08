@@ -71,6 +71,8 @@ function authHeaders(token: string): HeadersInit {
   }
 }
 
+import { notifySubscriptionGate, errorMessageOf } from './subscriptionGate'
+
 /** 401 발생 시 AuthContext에 전역 신호 전송 (순환 import 회피) */
 function emitUnauthorized() {
   if (typeof window !== 'undefined') {
@@ -105,7 +107,11 @@ async function handleError(res: Response, silent401 = false): Promise<never> {
   if (res.status >= 500) {
     throw new Error('서버에 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해주세요.')
   }
-  throw new Error(await readErrorMessage(res, `HTTP ${res.status}`))
+  // 구독 만료/대기/미구독 403 은 재구독 흐름으로 넘긴다. 이게 없으면 만료 회원이
+  // 오류 문구만 보고 그 화면에 머문다.
+  const body = await res.text().catch(() => '')
+  notifySubscriptionGate(res.status, body)
+  throw new Error(errorMessageOf(body, `HTTP ${res.status}`))
 }
 
 /** fetch 래퍼: 네트워크 에러(TypeError) → 사용자 친화 메시지로 변환 */

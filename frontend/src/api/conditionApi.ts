@@ -1,4 +1,5 @@
 import { API_BASE } from './config'
+import { failWithApiError } from './subscriptionGate'
 
 export interface ConditionSignal {
   section: string
@@ -135,53 +136,13 @@ function authHeaders(token?: string): HeadersInit {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-/** 구독 때문에 막혔음을 나타내는 서버 코드. SubscriptionAccessGuard 와 1:1. */
-export const SUBSCRIPTION_CODES = ['SUBSCRIPTION_EXPIRED', 'SUBSCRIPTION_PENDING', 'SUBSCRIPTION_REQUIRED'] as const
-export type SubscriptionCode = (typeof SUBSCRIPTION_CODES)[number]
-
-export class ApiError extends Error {
-  readonly status: number
-  readonly code?: string
-  constructor(status: number, message: string, code?: string) {
-    super(message)
-    this.name = 'ApiError'
-    this.status = status
-    this.code = code
-  }
-}
-
-/**
- * 구독 문제로 403 이 오면 전역 신호를 보낸다.
- * 라우터 밖(api 모듈)에서 직접 이동할 수 없으므로 이벤트로 넘기고,
- * SubscriptionGateWatcher 가 받아서 /subscribe 로 보낸다. (authApi 의 auth:unauthorized 와 같은 방식)
- */
-function emitSubscriptionRequired(code: SubscriptionCode, message: string) {
-  if (typeof window === 'undefined') return
-  window.dispatchEvent(new CustomEvent('subscription:required', { detail: { code, message } }))
-}
+// 구독 403 판정·신호·에러 타입은 subscriptionGate 한 곳에서만 정의한다.
+// 이 파일에만 있던 탓에 analysis/performance/auth 경로는 만료 회원을 그냥 통과시켰다.
+export { SUBSCRIPTION_CODES, ApiError } from './subscriptionGate'
+export type { SubscriptionCode } from './subscriptionGate'
 
 async function readJson<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    let message = ''
-    let code: string | undefined
-
-    // 서버는 {"error": "...", "code": "..."} 형태로 내려준다.
-    // 파싱에 실패하면(프록시 HTML 오류 등) 원문 대신 상태코드를 쓴다.
-    try {
-      const parsed = JSON.parse(text) as { error?: string; message?: string; code?: string }
-      message = parsed.error || parsed.message || ''
-      code = parsed.code
-    } catch {
-      message = /^\s*[<{]/.test(text) ? '' : text
-    }
-    if (!message) message = `요청을 처리하지 못했습니다. (${res.status})`
-
-    if (res.status === 403 && code && (SUBSCRIPTION_CODES as readonly string[]).includes(code)) {
-      emitSubscriptionRequired(code as SubscriptionCode, message)
-    }
-    throw new ApiError(res.status, message, code)
-  }
+  if (!res.ok) await failWithApiError(res)
   return res.json()
 }
 

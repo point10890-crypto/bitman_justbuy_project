@@ -1,5 +1,6 @@
 /** 분석 API 클라이언트 — Express 백엔드 경유 Multi-Agent */
 import { API_BASE } from './config'
+import { notifySubscriptionGate, errorMessageOf } from './subscriptionGate'
 
 export interface AgentInfo {
   agent: 'chatgpt' | 'grok'
@@ -99,7 +100,12 @@ export async function fetchPrecomputed(mode: string, token?: string): Promise<An
     if (token) headers['Authorization'] = `Bearer ${token}`
     const res = await fetch(`${API_BASE}/api/analysis/${encodeURIComponent(mode)}`, { headers })
     if (res.status === 404) return null
-    if (!res.ok) throw new Error(`API error ${res.status}`)
+    // 이 함수는 실패를 삼키고 null 을 돌려준다(프리컴퓨트는 없을 수 있으므로).
+    // 구독 403 까지 삼키면 만료 회원에게 아무 일도 일어나지 않으므로 먼저 신호를 보낸다.
+    if (!res.ok) {
+      notifySubscriptionGate(res.status, await res.text().catch(() => ''))
+      throw new Error(`API error ${res.status}`)
+    }
     const data = await res.json()
     return transformResponse(data)
   } catch {
@@ -133,9 +139,12 @@ async function pollJob(jobId: string, token?: string, maxWaitMs = 180_000): Prom
     const res = await fetch(`${API_BASE}/api/analysis/job/${jobId}`, { headers })
     if (!res.ok) {
       if (res.status === 404) throw new Error('분석 작업을 찾을 수 없습니다.')
-      const errData = await res.json().catch(() => ({ error: `Server error ${res.status}` }))
+      const body = await res.text().catch(() => '')
+      notifySubscriptionGate(res.status, body)
+      let errData: { status?: string; error?: string } = {}
+      try { errData = JSON.parse(body) } catch { /* 프록시 HTML 오류 등 */ }
       if (errData.status === 'error') throw new Error(errData.error || '분석 중 오류 발생')
-      throw new Error(errData.error || `API error ${res.status}`)
+      throw new Error(errorMessageOf(body, `API error ${res.status}`))
     }
 
     const data = await res.json()
