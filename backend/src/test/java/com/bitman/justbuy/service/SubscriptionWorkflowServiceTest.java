@@ -42,7 +42,7 @@ class SubscriptionWorkflowServiceTest {
     }
 
     @Test
-    void applyForSubscription_trimsDepositorAndClearsExpiredEndDate() {
+    void applyForSubscription_trimsDepositorAndGrantsNoAccessToAnExpiredMember() {
         UUID userId = UUID.randomUUID();
         User user = new User("member@example.com", "member", "hash");
         user.setSubscription(SubscriptionStatus.PRO);
@@ -55,7 +55,11 @@ class SubscriptionWorkflowServiceTest {
         assertThat(dto.subscription()).isEqualTo("PENDING");
         assertThat(user.getDepositorName()).isEqualTo("Hong Gil Dong");
         assertThat(user.getSubscriptionRequestedAt()).isNotNull();
-        assertThat(user.getSubscriptionEndDate()).isNull();
+        // 이 테스트가 지키려던 것은 "만료 회원에게 이용 권한이 남지 않는다" 이다.
+        // 종료일을 지워서 그걸 달성하면 재구독 신청이 신규 가입과 구별되지 않으므로,
+        // 이력은 남기고 접근 여부로 단언한다. (RenewalKeepsHistoryTest 가 이력을 고정한다.)
+        assertThat(service.isActivePro(user)).isFalse();
+        assertThat(user.getSubscriptionEndDate()).isNotNull();
         verify(userRepository).save(user);
     }
 

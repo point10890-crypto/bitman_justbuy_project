@@ -55,13 +55,23 @@ public class SubscriptionService {
 
         boolean keepCurrentAccess = isActivePro(user);
 
-        // 만료된 PRO/FREE는 신규 신청, 활성 PRO는 기존 이용권을 유지한 채 연장 승인 대기로 전환한다.
+        // 활성 PRO는 기존 이용권을 유지한 채 연장 승인 대기로 전환한다.
         user.setSubscription(SubscriptionStatus.PENDING);
         user.setDepositorName(normalizedDepositorName);
         user.setSubscriptionRequestedAt(LocalDateTime.now(KST));
         if (!keepCurrentAccess) {
-            user.setSubscriptionEndDate(null);
-            user.setSubscriptionApprovedAt(null);
+            // 구독 이력(종료일·승인일)은 지우지 않는다. 지우면 재구독 신청이 신규 가입과
+            // 구별되지 않아 관리자 대기 목록에도 이력 없는 신규 신청으로 뜨고,
+            // 반려되면 NONE 으로 떨어져 그 뒤로 계속 신규 구독 흐름을 타게 된다.
+            //
+            // 다만 남은 이용 기간이 생기면 안 된다. PENDING + 종료일이 오늘 이후면
+            // isActivePro 가 접근을 열어주므로, 과거 데이터에 미래 종료일이 남아 있다면
+            // 어제로 당겨 무료 접근이 새지 않게 막는다.
+            LocalDate today = LocalDate.now(KST);
+            LocalDate endDate = user.getSubscriptionEndDate();
+            if (endDate != null && !endDate.isBefore(today)) {
+                user.setSubscriptionEndDate(today.minusDays(1));
+            }
         }
         userRepository.save(user);
         log.info("Subscription applied: userId={}, depositor={}, previousStatus={}",
@@ -167,9 +177,10 @@ public class SubscriptionService {
         if (hasPendingRenewalAccess(user, LocalDate.now(KST))) {
             user.setSubscription(SubscriptionStatus.PRO);
         } else {
+            // 반려해도 구독 이력은 남긴다. 지우면 과거 회원이 "구독한 적 없음"으로 떨어져
+            // 그 뒤로 재구독이 아니라 신규 구독 흐름을 타게 된다. 접근은 FREE 가 막고,
+            // 종료일은 이미 과거이므로 남겨도 권한이 새지 않는다.
             user.setSubscription(SubscriptionStatus.FREE);
-            user.setSubscriptionEndDate(null);
-            user.setSubscriptionApprovedAt(null);
         }
         userRepository.save(user);
         log.info("Subscription rejected: userId={}", userId);
