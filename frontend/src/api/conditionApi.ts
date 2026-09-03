@@ -184,6 +184,10 @@ export async function fetchConditionCaptureTimes(sectionSlug?: string, token?: s
 export interface TrackRecordMode {
   mode: string
   title: string
+  /** 이 수익률이 어느 구간 기준인지 (모드마다 다름) */
+  returnBasis: string
+  /** 목표가/손절 도달률의 기간 기준 */
+  hitRateBasis: string
   totalSignals: number
   verifiedCount: number
   wins: number

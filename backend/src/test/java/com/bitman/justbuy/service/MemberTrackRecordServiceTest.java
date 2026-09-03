@@ -110,10 +110,10 @@ class MemberTrackRecordServiceTest {
             next, new KisApiService.DailyOhlc(next, 101, 101, 101, 101, 1L)   // 시장 +1.00%
         );
         when(benchmark.series(anyString(), any(), any())).thenReturn(series);
-        stub("BREAKOUT", record(d, 5.0, 6.0, false, false));   // 종목 +5.00%
+        stub("JONGGA_V2", record(d, 5.0, 6.0, false, false));   // 종목 +5.00%
 
         MemberTrackRecordResponse res = new MemberTrackRecordService(repository, benchmark).getTrackRecord(30);
-        ModeRecord breakout = res.modes().stream().filter(m -> m.mode().equals("BREAKOUT")).findFirst().orElseThrow();
+        ModeRecord breakout = res.modes().stream().filter(m -> m.mode().equals("JONGGA_V2")).findFirst().orElseThrow();
 
         assertThat(breakout.avgBenchmarkReturnPct()).isEqualTo("+1.00%");
         assertThat(breakout.avgExcessReturnPct()).isEqualTo("+4.00%");
@@ -141,6 +141,45 @@ class MemberTrackRecordServiceTest {
         r.setMaxReturn1d(maxReturn);
         r.setHitTarget(hitTarget);
         r.setHitStop(hitStop);
+        // 도달률 분모는 "레벨이 설정된 건"이므로 테스트 레코드에도 설정해 둔다
+        r.setTargetPrice(1000L);
+        r.setStopLoss(900L);
         return r;
+    }
+
+    @Test
+    void hitRateIsDashWhenNoLevelsWereEverSet() {
+        AnalysisTrackRecord noLevels = new AnalysisTrackRecord();
+        noLevels.setAnalysisDate(TODAY.minusDays(2));
+        noLevels.setCloseReturn(1.0);
+        stub("BREAKOUT", noLevels);
+
+        ModeRecord m = service().getTrackRecord(30).modes().stream()
+            .filter(x -> x.mode().equals("BREAKOUT")).findFirst().orElseThrow();
+
+        // 레벨이 없는데 0% 로 찍으면 "한 번도 손절 안 났다"는 착시를 준다
+        assertThat(m.stopHitRate()).isEqualTo("-");
+        assertThat(m.targetHitRate()).isEqualTo("-");
+    }
+
+    @Test
+    void excessReturnIsOnlyShownForModesWhoseWindowMatchesTheBenchmark() {
+        LocalDate d = TODAY.minusDays(2);
+        LocalDate next = TODAY.minusDays(1);
+        Map<LocalDate, KisApiService.DailyOhlc> series = Map.of(
+            d, new KisApiService.DailyOhlc(d, 100, 100, 100, 100, 1L),
+            next, new KisApiService.DailyOhlc(next, 101, 101, 101, 101, 1L));
+        when(benchmark.series(anyString(), any(), any())).thenReturn(series);
+        stub("BREAKOUT", record(d, 5.0, 6.0, false, false));      // 장중 진입 = 창 불일치
+        stub("JONGGA_V2", record(d, 5.0, 6.0, false, false));     // 익일 종가 = 창 일치
+
+        var res = new MemberTrackRecordService(repository, benchmark).getTrackRecord(30);
+        ModeRecord breakout = res.modes().stream().filter(m -> m.mode().equals("BREAKOUT")).findFirst().orElseThrow();
+        ModeRecord jongga = res.modes().stream().filter(m -> m.mode().equals("JONGGA_V2")).findFirst().orElseThrow();
+
+        assertThat(breakout.avgExcessReturnPct()).isEqualTo("-");
+        assertThat(breakout.returnBasis()).contains("당일 종가");
+        assertThat(jongga.avgExcessReturnPct()).isEqualTo("+4.00%");
+        assertThat(jongga.returnBasis()).contains("익일 종가");
     }
 }

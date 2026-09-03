@@ -417,7 +417,7 @@ export default function HomePage() {
             </button>
           )}
 
-          {section.id === 'short-term' && (
+          {section.id === 'short-term' && !locked && (
             <button
               className="section-endpoint-button section-history-button"
               type="button"

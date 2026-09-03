@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getStoredToken } from '../contexts/AuthContext'
 import { fetchMemberTrackRecord, type MemberTrackRecordResponse, type TrackRecordMode } from '../api/conditionApi'
@@ -9,6 +9,8 @@ const RANGE_PRESETS = [
 ] as const
 
 function returnClass(value: string) {
+  // '-' 는 "측정 불가"지 손실이 아니다. 그대로 두면 빈 값이 빨갛게 칠해진다.
+  if (value === '-' || !value) return ''
   if (value.startsWith('+')) return 'profit-text'
   if (value.startsWith('-')) return 'loss-text'
   return ''
@@ -23,7 +25,7 @@ function ModeCard({ record }: { record: TrackRecordMode }) {
           <h2>{record.title}</h2>
           <span>
             {measured
-              ? `검증 ${record.verifiedCount}건 · ${record.wins}승 ${record.losses}패`
+              ? `검증 ${record.verifiedCount}건 · ${record.wins}승 ${record.losses}패 · ${record.returnBasis}`
               : '검증된 포착이 아직 없습니다'}
           </span>
         </div>
@@ -35,9 +37,12 @@ function ModeCard({ record }: { record: TrackRecordMode }) {
             <span>승률 {record.winRate}</span>
             <span className={returnClass(record.avgReturnPct)}>평균 {record.avgReturnPct}</span>
             <span className={returnClass(record.avgMaxReturnPct)}>평균 최대 {record.avgMaxReturnPct}</span>
-            <span>목표가 도달 {record.targetHitRate}</span>
-            <span>손절 터치 {record.stopHitRate}</span>
+            {record.targetHitRate !== '-' && <span>목표가 도달 {record.targetHitRate}</span>}
+            {record.stopHitRate !== '-' && <span>손절 터치 {record.stopHitRate}</span>}
           </div>
+          {record.targetHitRate !== '-' && (
+            <div className="history-note">도달률 기준: {record.hitRateBasis}</div>
+          )}
           {record.avgExcessReturnPct !== '-' && (
             <div className="condition-track-summary">
               <span>시장 평균 {record.avgBenchmarkReturnPct}</span>
@@ -62,19 +67,21 @@ export default function TrackRecordPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    // 기간 전환 시 이전 수치가 새 탭 라벨 아래 남지 않도록 즉시 비우고,
+    // 응답 역전(늦게 온 옛 요청이 덮어쓰는 것)을 막기 위해 취소 플래그를 둔다.
+    let cancelled = false
     setLoading(true)
     setError(null)
-    try {
-      setData(await fetchMemberTrackRecord(days, getStoredToken() || undefined))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '성적표를 불러오지 못했습니다.')
-    } finally {
-      setLoading(false)
-    }
+    setData(null)
+    fetchMemberTrackRecord(days, getStoredToken() || undefined)
+      .then(res => { if (!cancelled) setData(res) })
+      .catch(err => {
+        if (!cancelled) setError(err instanceof Error ? err.message : '성적표를 불러오지 못했습니다.')
+      })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [days])
-
-  useEffect(() => { load() }, [load])
 
   return (
     <main className="search-home-page">
@@ -100,7 +107,7 @@ export default function TrackRecordPage() {
       </div>
 
       {error && <div className="condition-feed-status">{error}</div>}
-      {loading && !data && <div className="rank-table-empty">성적표를 불러오는 중입니다.</div>}
+      {loading && <div className="rank-table-empty">성적표를 불러오는 중입니다.</div>}
 
       {data && (
         <>
@@ -111,16 +118,20 @@ export default function TrackRecordPage() {
                 <span>{data.from} ~ {data.to}</span>
               </div>
             </div>
-            <div className="condition-track-summary">
-              <span>검증 {data.overall.verifiedCount}건</span>
-              <span>승률 {data.overall.winRate}</span>
-              <span className={returnClass(data.overall.avgReturnPct)}>평균 {data.overall.avgReturnPct}</span>
-              {data.overall.avgExcessReturnPct !== '-' && (
-                <span className={returnClass(data.overall.avgExcessReturnPct)}>
-                  시장 대비 {data.overall.avgExcessReturnPct}
-                </span>
-              )}
-            </div>
+            {data.overall.verifiedCount > 0 ? (
+              <>
+                <div className="condition-track-summary">
+                  <span>검증 {data.overall.verifiedCount}건</span>
+                  <span>승률 {data.overall.winRate}</span>
+                  <span className={returnClass(data.overall.avgReturnPct)}>평균 {data.overall.avgReturnPct}</span>
+                </div>
+                <div className="history-note">
+                  전체는 기준이 다른 모드를 합친 값입니다. 단일 지표로 해석하지 마세요.
+                </div>
+              </>
+            ) : (
+              <div className="rank-table-empty">검증된 포착이 아직 없습니다.</div>
+            )}
             {data.benchmarkLabel && <div className="history-note">{data.benchmarkLabel}</div>}
           </section>
 

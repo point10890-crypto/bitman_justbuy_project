@@ -24,6 +24,10 @@ public record MemberTrackRecordResponse(
     public record ModeRecord(
         String mode,
         String title,
+        /** 이 수익률이 어느 구간 기준인지. 모드마다 다르므로 반드시 함께 보여준다. */
+        String returnBasis,
+        /** 목표가/손절 도달률이 어느 기간 기준인지. */
+        String hitRateBasis,
         int totalSignals,
         int verifiedCount,
         int wins,
