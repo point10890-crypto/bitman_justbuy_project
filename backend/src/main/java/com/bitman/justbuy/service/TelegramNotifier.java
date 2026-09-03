@@ -26,6 +26,7 @@ public class TelegramNotifier {
     private static final Logger log = LoggerFactory.getLogger(TelegramNotifier.class);
     private static final String API_URL = "https://api.telegram.org/bot%s/sendMessage";
     private static final int MAX_MESSAGE_LENGTH = 4000;
+    private static final String NOTICE_TRUNCATED = "\n\n... (생략)";
 
     private final String botToken;
     private final String chatId;
@@ -69,6 +70,35 @@ public class TelegramNotifier {
         }
     }
 
+    /**
+     * 지정한 회원 chat id 로만 전송한다.
+     *
+     * <p>기존 발송 메서드는 관리자/채널 고정 대상이라 회원 개인에게 보낼 수단이 없었다.
+     * 회원 알림은 실패해도 다른 회원 발송이나 호출자 로직을 막으면 안 되므로
+     * 예외를 던지지 않고 성공 여부만 돌려준다.
+     *
+     * @return 전송 시도가 성공했으면 true
+     */
+    /**
+     * parse_mode 가 HTML 이므로 사용자 입력(이름 등)은 반드시 이스케이프해야 한다.
+     * 이스케이프하지 않으면 이름에 '<' 나 '&' 가 있는 회원은 텔레그램이 메시지를 거부해
+     * 그 사람만 조용히 알림을 못 받는다.
+     */
+    public static String escapeHtml(String value) {
+        if (value == null) return "";
+        return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    public boolean sendToMember(String memberChatId, String message) {
+        if (memberChatId == null || memberChatId.isBlank()) return false;
+        String text = message.length() > MAX_MESSAGE_LENGTH
+            ? message.substring(0, MAX_MESSAGE_LENGTH) + NOTICE_TRUNCATED
+            : message;
+        // sendTo 는 예외를 내부에서 삼키므로 반환값으로만 성공을 판별할 수 있다.
+        // 여기서 true 를 무조건 돌려주면 실패한 발송이 "보냄"으로 기록돼 재시도가 사라진다.
+        return sendTo(memberChatId.trim(), text);
+    }
+
     /** 관리자 개인 채팅에만 전송 (구독 승인 요청 등 운영 알림용). */
     public void sendToAdmin(String message) {
         String text = message.length() > MAX_MESSAGE_LENGTH
@@ -77,10 +107,10 @@ public class TelegramNotifier {
         sendTo(chatId, text);
     }
 
-    private void sendTo(String targetChatId, String text) {
+    private boolean sendTo(String targetChatId, String text) {
         if (botToken == null || botToken.isBlank()) {
             log.warn("[Telegram] botToken empty — cannot send to {} (check TELEGRAM_BOT_TOKEN env)", targetChatId);
-            return;
+            return false;
         }
         try {
             String url = String.format(API_URL, botToken);
@@ -98,15 +128,17 @@ public class TelegramNotifier {
             if (resp != null && resp.contains("\"ok\":false")) {
                 log.warn("[Telegram] API rejected send to {}: {}", targetChatId,
                     resp.length() > 300 ? resp.substring(0, 300) : resp);
-            } else {
-                log.info("[Telegram] ✉ sent to {} ({} chars)", targetChatId, text.length());
+                return false;
             }
+            log.info("[Telegram] ✉ sent to {} ({} chars)", targetChatId, text.length());
+            return true;
         } catch (org.springframework.web.client.HttpStatusCodeException hse) {
             log.warn("[Telegram] HTTP {} sending to {}: {}",
                 hse.getStatusCode(), targetChatId, hse.getResponseBodyAsString());
         } catch (Exception e) {
             log.warn("[Telegram] Failed to send to {}: {}", targetChatId, e.getMessage());
         }
+        return false;
     }
 
     /** 모드 코드 → 한글 라벨 변환 (UI와 통일) */

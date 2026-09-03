@@ -25,4 +25,19 @@ public class SubscriptionController {
                                           @Valid @RequestBody SubscriptionApplyRequest request) {
         return ResponseEntity.ok(subscriptionService.applyForSubscription(userId, request.depositorName()));
     }
+
+    /** 회원 텔레그램 연결. body: {"chatId": "123456789"} */
+    @PostMapping("/telegram")
+    public ResponseEntity<UserDto> linkTelegram(@AuthenticationPrincipal UUID userId,
+                                                @RequestBody TelegramLinkRequest request) {
+        return ResponseEntity.ok(subscriptionService.linkTelegram(userId, request.chatId()));
+    }
+
+    /** 회원 텔레그램 연결 해제. */
+    @DeleteMapping("/telegram")
+    public ResponseEntity<UserDto> unlinkTelegram(@AuthenticationPrincipal UUID userId) {
+        return ResponseEntity.ok(subscriptionService.unlinkTelegram(userId));
+    }
+
+    public record TelegramLinkRequest(String chatId) {}
 }

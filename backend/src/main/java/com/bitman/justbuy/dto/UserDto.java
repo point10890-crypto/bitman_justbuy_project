@@ -16,7 +16,9 @@ public record UserDto(
     LocalDateTime subscriptionRequestedAt,
     LocalDate subscriptionEndDate,
     LocalDateTime subscriptionApprovedAt,
-    LocalDateTime createdAt
+    LocalDateTime createdAt,
+    /** 텔레그램 연결 여부. chat id 원문은 내려주지 않는다(노출 시 타인이 사칭 발송 가능). */
+    boolean telegramLinked
 ) {
     public static UserDto from(User user) {
         return new UserDto(
@@ -29,7 +31,8 @@ public record UserDto(
             user.getSubscriptionRequestedAt(),
             user.getSubscriptionEndDate(),
             user.getSubscriptionApprovedAt(),
-            user.getCreatedAt()
+            user.getCreatedAt(),
+            user.getTelegramChatId() != null && !user.getTelegramChatId().isBlank()
         );
     }
 }

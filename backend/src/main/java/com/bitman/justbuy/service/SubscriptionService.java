@@ -110,6 +110,44 @@ public class SubscriptionService {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
+    /**
+     * 회원 텔레그램 연결. 숫자 chat id 만 허용한다.
+     *
+     * <p>회원이 봇에게 말을 걸어 받은 chat id 를 그대로 입력하는 방식이다.
+     * 형식 검증을 두는 이유는 잘못된 값이 저장되면 매일 발송이 조용히 실패하기 때문이다.
+     */
+    @Transactional
+    public UserDto linkTelegram(UUID userId, String chatId) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+
+        String normalized = chatId == null ? "" : chatId.trim();
+        if (!normalized.matches("-?\\d{5,20}")) {
+            throw new IllegalArgumentException("텔레그램 chat id 형식이 올바르지 않습니다. 숫자만 입력해 주세요.");
+        }
+
+        user.setTelegramChatId(normalized);
+        // 연결 직후 예고 마커는 비운다 — 연결 전에 지나간 단계를 놓치지 않도록.
+        user.setExpiryNoticeFor(null);
+        user.setExpiryNoticeStage(null);
+        userRepository.save(user);
+        log.info("[Subscription] 텔레그램 연결: userId={}", userId);
+        return UserDto.from(user);
+    }
+
+    /** 회원 텔레그램 연결 해제. 이후 알림 대상에서 빠진다. */
+    @Transactional
+    public UserDto unlinkTelegram(UUID userId) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+        user.setTelegramChatId(null);
+        user.setExpiryNoticeFor(null);
+        user.setExpiryNoticeStage(null);
+        userRepository.save(user);
+        log.info("[Subscription] 텔레그램 해제: userId={}", userId);
+        return UserDto.from(user);
+    }
+
     public List<UserDto> getPendingSubscriptions() {
         return userRepository.findBySubscription(SubscriptionStatus.PENDING)
             .stream()

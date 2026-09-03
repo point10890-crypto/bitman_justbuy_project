@@ -35,6 +35,14 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query("SELECT COUNT(u) FROM User u WHERE u.subscription = 'PRO' AND u.subscriptionEndDate BETWEEN :from AND :to")
     long countExpiringBetween(@Param("from") LocalDate from, @Param("to") LocalDate to);
 
+    /**
+     * 만료 예고 대상 — 지정한 종료일들을 가진 활성 PRO 회원 중 텔레그램을 연결한 사람.
+     * 관리자는 만료 개념이 없으므로 제외한다.
+     */
+    @Query("SELECT u FROM User u WHERE u.subscription = 'PRO' AND u.role <> 'ADMIN' "
+         + "AND u.telegramChatId IS NOT NULL AND u.subscriptionEndDate IN :dates")
+    List<User> findExpiryNoticeTargets(@Param("dates") List<LocalDate> dates);
+
     /** 특정 날짜 이후 생성된 유저 수 */
     @Query("SELECT COUNT(u) FROM User u WHERE u.createdAt >= :since")
     long countCreatedSince(@Param("since") java.time.LocalDateTime since);

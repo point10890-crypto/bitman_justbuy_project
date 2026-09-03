@@ -1,11 +1,13 @@
 package com.bitman.justbuy.controller;
 
 import com.bitman.justbuy.dto.performance.DailyClosePerformanceResponse;
+import com.bitman.justbuy.dto.performance.MemberTrackRecordResponse;
 import com.bitman.justbuy.dto.performance.SwingCumulativePerformanceResponse;
 import com.bitman.justbuy.entity.Role;
 import com.bitman.justbuy.entity.SubscriptionStatus;
 import com.bitman.justbuy.repository.UserRepository;
 import com.bitman.justbuy.service.SubscriptionService;
+import com.bitman.justbuy.service.MemberTrackRecordService;
 import com.bitman.justbuy.service.TrackRecordService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -28,13 +30,31 @@ public class PerformanceController {
     private final TrackRecordService trackRecordService;
     private final UserRepository userRepository;
     private final SubscriptionAccessGuard subscriptionAccessGuard;
+    private final MemberTrackRecordService memberTrackRecordService;
 
     public PerformanceController(TrackRecordService trackRecordService,
                                  UserRepository userRepository,
-                                 SubscriptionAccessGuard subscriptionAccessGuard) {
+                                 SubscriptionAccessGuard subscriptionAccessGuard,
+                                 MemberTrackRecordService memberTrackRecordService) {
         this.trackRecordService = trackRecordService;
         this.userRepository = userRepository;
         this.subscriptionAccessGuard = subscriptionAccessGuard;
+        this.memberTrackRecordService = memberTrackRecordService;
+    }
+
+    /**
+     * 회원용 모드별 트랙레코드 — 승률·평균수익·시장 대비 초과수익.
+     *
+     * <p>성과 데이터는 쌓여 있는데 회원에게 보이는 곳이 종가매매 히스토리뿐이었다.
+     * "왜 믿어야 하는가"에 답하는 화면의 데이터 소스다.
+     */
+    @GetMapping("/track-record")
+    public ResponseEntity<MemberTrackRecordResponse> trackRecord(
+        @AuthenticationPrincipal UUID userId,
+        @RequestParam(required = false) Integer days
+    ) {
+        requireProSubscription(userId);
+        return ResponseEntity.ok(memberTrackRecordService.getTrackRecord(days));
     }
 
     @GetMapping("/short-term/daily-close")

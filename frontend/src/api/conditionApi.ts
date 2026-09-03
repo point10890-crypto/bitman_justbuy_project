@@ -178,3 +178,59 @@ export async function fetchConditionCaptureTimes(sectionSlug?: string, token?: s
   })
   return readJson<ConditionCaptureTimesResponse>(res)
 }
+
+// ─── 회원 트랙레코드 (모드별 성적표) ───
+
+export interface TrackRecordMode {
+  mode: string
+  title: string
+  totalSignals: number
+  verifiedCount: number
+  wins: number
+  losses: number
+  winRate: string
+  avgReturnPct: string
+  avgMaxReturnPct: string
+  targetHitRate: string
+  stopHitRate: string
+  avgBenchmarkReturnPct: string
+  avgExcessReturnPct: string
+  marketBeatRate: string
+}
+
+export interface MemberTrackRecordResponse {
+  from: string
+  to: string
+  days: number
+  modes: TrackRecordMode[]
+  overall: TrackRecordMode
+  benchmarkLabel: string | null
+  note: string
+}
+
+/** 모드별 승률·평균수익·시장 대비 초과수익. days 기본 30. */
+export async function fetchMemberTrackRecord(days: number, token?: string): Promise<MemberTrackRecordResponse> {
+  const res = await fetch(`${API_BASE}/api/performance/track-record?days=${days}`, {
+    headers: authHeaders(token),
+  })
+  return readJson<MemberTrackRecordResponse>(res)
+}
+
+/** 회원 텔레그램 연결. chatId 는 숫자 문자열. */
+export async function linkTelegram(chatId: string, token?: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/subscription/telegram`, {
+    method: 'POST',
+    headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chatId }),
+  })
+  await readJson<unknown>(res)
+}
+
+/** 회원 텔레그램 연결 해제. */
+export async function unlinkTelegram(token?: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/subscription/telegram`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
+  })
+  await readJson<unknown>(res)
+}

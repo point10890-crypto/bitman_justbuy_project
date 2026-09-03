@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { linkTelegram, unlinkTelegram } from '../api/conditionApi'
+import { getStoredToken } from '../contexts/AuthContext'
 
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
 
@@ -21,7 +23,7 @@ function subscriptionActionLabel(subscription: string, expired?: boolean, renewa
 
 export default function MyPage() {
   const navigate = useNavigate()
-  const { user, logout, updateProfile, changePassword } = useAuth()
+  const { user, logout, updateProfile, changePassword, refreshUser } = useAuth()
   const [name, setName] = useState(user?.name || '')
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -29,6 +31,9 @@ export default function MyPage() {
   const [passwordMessage, setPasswordMessage] = useState('')
   const [savingProfile, setSavingProfile] = useState(false)
   const [savingPassword, setSavingPassword] = useState(false)
+  const [chatId, setChatId] = useState('')
+  const [telegramMessage, setTelegramMessage] = useState('')
+  const [savingTelegram, setSavingTelegram] = useState(false)
 
   useEffect(() => {
     setName(user?.name || '')
@@ -74,6 +79,29 @@ export default function MyPage() {
     }
   }
 
+  const telegramLinked = Boolean(user?.telegramLinked)
+
+  const handleTelegram = async (unlink: boolean) => {
+    setTelegramMessage('')
+    setSavingTelegram(true)
+    try {
+      const token = getStoredToken() || undefined
+      if (unlink) {
+        await unlinkTelegram(token)
+        setTelegramMessage('텔레그램 알림을 해제했습니다.')
+      } else {
+        await linkTelegram(chatId.trim(), token)
+        setTelegramMessage('연결했습니다. 만료 3일 전과 1일 전에 알림을 보내드립니다.')
+        setChatId('')
+      }
+      await refreshUser()
+    } catch (err) {
+      setTelegramMessage(err instanceof Error ? err.message : '처리에 실패했습니다.')
+    } finally {
+      setSavingTelegram(false)
+    }
+  }
+
   return (
     <main className="my-page">
       <section className="my-profile-card">
@@ -115,6 +143,52 @@ export default function MyPage() {
         >
           {subscriptionActionLabel(user.subscription, user.subscriptionExpired, user.subscriptionRenewalPending)}
         </button>
+      </section>
+
+      <section className="my-card">
+        <div className="my-card-head">
+          <h2>텔레그램 알림</h2>
+          <p>이용권 만료 3일 전과 1일 전에 미리 알려드립니다.</p>
+        </div>
+        {telegramLinked ? (
+          <>
+            <div className="my-info-grid">
+              <div><span>상태</span><strong>연결됨</strong></div>
+            </div>
+            <button
+              className="my-primary-button"
+              type="button"
+              disabled={savingTelegram}
+              onClick={() => handleTelegram(true)}
+            >
+              {savingTelegram ? '처리 중...' : '알림 해제'}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="subscription-note">
+              텔레그램에서 <strong>@userinfobot</strong> 에게 말을 걸면 알려주는 숫자 ID를 입력해 주세요.
+            </p>
+            <label className="my-field">
+              <span>텔레그램 chat ID</span>
+              <input
+                value={chatId}
+                onChange={event => setChatId(event.target.value)}
+                placeholder="예: 123456789"
+                inputMode="numeric"
+              />
+            </label>
+            <button
+              className="my-primary-button"
+              type="button"
+              disabled={savingTelegram || !chatId.trim()}
+              onClick={() => handleTelegram(false)}
+            >
+              {savingTelegram ? '연결 중...' : '알림 받기'}
+            </button>
+          </>
+        )}
+        {telegramMessage && <p className="my-form-message">{telegramMessage}</p>}
       </section>
 
       <section className="my-card">

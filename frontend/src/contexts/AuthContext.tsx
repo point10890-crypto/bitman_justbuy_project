@@ -18,6 +18,8 @@ export interface User {
   subscriptionApprovedAt?: string
   subscriptionExpired?: boolean
   subscriptionRenewalPending?: boolean
+  /** 텔레그램 알림 연결 여부. chat id 원문은 서버가 내려주지 않는다. */
+  telegramLinked?: boolean
   depositorName?: string
   createdAt: string
 }
@@ -62,6 +64,7 @@ function dtoToUser(dto: UserDto): User {
     subscriptionApprovedAt: dto.subscriptionApprovedAt ?? undefined,
     subscriptionExpired: isExpired,
     subscriptionRenewalPending: isPendingRenewal,
+    telegramLinked: dto.telegramLinked ?? false,
     depositorName: dto.depositorName ?? undefined,
     createdAt: dto.createdAt,
   }

@@ -417,6 +417,16 @@ export default function HomePage() {
             </button>
           )}
 
+          {section.id === 'short-term' && (
+            <button
+              className="section-endpoint-button section-history-button"
+              type="button"
+              onClick={() => navigate('/performance')}
+            >
+              모드별 성적표 보기 (승률 · 시장 대비)
+            </button>
+          )}
+
           {section.id === 'closing-bet' && (
             <button
               className="section-endpoint-button section-history-button"

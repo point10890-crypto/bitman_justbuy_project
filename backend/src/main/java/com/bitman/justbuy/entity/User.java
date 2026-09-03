@@ -50,6 +50,15 @@ public class User {
      */
     private LocalDateTime tokenValidFrom;
 
+    /** 회원 개인 텔레그램 chat id. 미연결이면 null — 알림 대상에서 제외된다. */
+    private String telegramChatId;
+
+    /** 만료 예고를 보낸 대상 종료일. 연장으로 종료일이 바뀌면 마커가 자동 무효가 된다. */
+    private LocalDate expiryNoticeFor;
+
+    /** 해당 종료일에 대해 마지막으로 보낸 예고 단계(3 = D-3, 1 = D-1). */
+    private Integer expiryNoticeStage;
+
     protected User() {}
 
     public User(String email, String name, String passwordHash) {
@@ -85,4 +94,13 @@ public class User {
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getTokenValidFrom() { return tokenValidFrom; }
     public void setTokenValidFrom(LocalDateTime tokenValidFrom) { this.tokenValidFrom = tokenValidFrom; }
+
+    public String getTelegramChatId() { return telegramChatId; }
+    public void setTelegramChatId(String telegramChatId) { this.telegramChatId = telegramChatId; }
+
+    public LocalDate getExpiryNoticeFor() { return expiryNoticeFor; }
+    public void setExpiryNoticeFor(LocalDate expiryNoticeFor) { this.expiryNoticeFor = expiryNoticeFor; }
+
+    public Integer getExpiryNoticeStage() { return expiryNoticeStage; }
+    public void setExpiryNoticeStage(Integer expiryNoticeStage) { this.expiryNoticeStage = expiryNoticeStage; }
 }
