@@ -9,6 +9,7 @@ import com.bitman.justbuy.condition.run.ConditionRunTrigger;
 import com.bitman.justbuy.repository.UserRepository;
 import com.bitman.justbuy.service.AsyncJobManager;
 import com.bitman.justbuy.service.ConditionSearchPipeline;
+import com.bitman.justbuy.service.LiveAnalysisQuotaService;
 import com.bitman.justbuy.service.SubscriptionService;
 import com.bitman.justbuy.service.TradingResearchViewService;
 import com.bitman.justbuy.service.AsyncJobManager.JobEntry;
@@ -34,16 +35,19 @@ public class AnalysisController {
     private final SubscriptionAccessGuard subscriptionAccessGuard;
     private final ConditionRunService conditionRunService;
     private final TradingResearchViewService tradingResearchViewService;
+    private final LiveAnalysisQuotaService liveAnalysisQuotaService;
 
     public AnalysisController(ConditionSearchPipeline conditionSearchPipeline,
                                AsyncJobManager jobManager, SubscriptionAccessGuard subscriptionAccessGuard,
                                ConditionRunService conditionRunService,
-                               TradingResearchViewService tradingResearchViewService) {
+                               TradingResearchViewService tradingResearchViewService,
+                               LiveAnalysisQuotaService liveAnalysisQuotaService) {
         this.conditionSearchPipeline = conditionSearchPipeline;
         this.jobManager = jobManager;
         this.subscriptionAccessGuard = subscriptionAccessGuard;
         this.conditionRunService = conditionRunService;
         this.tradingResearchViewService = tradingResearchViewService;
+        this.liveAnalysisQuotaService = liveAnalysisQuotaService;
     }
 
     private void requireProSubscription(UUID userId) {
@@ -99,7 +103,20 @@ public class AnalysisController {
             return ResponseEntity.ok(cached);
         }
 
-        log.info("[API] Live analysis started: mode={}, query={}", request.mode(), request.query());
+        // 캐시 미스 = 실제 LLM 에이전트 호출. 이 지점에서만 쿼터를 소비한다.
+        // 캐시 적중은 비용이 없으므로 차감하지 않는다.
+        if (!liveAnalysisQuotaService.tryConsume(userId)) {
+            int quota = liveAnalysisQuotaService.quota();
+            conditionRunService.recordEvent(run.runId(), ConditionRunEventType.NOTIFICATION_SKIPPED,
+                "live analysis quota exceeded", Map.of("dailyQuota", quota));
+            conditionRunService.markFailed(run.runId(), "live analysis quota exceeded");
+            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
+                "오늘 라이브 분석 " + quota + "회를 모두 사용했습니다. 예약 분석 결과는 계속 이용할 수 있습니다.",
+                "LIVE_ANALYSIS_QUOTA_EXCEEDED");
+        }
+
+        log.info("[API] Live analysis started: mode={}, query={}, quotaLeft={}",
+            request.mode(), request.query(), liveAnalysisQuotaService.remaining(userId));
         String jobId = jobManager.createJob();
         conditionRunService.recordEvent(run.runId(), ConditionRunEventType.JOB_CREATED,
             "async analysis job created", Map.of("jobId", jobId));

@@ -43,17 +43,20 @@ class AnalysisControllerTest {
     @Mock SubscriptionService subscriptionService;
 
     private ConditionRunService conditionRunService;
+    private com.bitman.justbuy.service.LiveAnalysisQuotaService quotaService;
     private AnalysisController controller;
 
     @BeforeEach
     void setUp() {
         conditionRunService = new ConditionRunService();
+        quotaService = new com.bitman.justbuy.service.LiveAnalysisQuotaService();
         controller = new AnalysisController(
             conditionSearchPipeline,
             jobManager,
             new SubscriptionAccessGuard(userRepository, subscriptionService),
             conditionRunService,
-            new TradingResearchViewService()
+            new TradingResearchViewService(),
+            quotaService
         );
     }
 

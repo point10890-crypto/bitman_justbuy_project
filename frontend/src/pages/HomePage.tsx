@@ -24,11 +24,7 @@ const sections: Section[] = [
     mode: 'BREAKOUT',
     query: '오늘 장중 단타 돌파 후보 분석',
     columns: ['종목명', '포착가', '현재가', '단기 수익률'],
-    rows: [
-      { name: '로보티즈', a: '31,200', b: '34,350', c: '+10.09%' },
-      { name: '디아이', a: '7,120', b: '7,510', c: '+5.53%' },
-      { name: '한미반도체', a: '139,000', b: '145,300', c: '+4.66%' },
-    ],
+    rows: [],
   },
   {
     id: 'swing',
@@ -37,11 +33,7 @@ const sections: Section[] = [
     mode: 'REVERSAL_EDGE',
     query: '스윙 눌림목과 반전 후보 분석',
     columns: ['종목명', '포착가', '목표가', '손절가'],
-    rows: [
-      { name: '현대무벡스', a: '31,800', b: '35,000', c: '관찰' },
-      { name: '범한퓨얼셀', a: '32,500', b: '38,000', c: '1차' },
-      { name: '디앤디파마텍', a: '78,000', b: '86,000', c: '보유' },
-    ],
+    rows: [],
   },
   {
     id: 'leaders',
@@ -50,11 +42,7 @@ const sections: Section[] = [
     mode: 'FLOW_LEADER',
     query: '기관 외국인 수급 주도 종목 분석',
     columns: ['종목명', '거래대금', '등락률', '강도'],
-    rows: [
-      { name: '알테오젠', a: '1,230억', b: '+12.4%', c: '강' },
-      { name: '한화오션', a: '980억', b: '+8.7%', c: '중' },
-      { name: '에코프로', a: '760억', b: '+6.2%', c: '중' },
-    ],
+    rows: [],
   },
   {
     id: 'themes',
@@ -63,11 +51,7 @@ const sections: Section[] = [
     mode: 'CATALYST_BURST',
     query: '오늘 시장 이슈와 테마 대장주 분석',
     columns: ['테마명', '대장주', '상승률', '강도'],
-    rows: [
-      { name: '반도체', a: '한미반도체', b: '+8.2%', c: '강' },
-      { name: '로봇', a: '로보티즈', b: '+5.1%', c: '중' },
-      { name: '방산', a: '한화에어로', b: '+4.7%', c: '중' },
-    ],
+    rows: [],
   },
   {
     id: 'closing-bet',
@@ -77,20 +61,14 @@ const sections: Section[] = [
     query: '오늘 종가매매 후보 분석',
     scheduleLabel: '종목 검출 시간 · 장중 오후 3시 검출',
     columns: ['종목명', '진입가', '목표가', '손절가'],
-    rows: [
-      { name: '종가 후보', a: '준비중', b: '준비중', c: '-' },
-    ],
+    rows: [],
   },
   {
     id: 'alerts',
     icon: 'alert',
     title: '종목 알림이',
     columns: ['관심종목', '조건', '상태', '채널'],
-    rows: [
-      { name: '삼성전자', a: '주도주 진입', b: '대기', c: '앱' },
-      { name: '에코프로', a: '+5% 돌파', b: '알림', c: '텔레그램' },
-      { name: '한미반도체', a: '공시 발생', b: '대기', c: '앱' },
-    ],
+    rows: [],
   },
 ]
 
@@ -106,7 +84,10 @@ function maskValue(value: string) {
 }
 
 function rowsFromCondition(section: ConditionSectionResponse | undefined, fallbackRows: Section['rows']) {
-  if (!section) return fallbackRows
+  // API 응답이 없을 때 예시 데이터를 보여주면 PRO 회원이 장애 중에 가짜 수치를
+  // 실제 포착으로 오인한다. 빈 목록을 돌려 '데이터 준비 중' 상태를 노출한다.
+  void fallbackRows
+  if (!section) return []
   if (!section.signals?.length) return []
   return section.signals.slice(0, 3).map(signal => ({
     name: signal.stockName,
@@ -125,7 +106,7 @@ function usesRiskPriceColumns(section: ConditionSectionResponse) {
 }
 
 function sectionSourceStatus(section: ConditionSectionResponse | undefined) {
-  if (!section) return '기본 표시'
+  if (!section) return '데이터 준비 중'
   if (section.sourceStatus === 'REALTIME_SCAN') return '실시간 포착'
   if (section.sourceStatus === 'PRECOMPUTED') return '실시간 캐시'
   if (section.sourceStatus === 'STALE_CACHE') return '최근 저장 결과'

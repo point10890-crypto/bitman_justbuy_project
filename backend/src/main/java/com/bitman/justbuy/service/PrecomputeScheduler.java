@@ -408,6 +408,10 @@ public class PrecomputeScheduler {
             com.bitman.justbuy.controller.MonitorController.recordAnalysis(
                 mode, true, durationMs, agentsUsed, agentsSucceeded, picks, null);
 
+            // 에이전트 일부 실패는 지금까지 로그에만 남아 조용히 지나갔다.
+            // 2개 중 1개만 성공해도 합의(consensus)가 비고 픽 품질이 떨어지므로 즉시 알린다.
+            notifyAgentDegradation(mode, agentsUsed, agentsSucceeded, picks);
+
             // 텔레그램 발송 조건 3가지 동시 충족 시에만 발송:
             // 1) picks > 0  — 빈 분석 결과 발송 방지
             // 2) agentsSucceeded > 0  — 모든 AI 실패 시 발송 방지
@@ -466,5 +470,38 @@ public class PrecomputeScheduler {
 
     public Map<String, String> getLastRunTimes() {
         return Map.copyOf(lastRunTimes);
+    }
+
+    /**
+     * 에이전트 부분 실패/픽 0건을 관리자에게 알린다.
+     *
+     * <p>스케줄 분석은 하루 12회 자동으로 돌아 아무도 보지 않는다. 에이전트가 절반만
+     * 성공하면 합의(consensus)가 비어 픽 품질이 떨어지는데, 로그에만 남으면 며칠씩 방치된다.
+     * 알림 실패가 분석 자체를 막지 않도록 예외는 삼킨다.
+     */
+    private void notifyAgentDegradation(String mode, int agentsUsed, int agentsSucceeded, int picks) {
+        if (telegramNotifier == null) return;
+
+        boolean partialFailure = agentsUsed > 0 && agentsSucceeded < agentsUsed;
+        boolean noPicks = picks == 0;
+        if (!partialFailure && !noPicks) return;
+
+        try {
+            StringBuilder sb = new StringBuilder();
+            sb.append("[JUST BUY] 파이프라인 경고\n\n");
+            sb.append("모드: ").append(mode).append("\n");
+            sb.append("에이전트: ").append(agentsSucceeded).append("/").append(agentsUsed).append(" 성공\n");
+            sb.append("픽: ").append(picks).append("건\n\n");
+            if (partialFailure) {
+                sb.append("- 에이전트 일부 실패 — 합의(consensus)가 비어 픽 품질이 낮아집니다.\n");
+            }
+            if (noPicks) {
+                sb.append("- 픽 0건 — 해당 모드 화면이 비어 보입니다.\n");
+            }
+            sb.append("\n관리자 페이지 > 시스템 상태를 확인하세요.");
+            telegramNotifier.sendToAdmin(sb.toString());
+        } catch (Exception e) {
+            log.warn("[Scheduler] 에이전트 경고 알림 실패: {}", e.getMessage());
+        }
     }
 }
