@@ -27,6 +27,9 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     List<User> findBySubscription(SubscriptionStatus subscription);
 
+    /** 같은 텔레그램 chat id 를 이미 쓰는 계정. 타인 chat id 등록을 막는다. */
+    List<User> findByTelegramChatId(String telegramChatId);
+
     /** 만료일이 지난 PRO 유저 목록 (자동 다운그레이드용) */
     @Query("SELECT u FROM User u WHERE u.subscription = 'PRO' AND u.role <> 'ADMIN' AND u.subscriptionEndDate < :today")
     List<User> findExpiredProUsers(@Param("today") LocalDate today);

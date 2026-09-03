@@ -122,8 +122,18 @@ public class SubscriptionService {
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
         String normalized = chatId == null ? "" : chatId.trim();
-        if (!normalized.matches("-?\\d{5,20}")) {
-            throw new IllegalArgumentException("텔레그램 chat id 형식이 올바르지 않습니다. 숫자만 입력해 주세요.");
+        if (!normalized.matches("[1-9]\\d{4,19}")) {
+            // 음수는 그룹/채널 id 다. 허용하면 봇이 단체 채팅에 글을 쓰게 만들 수 있고,
+            // 개인 만료 안내가 여러 사람에게 노출된다. 개인 chat id(양수)만 받는다.
+            throw new IllegalArgumentException("텔레그램 개인 chat id 형식이 올바르지 않습니다. 양수 숫자만 입력해 주세요.");
+        }
+
+        // 소유 증명은 아직 없다. 최소한 한 chat id 가 여러 계정에 붙는 것은 막아
+        // 타인 chat id 를 등록해 그 사람에게 내 만료 안내가 가는 상황을 방지한다.
+        for (User other : userRepository.findByTelegramChatId(normalized)) {
+            if (!userId.equals(other.getId())) {   // other 가 아직 id 없는 전이 상태일 수 있다
+                throw new IllegalArgumentException("이미 다른 계정에 연결된 텔레그램 ID 입니다.");
+            }
         }
 
         user.setTelegramChatId(normalized);
