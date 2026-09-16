@@ -75,6 +75,7 @@ class DeepSeekAgentTest {
         assertThat(body).contains("deepseek-v4-flash");
         assertThat(body).contains("thinking");
         assertThat(body).contains("disabled");
+        assertThat(mapper.readTree(body).path("max_tokens").asInt()).isEqualTo(8192);
     }
 
     @Test
@@ -99,6 +100,27 @@ class DeepSeekAgentTest {
 
         assertThat(result.status()).isEqualTo("error");
         assertThat(result.error()).contains("timeout");
+    }
+
+    @Test
+    void analyze_rejectsTruncatedJson() {
+        when(runtimeAiConfigService.getDeepSeekConfig())
+            .thenReturn(new DeepSeekConfig("sk-test", "https://api.deepseek.com", "deepseek-v4-flash", "runtime", null));
+        when(restTemplate.exchange(anyString(), any(), any(), eq(String.class)))
+            .thenReturn(ResponseEntity.ok("""
+                {"choices":[{"finish_reason":"length","message":{"content":"```json:analysis\\n{"}}]}
+                """));
+        AgentResult result = agent.analyze("system", "user");
+        assertThat(result.status()).isEqualTo("error");
+        assertThat(result.error()).contains("length");
+    }
+
+    @Test
+    void analyze_rejectsEmptyResponse() throws Exception {
+        when(runtimeAiConfigService.getDeepSeekConfig())
+            .thenReturn(new DeepSeekConfig("sk-test", "https://api.deepseek.com", "deepseek-v4-flash", "runtime", null));
+        stubOkResponse("deepseek-v4-flash", " ", 11, 0);
+        assertThat(agent.analyze("system", "user").status()).isEqualTo("error");
     }
 
     private void stubOkResponse(String model, String content, int promptTokens, int completionTokens)

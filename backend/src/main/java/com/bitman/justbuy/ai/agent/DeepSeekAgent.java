@@ -70,7 +70,8 @@ public class DeepSeekAgent implements AiAgent {
 
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("model", model);
-            body.put("max_tokens", 4096);
+            // Narrative plus the consensus JSON exceeds 4096 tokens in production.
+            body.put("max_tokens", 8192);
             body.put("thinking", Map.of("type", "disabled"));
             body.put("messages", List.of(
                 Map.of("role", "system", "content", systemPrompt),
@@ -90,6 +91,13 @@ public class DeepSeekAgent implements AiAgent {
             String actualModel = root.path("model").asText(model);
             int inputTokens = root.path("usage").path("prompt_tokens").asInt(0);
             int outputTokens = root.path("usage").path("completion_tokens").asInt(0);
+
+            String finishReason = root.path("choices").path(0).path("finish_reason").asText("");
+            if ((!finishReason.isEmpty() && !"stop".equals(finishReason)) || content.isBlank()) {
+                return AgentResult.error(name(), actualModel,
+                    "Incomplete DeepSeek analysis: " + (content.isBlank() ? "empty response" : finishReason),
+                    System.currentTimeMillis() - start);
+            }
 
             return new AgentResult(name(), content, actualModel, inputTokens, outputTokens,
                 "success", null, System.currentTimeMillis() - start);
