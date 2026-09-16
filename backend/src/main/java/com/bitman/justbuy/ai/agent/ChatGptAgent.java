@@ -13,16 +13,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * OpenAI GPT-4o 에이전트.
- * gpt-4o-search-preview 모델로 한국 금융 도메인 웹검색 포함 분석.
+ * OpenAI 에이전트. Responses API의 웹검색으로 최신 근거를 수집한다.
  * 담당: L1 Macro + L2 Currency + L4 기술적분석 + L6 펀더멘탈
  */
 @Component
 public class ChatGptAgent implements AiAgent {
 
     private static final String BASE_URL = "https://api.openai.com/v1";
-    // v2.8.4 (2026-04-26): R3 Synthesis 단계 제거, analyze 만 유지 (웹검색 포함 모델)
-    static final String ANALYSIS_MODEL = "gpt-4o-search-preview";
+    // Search preview was shut down; this model is verified against the production project.
+    static final String ANALYSIS_MODEL = "gpt-5.5";
     static final String SYNTHESIS_MODEL = "gpt-4o";
 
     private final AiProperties props;
@@ -43,10 +42,68 @@ public class ChatGptAgent implements AiAgent {
         return props.openaiApiKey() != null && !props.openaiApiKey().isBlank();
     }
 
-    /** R1 분석용 — 웹검색 활성화 (gpt-4o-search-preview) */
+    /** R1 분석용 — 웹검색 필수, 저장 비활성화. */
     @Override
     public AgentResult analyze(String systemPrompt, String userMessage) {
-        return callOpenAi(ANALYSIS_MODEL, systemPrompt, userMessage, true);
+        long start = System.currentTimeMillis();
+        if (!isAvailable()) return AgentResult.skipped(name(), "API key not configured");
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setBearerAuth(props.openaiApiKey());
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("model", ANALYSIS_MODEL);
+            body.put("max_output_tokens", 8192);
+            body.put("store", false);
+            body.put("reasoning", Map.of("effort", "low"));
+            body.put("input", List.of(
+                Map.of("role", "system", "content", systemPrompt),
+                Map.of("role", "user", "content", userMessage)));
+            body.put("tools", List.of(Map.of("type", "web_search",
+                "search_context_size", "medium",
+                "user_location", Map.of("type", "approximate", "country", "KR", "city", "Seoul"))));
+            body.put("tool_choice", "required");
+            var response = restTemplate.exchange(BASE_URL + "/responses", HttpMethod.POST,
+                new HttpEntity<>(mapper.writeValueAsString(body), headers), String.class);
+            JsonNode root = mapper.readTree(response.getBody());
+            if (!"completed".equals(root.path("status").asText())) {
+                return AgentResult.error(name(), ANALYSIS_MODEL,
+                    "OpenAI response " + root.path("status").asText("missing status") + ": "
+                        + root.path("incomplete_details").path("reason").asText("not completed"),
+                    System.currentTimeMillis() - start);
+            }
+            StringBuilder content = new StringBuilder();
+            var citations = new java.util.LinkedHashSet<String>();
+            for (JsonNode item : root.path("output")) {
+                if (!"message".equals(item.path("type").asText())) continue;
+                for (JsonNode part : item.path("content")) {
+                    if (!"output_text".equals(part.path("type").asText())) continue;
+                    if (!content.isEmpty()) content.append('\n');
+                    content.append(part.path("text").asText(""));
+                    for (JsonNode annotation : part.path("annotations")) {
+                        String url = annotation.path("url").asText("");
+                        if ("url_citation".equals(annotation.path("type").asText())
+                                && (url.startsWith("https://") || url.startsWith("http://"))) {
+                            citations.add(url);
+                        }
+                    }
+                }
+            }
+            if (content.toString().isBlank()) {
+                return AgentResult.error(name(), ANALYSIS_MODEL, "Empty OpenAI analysis response",
+                    System.currentTimeMillis() - start);
+            }
+            if (!citations.isEmpty()) {
+                content.append("\n\n**검색 출처**\n");
+                citations.forEach(url -> content.append("- ").append(url).append('\n'));
+            }
+            return new AgentResult(name(), content.toString(), root.path("model").asText(ANALYSIS_MODEL),
+                root.path("usage").path("input_tokens").asInt(0),
+                root.path("usage").path("output_tokens").asInt(0), "success", null,
+                System.currentTimeMillis() - start);
+        } catch (Exception e) {
+            return AgentResult.error(name(), ANALYSIS_MODEL, e.getMessage(), System.currentTimeMillis() - start);
+        }
     }
 
     public AgentResult synthesize(String systemPrompt, String userMessage) {

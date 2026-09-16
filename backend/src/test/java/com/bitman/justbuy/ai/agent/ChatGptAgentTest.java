@@ -56,8 +56,8 @@ class ChatGptAgentTest {
 
     // ── model constants ──────────────────────────────────────
     @Test
-    void analysisModel_isSearchPreview() {
-        assertThat(ChatGptAgent.ANALYSIS_MODEL).isEqualTo("gpt-4o-search-preview");
+    void analysisModel_usesSupportedSearchModel() {
+        assertThat(ChatGptAgent.ANALYSIS_MODEL).isEqualTo("gpt-5.5");
     }
 
     @Test
@@ -68,7 +68,7 @@ class ChatGptAgentTest {
     // ── analyze ──────────────────────────────────────────────
     @Test
     void analyze_callsOpenAiWithSearchOptions() throws Exception {
-        stubOkResponse("gpt-4o-search-preview-2024-11-20", "분석 결과입니다.", 100, 200);
+        stubAnalysisResponse("gpt-5.5-2026-04-23", "분석 결과입니다.", 100, 200);
 
         AgentResult result = agent.analyze("system", "user");
 
@@ -76,13 +76,17 @@ class ChatGptAgentTest {
         assertThat(result.content()).isEqualTo("분석 결과입니다.");
         assertThat(result.agent()).isEqualTo("chatgpt");
 
-        // web_search_options가 요청 body에 포함됐는지 검증
+        // Responses 웹검색과 저장 비활성화 요청 검증
         ArgumentCaptor<HttpEntity> captor = ArgumentCaptor.forClass(HttpEntity.class);
-        verify(restTemplate).exchange(contains("/chat/completions"), eq(HttpMethod.POST),
+        verify(restTemplate).exchange(contains("/responses"), eq(HttpMethod.POST),
             captor.capture(), eq(String.class));
         String body = (String) captor.getValue().getBody();
-        assertThat(body).contains("web_search_options");
-        assertThat(body).contains("gpt-4o-search-preview");
+        assertThat(body).contains("web_search");
+        assertThat(mapper.readTree(body).path("tool_choice").asText()).isEqualTo("required");
+        assertThat(mapper.readTree(body).path("store").asBoolean(true)).isFalse();
+        assertThat(body).contains("gpt-5.5");
+        assertThat(body).contains("max_output_tokens");
+        assertThat(body).doesNotContain("\"max_tokens\"");
         assertThat(body).contains("KR");
         assertThat(body).contains("Seoul");
     }
@@ -133,7 +137,7 @@ class ChatGptAgentTest {
     // ── token counting ───────────────────────────────────────
     @Test
     void analyze_correctlyParsesTokenCounts() throws Exception {
-        stubOkResponse("gpt-4o-search-preview", "내용", 1500, 800);
+        stubAnalysisResponse("gpt-5.5", "내용", 1500, 800);
         AgentResult result = agent.analyze("sys", "usr");
         assertThat(result.inputTokens()).isEqualTo(1500);
         assertThat(result.outputTokens()).isEqualTo(800);
@@ -142,7 +146,7 @@ class ChatGptAgentTest {
     // ── authorization header ─────────────────────────────────
     @Test
     void analyze_setsAuthorizationHeader() throws Exception {
-        stubOkResponse("gpt-4o-search-preview", "ok", 10, 20);
+        stubAnalysisResponse("gpt-5.5", "ok", 10, 20);
         ArgumentCaptor<HttpEntity> captor = ArgumentCaptor.forClass(HttpEntity.class);
         agent.analyze("sys", "usr");
         verify(restTemplate).exchange(anyString(), any(), captor.capture(), eq(String.class));
@@ -150,6 +154,44 @@ class ChatGptAgentTest {
         assertThat(headers.getFirst("Authorization")).isEqualTo("Bearer test-openai-key");
     }
 
+    @Test
+    void analyze_rejectsEmptyResponse() throws Exception {
+        stubAnalysisResponse("gpt-5.5", "  ", 10, 0);
+        assertThat(agent.analyze("sys", "usr").status()).isEqualTo("error");
+    }
+
+    @Test
+    void analyze_rejectsIncompleteResponse() {
+        when(restTemplate.exchange(anyString(), any(), any(), eq(String.class)))
+            .thenReturn(ResponseEntity.ok("{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"output\":[]}"));
+        var result = agent.analyze("sys", "usr");
+        assertThat(result.status()).isEqualTo("error");
+        assertThat(result.error()).contains("max_output_tokens");
+    }
+
+    @Test
+    void analyze_preservesMultipleTextPartsAndCitations() {
+        when(restTemplate.exchange(anyString(), any(), any(), eq(String.class)))
+            .thenReturn(ResponseEntity.ok("""
+                {"status":"completed","output":[{"type":"reasoning"},
+                {"type":"message","content":[
+                {"type":"output_text","text":"first","annotations":[{"type":"url_citation","url":"https://www.krx.co.kr","title":"KRX"}]},
+                {"type":"output_text","text":"second"}]}]}
+                """));
+        var result = agent.analyze("sys", "usr");
+        assertThat(result.status()).isEqualTo("success");
+        assertThat(result.content()).contains("first", "second", "https://www.krx.co.kr");
+    }
+
+    private void stubAnalysisResponse(String model, String content, int input, int output) throws Exception {
+        String json = mapper.writeValueAsString(java.util.Map.of(
+            "model", model, "status", "completed",
+            "output", java.util.List.of(java.util.Map.of("type", "message", "content",
+                java.util.List.of(java.util.Map.of("type", "output_text", "text", content)))),
+            "usage", java.util.Map.of("input_tokens", input, "output_tokens", output)));
+        when(restTemplate.exchange(anyString(), any(), any(), eq(String.class)))
+            .thenReturn(ResponseEntity.ok(json));
+    }
     // ── helpers ──────────────────────────────────────────────
     private void stubOkResponse(String model, String content, int promptTokens, int completionTokens)
             throws Exception {
