@@ -29,4 +29,13 @@ User request: “1개월 구독자가 6개월 이용권 업그레이드 할 수 
 - `npm run build` and `git diff --check` passed. Production assets: `index-DhxbvmW4.js` and `index-CCQIA_Bg.css`.
 - Service worker cache: `bitman-v20261011-subscription-upgrade-r4`.
 
-Deployment results are recorded below after verification.
+## Production deployment and read-only verification
+
+- Source commit: `a4cd12c`.
+- MiniPC deployed successfully to `192.168.219.100` with the standard deploy script; operational DB and secrets preserved. Backend tests reran: 261 passed, zero failures/errors.
+- Both MiniPC localhost and `https://api.bit-man.net/api/health` returned `status=ok`, `service=justbuy-api` at 2026-10-11 20:19 KST. Public Spring HTML references the current JS artifact.
+- Read-only subscription catalog returned MONTHLY (1 month, 30,000 KRW) and SIX_MONTHS (6 months, 150,000 KRW).
+- Cloudflare Pages main deployment: `9a3b0638`; production deployment: `a7768ae2`.
+- The exact main URL `/subscribe?plan=SIX_MONTHS&renewal=1`, root HTML, current JS/CSS assets and `sw.js` all returned HTTP 200 with the expected upgrade artifact/cache markers.
+- The production alias upgrade URL and service worker returned HTTP 200 with the same current artifact/cache markers.
+- These deployment checks verify artifact delivery and service health. No real member's subscription was submitted or approved during QA, and an authenticated real-browser UI check remains unavailable with the current tools.

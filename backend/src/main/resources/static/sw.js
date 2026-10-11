@@ -1,6 +1,6 @@
 /** BitMan Service Worker - freshness-first app shell */
 
-const CACHE_NAME = 'bitman-v20261011-subscription-renewal-r3'
+const CACHE_NAME = 'bitman-v20261011-subscription-upgrade-r4'
 const SHELL_ASSETS = [
   '/manifest.json',
 ]
