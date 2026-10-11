@@ -33,3 +33,8 @@
 - TypeScript 검사와 Vite 프로덕션 빌드 통과. JS `index-dyMR2R4b.js`, CSS `index-BaO4lied.css`.
 - 로컬 브라우저에서 320px/390px 모바일과 1440px 데스크톱을 확인했다. 가입·로그인 후 `SIX_MONTHS` 유지, 신청 후 6개월·150,000원 대기 표시, 승인 확인 후 홈 이동, 활성 PRO의 연장 신청 후 마이페이지 이동을 확인했다.
 - PWA 캐시 버전: `bitman-v20261011-subscription-r1`.
+- MiniPC 배포 스크립트에서 백엔드 테스트와 JAR 빌드, 운영 DB·JAR 백업, 재시작 후 상태 확인을 완료했다. MiniPC 로컬과 공개 `/api/health` 모두 `status=ok`, `service=justbuy-api`다.
+- 운영 `https://api.bit-man.net/api/subscription/plans`는 월간 30,000원과 6개월 150,000원을 반환한다.
+- Cloudflare Pages main `0f057c34`와 production `639f36db` 배포 완료. 기본 Pages 주소, production 별칭, Spring static 모두 같은 JS/CSS 파일과 새 SW 캐시 버전을 제공한다.
+- 실제 `https://bitman-justbuy.pages.dev/`의 6개월 요금 카드에서 `/subscribe?plan=SIX_MONTHS`로 이동했다. 인앱 브라우저에서 선택된 6개월과 150,000원, `/login?plan=SIX_MONTHS` 및 `/register?plan=SIX_MONTHS` 연결을 확인했다. 운영 계정 생성·구독 신청·입금은 수행하지 않았다.
+- 로컬 테스트 전용 진입 파일과 서버는 정리했으며 배포 산출물에 포함하지 않았다.
