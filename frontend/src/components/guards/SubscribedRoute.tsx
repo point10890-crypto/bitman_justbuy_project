@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { memberTierOf } from '../../lib/memberTier'
+import { postAuthPath } from '../../lib/subscriptionPlans'
 import type { ReactNode } from 'react'
 
 function LoadingScreen() {
@@ -47,7 +48,7 @@ export default function SubscribedRoute({ children }: { children: ReactNode }) {
 
     return (
       <Navigate
-        to="/subscribe"
+        to={postAuthPath(location.search, false, isExpired, user.subscriptionPlan)}
         state={{ message, from: location.pathname, renewal: isExpired }}
         replace
       />

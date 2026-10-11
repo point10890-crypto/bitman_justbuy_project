@@ -56,6 +56,13 @@ function freeUser(overrides: Partial<FixtureUser> = {}): FixtureUser {
     role: 'USER', subscription: 'free', createdAt: '2026-01-01T00:00:00Z', ...overrides,
   }
 }
+function expiredUser(plan: PlanId = 'SIX_MONTHS', overrides: Partial<FixtureUser> = {}): FixtureUser {
+  return freeUser({
+    subscriptionExpired: true, subscriptionPlan: plan,
+    subscriptionEndDate: '2000-01-01', subscriptionApprovedAt: '1999-12-01',
+    depositorName: '샘플입금자', ...overrides,
+  })
+}
 function FixtureAuthProvider({ initialUser, children }: { initialUser: FixtureUser | null; children: ReactNode }) {
   const [user, setUser] = useState(initialUser)
   const login: FixtureAuth['login'] = async (...args) => {
@@ -122,8 +129,9 @@ async function chooseSixMonths() {
 }
 async function submitSubscription() {
   fireEvent.change(screen.getByLabelText('입금자명'), { target: { value: '샘플입금자' } })
-  await waitFor(() => expect((screen.getByRole('button', { name: '구독 신청하기' }) as HTMLButtonElement).disabled).toBe(false))
-  fireEvent.click(screen.getByRole('button', { name: '구독 신청하기' }))
+  const name = /^(?:재)?구독 신청하기$/
+  await waitFor(() => expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name }))
 }
 function expectSixMonthPaymentDetails() {
   const payment = screen.getByRole('region', { name: '신청 및 입금 정보' })
@@ -299,6 +307,91 @@ describe('subscription selection through public auth and renewal pages', () => {
     expect(screen.queryByRole('button', { name: '계좌번호 복사' })).toBeNull()
     expect(screen.getAllByText('구독중').length).toBeGreaterThan(0)
     expect(screen.getByTestId('flow-route').textContent).toBe('/my')
+    expect(refreshMock).toHaveBeenCalledOnce()
+    expect(applyMock).not.toHaveBeenCalled()
+  })
+
+  it('restores the expired six-month plan after an ordinary login without a selected plan', async () => {
+    loginMock.mockResolvedValue(expiredUser())
+    renderFlow('/login')
+    fireEvent.change(screen.getByLabelText('이메일'), { target: { value: 'sample@example.invalid' } })
+    fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: 'SampleFixture123!' } })
+    fireEvent.click(screen.getByRole('button', { name: '로그인' }))
+
+    await waitFor(() => expect(screen.getByTestId('flow-route').textContent).toBe('/subscribe?plan=SIX_MONTHS&renewal=1'))
+    expect((screen.getByRole('radio', { name: /6개월/ }) as HTMLInputElement).checked).toBe(true)
+    expect(selectedPrice()).toContain('150,000원')
+    expect(loginMock).toHaveBeenCalledOnce()
+    expect(applyMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps a plain guest login free of an implicit monthly plan and restores the previous six-month plan', async () => {
+    loginMock.mockResolvedValue(expiredUser())
+    renderFlow('/subscribe')
+    fireEvent.click(await screen.findByRole('link', { name: '이미 계정이 있나요? 로그인' }))
+
+    expect(screen.getByTestId('flow-route').textContent).toBe('/login')
+    fireEvent.change(screen.getByLabelText('이메일'), { target: { value: 'sample@example.invalid' } })
+    fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: 'SampleFixture123!' } })
+    fireEvent.click(screen.getByRole('button', { name: '로그인' }))
+
+    await waitFor(() => expect(screen.getByTestId('flow-route').textContent).toBe('/subscribe?plan=SIX_MONTHS&renewal=1'))
+    expect((screen.getByRole('radio', { name: /6개월/ }) as HTMLInputElement).checked).toBe(true)
+    expect(selectedPrice()).toContain('150,000원')
+    expect(loginMock).toHaveBeenCalledOnce()
+    expect(applyMock).not.toHaveBeenCalled()
+  })
+
+  it('opens plain subscription on the previous six-month plan with an expired membership summary', async () => {
+    renderFlow('/subscribe', expiredUser('SIX_MONTHS', { subscriptionExpired: undefined }))
+
+    await waitFor(() => expect(screen.getByTestId('flow-route').textContent).toBe('/subscribe?plan=SIX_MONTHS&renewal=1'))
+    expect(screen.getByRole('heading', { name: '재구독 신청', level: 1 })).toBeTruthy()
+    expect((screen.getByRole('radio', { name: /6개월/ }) as HTMLInputElement).checked).toBe(true)
+    expect(selectedPrice()).toContain('150,000원')
+    expect(screen.getByText('2000-01-01')).toBeTruthy()
+    expect((screen.getByLabelText('입금자명') as HTMLInputElement).value).toBe('샘플입금자')
+    expect(screen.getByRole('button', { name: '재구독 신청하기' })).toBeTruthy()
+    expect(applyMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps the last six-month plan when an expired member starts renewal from their account', async () => {
+    renderFlow('/my', expiredUser('SIX_MONTHS', { subscriptionExpired: undefined }))
+    fireEvent.click(screen.getByRole('button', { name: '재구독 신청' }))
+
+    await waitFor(() => expect(screen.getByTestId('flow-route').textContent).toBe('/subscribe?plan=SIX_MONTHS&renewal=1'))
+    expect(screen.getByRole('heading', { name: '재구독 신청', level: 1 })).toBeTruthy()
+    expect((screen.getByRole('radio', { name: /6개월/ }) as HTMLInputElement).checked).toBe(true)
+    expect(selectedPrice()).toContain('150,000원')
+  })
+
+  it('honors an explicit monthly choice over an expired six-month plan and submits monthly', async () => {
+    renderFlow('/subscribe?plan=MONTHLY', expiredUser())
+
+    await waitFor(() => expect(screen.getByTestId('flow-route').textContent).toBe('/subscribe?plan=MONTHLY&renewal=1'))
+    expect((screen.getByRole('radio', { name: /1개월/ }) as HTMLInputElement).checked).toBe(true)
+    expect(selectedPrice()).toContain('30,000원')
+    expect(screen.getByRole('button', { name: '재구독 신청하기' })).toBeTruthy()
+    await submitSubscription()
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '재구독 승인 대기 중' })).toBeTruthy())
+    expect(applyMock).toHaveBeenCalledExactlyOnceWith('샘플입금자', 'MONTHLY')
+    expect(screen.queryByRole('button', { name: /^(?:재)?구독 신청하기$/ })).toBeNull()
+  })
+
+  it('blocks another expired renewal while pending and resumes the app after approval', async () => {
+    renderFlow('/subscribe?plan=MONTHLY&renewal=1', expiredUser('MONTHLY', { subscription: 'pending', requestedSubscriptionPlan: 'SIX_MONTHS' }))
+
+    expect(screen.getByRole('heading', { name: '재구독 승인 대기 중' })).toBeTruthy()
+    expectSixMonthPaymentDetails()
+    expect(screen.queryByRole('radio')).toBeNull()
+    expect(screen.queryByRole('button', { name: /^(?:재)?구독 신청하기$/ })).toBeNull()
+    expect(applyMock).not.toHaveBeenCalled()
+    refreshMock.mockResolvedValue(freeUser({ subscription: 'pro', subscriptionPlan: 'SIX_MONTHS', requestedSubscriptionPlan: undefined, subscriptionEndDate: '2099-12-31', subscriptionApprovedAt: '2026-01-01' }))
+    fireEvent.click(screen.getByRole('button', { name: '승인 상태 새로고침' }))
+
+    await waitFor(() => expect(screen.getByTestId('flow-route').textContent).toBe('/'))
+    expect(screen.getByText('샘플 앱 홈')).toBeTruthy()
     expect(refreshMock).toHaveBeenCalledOnce()
     expect(applyMock).not.toHaveBeenCalled()
   })

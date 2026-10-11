@@ -3,6 +3,7 @@ package com.bitman.justbuy.service;
 import com.bitman.justbuy.controller.GlobalExceptionHandler;
 import com.bitman.justbuy.controller.SubscriptionController;
 import com.bitman.justbuy.dto.UserDto;
+import com.bitman.justbuy.entity.SubscriptionPlan;
 import com.bitman.justbuy.entity.SubscriptionStatus;
 import com.bitman.justbuy.entity.Role;
 import com.bitman.justbuy.entity.User;
@@ -13,6 +14,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
@@ -36,6 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -103,6 +107,64 @@ class SubscriptionPlanWorkflowTest {
         assertThat(approved.subscriptionEndDate()).isEqualTo(existingEnd.plusMonths(6));
         assertThat(dtoJson(approved).path("subscriptionPlan").asText()).isEqualTo("SIX_MONTHS");
         assertThat(dtoJson(approved).path("requestedSubscriptionPlan").isNull()).isTrue();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = SubscriptionStatus.class, names = {"FREE", "PRO"})
+    void expiredSixMonthMemberRenewsFromApprovalDayWithoutLosingHistoryOrReplacingPendingRequest(
+            SubscriptionStatus expiredStatus) throws Exception {
+        LocalDate previousEnd = LocalDate.now(KST).minusDays(7);
+        LocalDateTime previousApproval = previousEnd.minusMonths(6).atTime(12, 0);
+        String previousPayer = "previous payer";
+        user.setSubscription(expiredStatus);
+        user.setSubscriptionPlan(SubscriptionPlan.SIX_MONTHS);
+        user.setSubscriptionEndDate(previousEnd);
+        user.setSubscriptionApprovedAt(previousApproval);
+        user.setDepositorName(previousPayer);
+
+        String response = mvc.perform(post("/api/subscription/apply").contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(java.util.Map.of(
+                    "depositorName", previousPayer, "plan", "SIX_MONTHS"))))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        JsonNode pending = mapper.readTree(response);
+        LocalDateTime requestedAt = user.getSubscriptionRequestedAt();
+
+        assertThat(pending.path("id").asText()).isEqualTo(userId.toString());
+        assertThat(pending.path("subscription").asText()).isEqualTo("PENDING");
+        assertThat(pending.path("subscriptionPlan").asText()).isEqualTo("SIX_MONTHS");
+        assertThat(pending.path("requestedSubscriptionPlan").asText()).isEqualTo("SIX_MONTHS");
+        assertThat(pending.path("depositorName").asText()).isEqualTo(previousPayer);
+        assertThat(user.getSubscriptionEndDate()).isEqualTo(previousEnd);
+        assertThat(user.getSubscriptionApprovedAt()).isEqualTo(previousApproval);
+        assertThat(requestedAt).isNotNull();
+        assertThat(service.isActivePro(user)).isFalse();
+
+        String duplicateResponse = mvc.perform(post("/api/subscription/apply").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"depositorName\":\"replacement payer\",\"plan\":\"MONTHLY\"}"))
+            .andExpect(status().isBadRequest()).andReturn().getResponse().getContentAsString();
+
+        assertThat(mapper.readTree(duplicateResponse).path("error").asText()).contains("이미 구독 신청");
+        assertThat(user.getSubscription()).isEqualTo(SubscriptionStatus.PENDING);
+        assertThat(user.getSubscriptionPlan()).isEqualTo(SubscriptionPlan.SIX_MONTHS);
+        assertThat(user.getRequestedSubscriptionPlan()).isEqualTo(SubscriptionPlan.SIX_MONTHS);
+        assertThat(user.getDepositorName()).isEqualTo(previousPayer);
+        assertThat(user.getSubscriptionRequestedAt()).isEqualTo(requestedAt);
+        assertThat(user.getSubscriptionEndDate()).isEqualTo(previousEnd);
+        assertThat(user.getSubscriptionApprovedAt()).isEqualTo(previousApproval);
+        verify(repository, times(1)).save(user);
+
+        LocalDate approvalDay = LocalDate.now(KST);
+        var approved = service.approveSubscription(userId);
+
+        assertThat(approved.id()).isEqualTo(userId);
+        assertThat(approved.subscription()).isEqualTo("PRO");
+        assertThat(approved.subscriptionEndDate()).isEqualTo(approvalDay.plusMonths(6));
+        assertThat(approved.subscriptionApprovedAt().toLocalDate()).isEqualTo(approvalDay);
+        assertThat(approved.depositorName()).isEqualTo(previousPayer);
+        assertThat(user.getSubscriptionPlan()).isEqualTo(SubscriptionPlan.SIX_MONTHS);
+        assertThat(user.getRequestedSubscriptionPlan()).isNull();
+        assertThat(approved.subscriptionRequestedAt()).isNull();
+        assertThat(service.isActivePro(user)).isTrue();
     }
 
     @Test

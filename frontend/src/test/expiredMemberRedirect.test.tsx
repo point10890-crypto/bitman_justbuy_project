@@ -22,6 +22,7 @@ type TestUser = {
   subscription: 'free' | 'pending' | 'pro'
   subscriptionEndDate?: string
   subscriptionApprovedAt?: string
+  subscriptionPlan?: 'MONTHLY' | 'SIX_MONTHS'
   createdAt: string
 }
 
@@ -46,6 +47,7 @@ function LocationProbe() {
   return (
     <div>
       <span data-testid="path">{location.pathname}</span>
+      <span data-testid="search">{location.search}</span>
       <span data-testid="renewal">{String(!!state?.renewal)}</span>
       <span data-testid="message">{state?.message ?? ''}</span>
     </div>
@@ -74,7 +76,7 @@ const lapsedMember: TestUser = {
 describe('만료 회원 → 재구독 페이지', () => {
   beforeEach(() => {
     currentUser = null
-    refreshUser.mockClear()
+    refreshUser.mockReset().mockResolvedValue(undefined)
   })
 
   // 설정 파일 없이 vitest 를 쓰면 자동 정리가 걸리지 않아 이전 렌더가 DOM 에 남는다.
@@ -106,6 +108,44 @@ describe('만료 회원 → 재구독 페이지', () => {
     await waitFor(() => expect(screen.getByTestId('path').textContent).toBe('/subscribe'))
     expect(screen.getByTestId('renewal').textContent).toBe('true')
     expect(refreshUser).toHaveBeenCalled()
+  })
+
+  it('만료 회원의 이전 6개월 이용권을 새로고침에도 유지되는 연장 주소로 보낸다', async () => {
+    currentUser = { ...lapsedMember, subscriptionPlan: 'SIX_MONTHS' }
+    renderApp('/supply')
+
+    await waitFor(() => expect(screen.getByTestId('path').textContent).toBe('/subscribe'))
+    expect(screen.getByTestId('search').textContent).toBe('?plan=SIX_MONTHS&renewal=1')
+  })
+
+  it('만료 라우트에서도 사용자가 명시한 1개월 선택을 이전 6개월보다 우선한다', async () => {
+    currentUser = { ...lapsedMember, subscriptionPlan: 'SIX_MONTHS' }
+    renderApp('/supply?plan=MONTHLY')
+
+    await waitFor(() => expect(screen.getByTestId('path').textContent).toBe('/subscribe'))
+    expect(screen.getByTestId('search').textContent).toBe('?plan=MONTHLY&renewal=1')
+  })
+
+  it('API 만료 신호에서는 오래된 플랜을 고정하지 않고 갱신한 회원의 이용권을 확인하게 한다', async () => {
+    currentUser = { ...lapsedMember, subscription: 'pro', subscriptionPlan: 'MONTHLY', subscriptionEndDate: nextWeek() }
+    refreshUser.mockImplementation(async () => {
+      currentUser = { ...lapsedMember, subscriptionPlan: 'SIX_MONTHS' }
+    })
+    renderApp('/supply')
+    notifySubscriptionGate(403, JSON.stringify({ code: 'SUBSCRIPTION_EXPIRED', error: '만료' }))
+
+    await waitFor(() => expect(screen.getByTestId('path').textContent).toBe('/subscribe'))
+    expect(screen.getByTestId('search').textContent).toBe('?renewal=1')
+    expect(refreshUser).toHaveBeenCalledOnce()
+  })
+
+  it('API 만료 신호도 명시한 플랜과 연장 의도를 주소에 보존한다', async () => {
+    currentUser = { ...lapsedMember, subscription: 'pro', subscriptionPlan: 'SIX_MONTHS', subscriptionEndDate: nextWeek() }
+    renderApp('/supply?plan=MONTHLY')
+    notifySubscriptionGate(403, JSON.stringify({ code: 'SUBSCRIPTION_EXPIRED', error: '만료' }))
+
+    await waitFor(() => expect(screen.getByTestId('path').textContent).toBe('/subscribe'))
+    expect(screen.getByTestId('search').textContent).toBe('?plan=MONTHLY&renewal=1')
   })
 
   it('한 번도 구독한 적 없는 회원은 연장이 아니라 신규 구독으로 간다', async () => {

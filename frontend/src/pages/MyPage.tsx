@@ -5,6 +5,8 @@ import { linkTelegram, unlinkTelegram } from '../api/conditionApi'
 import { getStoredToken } from '../contexts/AuthContext'
 import { getSubscriptionPlan, subscribePath } from '../lib/subscriptionPlans'
 import { SubscriptionPaymentDetails } from '../components/app/SubscriptionPaymentDetails'
+import { SubscriptionExpiredNotice } from '../components/app/SubscriptionExpiredNotice'
+import { memberTierOf } from '../lib/memberTier'
 
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
 
@@ -19,6 +21,7 @@ function subscriptionLabel(subscription: string, expired?: boolean, renewalPendi
 function subscriptionActionLabel(subscription: string, expired?: boolean, renewalPending?: boolean) {
   if (renewalPending) return '승인 상태 새로고침'
   if (subscription === 'pending') return '승인 상태 새로고침'
+  if (expired) return '재구독 신청'
   if (subscription === 'pro' && !expired) return '구독 연장 / 관리'
   return '구독 플랜 선택'
 }
@@ -51,6 +54,8 @@ export default function MyPage() {
   if (!user) return null
 
   const currentPlan = getSubscriptionPlan(pendingPlan ? user.requestedSubscriptionPlan : user.subscriptionPlan)
+  const expired = memberTierOf(user) === 'EXPIRED' && !pendingPlan
+  const renewal = expired || (memberTierOf(user) === 'ACTIVE' && !pendingPlan)
   const hasPlan = user.subscription !== 'free' || user.subscriptionApprovedAt || user.subscriptionEndDate
   const unlimited = user.role === 'ADMIN' || (user.subscription === 'pro' && !user.subscriptionEndDate)
 
@@ -124,7 +129,7 @@ export default function MyPage() {
           <p>{user.email}</p>
         </div>
         <span className={`my-subscription-badge ${user.subscription}`}>
-          {subscriptionLabel(user.subscription, user.subscriptionExpired, user.subscriptionRenewalPending)}
+          {subscriptionLabel(user.subscription, expired, user.subscriptionRenewalPending)}
         </span>
       </section>
 
@@ -133,11 +138,12 @@ export default function MyPage() {
           <h2>구독 관리</h2>
           <p>이용권 플랜, 승인 상태와 만료일을 확인합니다.</p>
         </div>
+        {expired && <SubscriptionExpiredNotice plan={user.subscriptionPlan} endDate={user.subscriptionEndDate} />}
         {pendingPlan && !unlimited && (
           <SubscriptionPaymentDetails plan={user.requestedSubscriptionPlan} depositorName={user.depositorName} />
         )}
         <div className="my-status-grid">
-          <div><span>상태</span><strong>{subscriptionLabel(user.subscription, user.subscriptionExpired, user.subscriptionRenewalPending)}</strong></div>
+          <div><span>상태</span><strong>{subscriptionLabel(user.subscription, expired, user.subscriptionRenewalPending)}</strong></div>
           <div><span>만료일</span><strong>{unlimited ? '기간 제한 없음' : user.subscriptionEndDate || '-'}</strong></div>
           <div><span>입금자명</span><strong>{user.depositorName || '-'}</strong></div>
           {!pendingPlan && <>
@@ -148,9 +154,9 @@ export default function MyPage() {
         <button
           className="my-primary-button"
           type="button"
-          onClick={() => pendingPlan ? refreshUser() : unlimited ? navigate('/') : navigate(subscribePath(currentPlan.id, user.subscription === 'pro' && !user.subscriptionExpired && !user.subscriptionRenewalPending), {
+          onClick={() => pendingPlan ? refreshUser() : unlimited ? navigate('/') : navigate(subscribePath(currentPlan.id, renewal), {
             state: {
-              renewal: user.subscription === 'pro' && !user.subscriptionExpired && !user.subscriptionRenewalPending,
+              renewal,
               renewalPending: user.subscriptionRenewalPending,
               message: user.subscriptionRenewalPending
                 ? '기존 이용권은 유지되고 있으며, 선택한 플랜의 연장 승인을 기다리는 중입니다.'
@@ -160,7 +166,7 @@ export default function MyPage() {
             },
           })}
         >
-          {unlimited ? '전체 분석으로 이동' : subscriptionActionLabel(user.subscription, user.subscriptionExpired, user.subscriptionRenewalPending)}
+          {unlimited ? '전체 분석으로 이동' : subscriptionActionLabel(user.subscription, expired, user.subscriptionRenewalPending)}
         </button>
       </section>
 

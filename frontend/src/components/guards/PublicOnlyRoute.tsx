@@ -24,7 +24,7 @@ export default function PublicOnlyRoute({ children }: { children: ReactNode }) {
     const tier = memberTierOf(user)
     const needsRenewal = tier === 'EXPIRED'
     const routeState = location.state as { renewal?: boolean } | null
-    const target = user.role === 'ADMIN' ? '/' : postAuthPath(location.search, tier === 'ACTIVE', needsRenewal || !!routeState?.renewal)
+    const target = user.role === 'ADMIN' ? '/' : postAuthPath(location.search, tier === 'ACTIVE', needsRenewal || !!routeState?.renewal, user.subscriptionPlan)
     return (
       <Navigate
         to={target}

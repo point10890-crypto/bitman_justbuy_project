@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { PWAInstallPrompt } from '../components/app/PWAInstallPrompt'
-import { isSubscriptionExpired, useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../contexts/AuthContext'
 import { authPath, formatWon, getSubscriptionPlan, postAuthPath, subscriptionPlanFromSearch } from '../lib/subscriptionPlans'
+import { memberTierOf } from '../lib/memberTier'
 
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
 
@@ -22,10 +23,11 @@ export default function LoginPage() {
   useEffect(() => {
     if (isLoading || !user) return
 
-    const activePro = user.subscription === 'pro' && !isSubscriptionExpired(user.subscriptionEndDate)
-    navigate(user.role === 'ADMIN' ? '/' : postAuthPath(location.search, activePro, renewal || !!user.subscriptionExpired), {
+    const tier = memberTierOf(user)
+    const expired = tier === 'EXPIRED'
+    navigate(user.role === 'ADMIN' ? '/' : postAuthPath(location.search, tier === 'ACTIVE', renewal || expired, user.subscriptionPlan), {
       replace: true,
-      state: user.subscriptionExpired
+      state: expired
         ? { message: '이용권이 만료되었습니다. 구독을 연장해 주세요.', renewal: true }
         : undefined,
     })
@@ -54,10 +56,11 @@ export default function LoginPage() {
     try {
       setLoading(true)
       const loggedInUser = await login(email.trim().toLowerCase(), password, rememberMe)
-      const activePro = loggedInUser.subscription === 'pro' && !loggedInUser.subscriptionExpired
-      navigate(loggedInUser.role === 'ADMIN' ? '/' : postAuthPath(location.search, activePro, renewal || !!loggedInUser.subscriptionExpired), {
+      const tier = memberTierOf(loggedInUser)
+      const expired = tier === 'EXPIRED'
+      navigate(loggedInUser.role === 'ADMIN' ? '/' : postAuthPath(location.search, tier === 'ACTIVE', renewal || expired, loggedInUser.subscriptionPlan), {
           replace: true,
-          state: loggedInUser.subscriptionExpired
+          state: expired
             ? { message: '이용권이 만료되었습니다. 구독을 연장해 주세요.', renewal: true }
             : undefined,
         })
@@ -81,7 +84,7 @@ export default function LoginPage() {
 
         <div className="auth-title">
           <h1>로그인</h1>
-          <p>{selectedPlan ? `로그인 후 선택한 ${getSubscriptionPlan(selectedPlan).label} 이용권 (${formatWon(getSubscriptionPlan(selectedPlan).price)}) 신청을 이어갑니다.` : '구독 중인 계정으로 오늘 포착된 조건검색 결과를 확인하세요.'}</p>
+          <p>{selectedPlan ? `로그인 후 선택한 ${getSubscriptionPlan(selectedPlan).label} 이용권 (${formatWon(getSubscriptionPlan(selectedPlan).price)}) 신청을 이어갑니다.` : '기존 계정으로 로그인해 이용권을 확인하거나 재구독을 신청하세요.'}</p>
         </div>
 
         {error && <div className="auth-error">{error}</div>}

@@ -180,8 +180,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // 현재 경로가 로그인/랜딩이 아닐 때만 이동 (무한 리다이렉트 방지)
       const path = window.location.pathname
       if (path !== '/login' && path !== '/landing' && path !== '/register') {
+        const params = new URLSearchParams(window.location.search)
         window.location.href = path === '/subscribe'
-          ? authPath('login', subscriptionPlanFromSearch(window.location.search), new URLSearchParams(window.location.search).get('renewal') === '1')
+          ? authPath('login', params.has('plan') ? subscriptionPlanFromSearch(window.location.search) : undefined, params.get('renewal') === '1')
           : '/login'
       }
     }

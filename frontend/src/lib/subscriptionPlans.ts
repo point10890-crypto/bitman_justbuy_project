@@ -31,15 +31,16 @@ export function subscribePath(plan: SubscriptionPlanId = 'MONTHLY', renewal = fa
 }
 
 export function authPath(page: 'login' | 'register', plan?: SubscriptionPlanId, renewal = false) {
-  if (!plan && !renewal) return `/${page}`
-  return `/${page}?plan=${plan ?? 'MONTHLY'}${renewal ? '&renewal=1' : ''}`
+  if (!plan) return `/${page}${renewal ? '?renewal=1' : ''}`
+  return `/${page}?plan=${plan}${renewal ? '&renewal=1' : ''}`
 }
 
-export function postAuthPath(search: string, activeMember: boolean, renewal = false) {
+export function postAuthPath(search: string, activeMember: boolean, renewal = false, defaultPlan?: SubscriptionPlanId) {
   const params = new URLSearchParams(search)
   const needsRenewal = renewal || params.get('renewal') === '1'
   if (params.has('plan') || needsRenewal) {
-    return subscribePath(subscriptionPlanFromSearch(search), activeMember || needsRenewal)
+    const plan = params.has('plan') ? subscriptionPlanFromSearch(search) : parseSubscriptionPlan(defaultPlan)
+    return subscribePath(plan, activeMember || needsRenewal)
   }
   return activeMember ? '/' : '/subscribe'
 }

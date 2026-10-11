@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
+import { subscribePath, subscriptionPlanFromSearch } from '../../lib/subscriptionPlans'
 
 const SUBSCRIBE_PATH = '/subscribe'
 
@@ -36,17 +37,24 @@ export default function SubscriptionGateWatcher() {
 
       const expired = detail.code === 'SUBSCRIPTION_EXPIRED'
       const pending = detail.code === 'SUBSCRIPTION_PENDING'
+      const params = new URLSearchParams(location.search)
+      const renewal = expired || params.get('renewal') === '1'
+      // A cached plan may be stale. Without an explicit choice, let the
+      // subscription page restore the plan from the refreshed member.
+      const target = params.has('plan')
+        ? subscribePath(subscriptionPlanFromSearch(location.search), renewal)
+        : `${SUBSCRIBE_PATH}${renewal ? '?renewal=1' : ''}`
 
       // 서버 상태로 맞춘 뒤 이동. 실패해도 이동은 진행한다.
       void Promise.resolve(refreshUser())
         .catch(() => { /* 갱신 실패는 무시 — 아래 이동이 더 중요하다 */ })
         .finally(() => {
-          navigate(SUBSCRIBE_PATH, {
+          navigate(target, {
             replace: true,
             state: {
               message: detail.message
                 || (expired ? '이용권이 만료되었습니다. 재구독 신청을 해주세요.' : undefined),
-              renewal: expired,
+              renewal,
               renewalPending: pending,
               from: location.pathname,
             },
@@ -56,7 +64,7 @@ export default function SubscriptionGateWatcher() {
 
     window.addEventListener('subscription:required', onSubscriptionRequired)
     return () => window.removeEventListener('subscription:required', onSubscriptionRequired)
-  }, [navigate, location.pathname, refreshUser, user?.role])
+  }, [navigate, location.pathname, location.search, refreshUser, user?.role])
 
   return null
 }

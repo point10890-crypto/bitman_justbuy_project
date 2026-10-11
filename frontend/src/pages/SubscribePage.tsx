@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { PWAInstallPrompt } from '../components/app/PWAInstallPrompt'
 import { SubscriptionPaymentDetails } from '../components/app/SubscriptionPaymentDetails'
+import { SubscriptionExpiredNotice } from '../components/app/SubscriptionExpiredNotice'
 import { useAuth } from '../contexts/AuthContext'
+import { isSubscriptionExpired, memberTierOf } from '../lib/memberTier'
 import { SUBSCRIPTION_BANK_ACCOUNT } from '../lib/subscriptionPayment'
 import { fetchSubscriptionPlans, type SubscriptionPlanDto, type SubscriptionPlanId } from '../api/authApi'
 import {
@@ -80,13 +82,24 @@ export default function SubscribePage() {
   const copyTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   const routeState = location.state as { message?: string; renewal?: boolean; renewalPending?: boolean } | null
   const params = new URLSearchParams(location.search)
-  const selectedId = subscriptionPlanFromSearch(location.search)
-  const selectedPlan = catalog.find(plan => plan.id === selectedId) || getSubscriptionPlan(selectedId)
-  const activePro = user?.subscription === 'pro' && !user.subscriptionExpired
-  const unlimitedAccess = user?.role === 'ADMIN' || (activePro && !user?.subscriptionEndDate)
+  const tier = user ? memberTierOf(user) : 'NONE'
   const pending = user?.subscription === 'pending' || !!user?.subscriptionRenewalPending
-  const renewal = !!routeState?.renewal || !!routeState?.renewalPending || params.get('renewal') === '1' || !!user?.subscriptionExpired
+  const expired = tier === 'EXPIRED' && !pending
+  const selectedId = expired && !params.has('plan')
+    ? getSubscriptionPlan(user?.subscriptionPlan).id
+    : subscriptionPlanFromSearch(location.search)
+  const selectedPlan = catalog.find(plan => plan.id === selectedId) || getSubscriptionPlan(selectedId)
+  const activePro = tier === 'ACTIVE'
+  const unlimitedAccess = user?.role === 'ADMIN' || (activePro && !user?.subscriptionEndDate)
+  const renewal = !!routeState?.renewal || !!routeState?.renewalPending || params.get('renewal') === '1' || expired
     || (activePro && params.has('plan'))
+
+  useEffect(() => {
+    if (isLoading || !expired) return
+    if (!params.has('plan') || params.get('renewal') !== '1') {
+      navigate(subscribePath(selectedId, true), { replace: true, state: location.state })
+    }
+  }, [isLoading, expired, location.search, location.state, selectedId, navigate])
 
   useEffect(() => {
     let cancelled = false
@@ -154,12 +167,13 @@ export default function SubscribePage() {
 
   if (pending && user) {
     const requested = getSubscriptionPlan(user.requestedSubscriptionPlan)
+    const expiredRenewal = !!(user.subscriptionApprovedAt || user.subscriptionEndDate) && isSubscriptionExpired(user.subscriptionEndDate)
     return (
       <main className="subscription-page subscription-flow-page">
         <section className="subscription-card pending">
           <SubscriptionLogo onClick={() => navigate(activePro ? '/' : '/landing')} />
           <div className="subscription-state-icon" aria-hidden="true">⌛</div>
-          <h1>{activePro ? '구독 연장 승인 대기 중' : '구독 승인 대기 중'}</h1>
+          <h1>{activePro ? '구독 연장 승인 대기 중' : expiredRenewal ? '재구독 승인 대기 중' : '구독 승인 대기 중'}</h1>
           <p>입금 확인 후 {requested.label} 이용권이 활성화됩니다. {activePro ? '현재 이용권은 남은 기간 동안 계속 이용할 수 있습니다.' : '승인되면 자동으로 앱 홈으로 연결됩니다.'}</p>
           <SubscriptionPaymentDetails plan={user.requestedSubscriptionPlan} depositorName={user.depositorName} />
           <SubscriptionSteps pending />
@@ -176,10 +190,11 @@ export default function SubscribePage() {
       <section className="subscription-card">
         <SubscriptionLogo onClick={() => navigate(user ? '/' : '/landing')} />
         <div className="subscription-title">
-          <h1>{renewal ? '이용권 연장' : 'BitMan 구독'}</h1>
-          <p>이용 기간을 선택하고, 입금 후 신청하면 전체 분석 결과를 볼 수 있습니다.</p>
+          <h1>{expired ? '재구독 신청' : renewal ? '이용권 연장' : 'BitMan 구독'}</h1>
+          <p>{expired ? '이용 기간과 입금자명을 확인하고 재구독을 신청하세요.' : '이용 기간을 선택하고, 입금 후 신청하면 전체 분석 결과를 볼 수 있습니다.'}</p>
         </div>
-        {routeState?.message && <div className="subscription-route-message">{routeState.message}</div>}
+        {expired && <SubscriptionExpiredNotice plan={user?.subscriptionPlan} endDate={user?.subscriptionEndDate} />}
+        {!expired && routeState?.message && <div className="subscription-route-message">{routeState.message}</div>}
         {activePro && renewal && <p className="subscription-renewal-note">남은 이용 기간에 선택한 기간이 더해집니다. 승인 대기 중에도 현재 이용권은 유지됩니다.</p>}
         <fieldset className="subscription-plan-options">
           <legend>이용권 선택</legend>
@@ -195,18 +210,18 @@ export default function SubscribePage() {
         </fieldset>
         <div className="subscription-price"><span>{selectedPlan.label} 입금 금액</span><strong>{formatWon(selectedPlan.price)}</strong></div>
         <SubscriptionSteps />
-        <ul className="subscription-features">
+        {!expired && <ul className="subscription-features">
           <PlanFeature>단타 · 스윙 · 주도주 TOP3 전체 공개</PlanFeature>
           <PlanFeature>테마 분석과 종목 알림 이용</PlanFeature>
           <PlanFeature>KIS/DART 기반 AI 요약 확인</PlanFeature>
-        </ul>
+        </ul>}
         {catalogError ? <div className="subscription-catalog-error" role="alert"><p>{catalogError}</p><button type="button" onClick={() => setCatalogAttempt(attempt => attempt + 1)}>이용권 다시 확인</button></div>
           : !catalogReady && <p className="subscription-note" role="status">이용권 정보를 확인하고 있습니다.</p>}
         {!user ? (
           <div className="subscription-guest-actions">
             <p>가입은 무료입니다. 선택한 {selectedPlan.label} 이용권은 가입 후 그대로 이어집니다.</p>
             <Link className="auth-submit" to={authPath('register', selectedId, renewal)}>무료 회원가입 후 구독 신청</Link>
-            <Link className="subscription-login-link" to={authPath('login', selectedId, renewal)}>이미 계정이 있나요? 로그인</Link>
+            <Link className="subscription-login-link" to={authPath('login', params.has('plan') ? selectedId : undefined, renewal)}>이미 계정이 있나요? 로그인</Link>
           </div>
         ) : (
           <>
@@ -214,7 +229,7 @@ export default function SubscribePage() {
             {error && <div className="auth-error" role="alert">{error}</div>}
             <form className="auth-form" onSubmit={handleSubmit}>
               <label><span>입금자명</span><input value={depositorName} onChange={event => setDepositorName(event.target.value)} autoComplete="name" placeholder="실제 입금자명" /></label>
-              <button className="auth-submit" type="submit" disabled={loading || !catalogReady}>{loading ? '신청 중...' : '구독 신청하기'}</button>
+              <button className="auth-submit" type="submit" disabled={loading || !catalogReady}>{loading ? '신청 중...' : expired ? '재구독 신청하기' : '구독 신청하기'}</button>
             </form>
             <p className="subscription-note">선택한 금액을 입금한 뒤 신청해 주세요. 입금자명은 실제 송금한 이름과 같아야 합니다. 자동 결제는 되지 않습니다.</p>
             <SubscriptionActions onManage={() => navigate('/my')} onLogout={handleLogout} />

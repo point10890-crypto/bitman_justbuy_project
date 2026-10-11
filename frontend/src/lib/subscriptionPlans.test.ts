@@ -31,6 +31,22 @@ describe('subscription plan selection survives account entry', () => {
     expect(postAuthPath('?next=https%3A%2F%2Fevil.example&plan=YEARLY', false)).toBe('/subscribe?plan=MONTHLY')
   })
 
+  it('defaults an expired member to the previously approved plan without overriding an explicit choice', () => {
+    expect(postAuthPath('', false, true, 'SIX_MONTHS')).toBe('/subscribe?plan=SIX_MONTHS&renewal=1')
+    expect(postAuthPath('?renewal=1', false, false, 'SIX_MONTHS')).toBe('/subscribe?plan=SIX_MONTHS&renewal=1')
+    expect(postAuthPath('?plan=MONTHLY', false, true, 'SIX_MONTHS')).toBe('/subscribe?plan=MONTHLY&renewal=1')
+    expect(postAuthPath('?plan=YEARLY', false, true, 'SIX_MONTHS')).toBe('/subscribe?plan=MONTHLY&renewal=1')
+    expect(postAuthPath('', false, true)).toBe('/subscribe?plan=MONTHLY&renewal=1')
+    expect(postAuthPath('', true, false, 'SIX_MONTHS')).toBe('/')
+  })
+
+  it('keeps renewal intent through reauthentication without inventing a monthly choice', () => {
+    expect(authPath('login', undefined, true)).toBe('/login?renewal=1')
+    expect(authPath('register', undefined, true)).toBe('/register?renewal=1')
+    expect(postAuthPath('?renewal=1', false, false, 'SIX_MONTHS')).toBe('/subscribe?plan=SIX_MONTHS&renewal=1')
+    expect(authPath('login', 'MONTHLY', true)).toBe('/login?plan=MONTHLY&renewal=1')
+  })
+
   it('rejects an incomplete or invalid server catalog before using it for application', () => {
     const monthly = { id: 'MONTHLY', label: '1개월', months: 1, price: 30000 }
     const sixMonths = { id: 'SIX_MONTHS', label: '6개월', months: 6, price: 150000 }

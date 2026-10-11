@@ -1,0 +1,7 @@
+.subscription-expired-notice { margin: 0 0 20px; padding: 16px; border: 1px solid #665537; border-radius: 10px; background: #282319; color: #e9dba5; }
+.subscription-expired-notice > strong { display: block; font-size: 15px; line-height: 1.5; }
+.subscription-expired-notice dl { display: flex; flex-wrap: wrap; gap: 10px 22px; margin: 12px 0; }
+.subscription-expired-notice dl div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.subscription-expired-notice dt { color: #c0b89d; font-size: 12px; }
+.subscription-expired-notice dd { margin: 0; color: #f2e5bd; font-size: 13px; font-weight: 650; }
+.subscription-expired-notice p { margin: 0; color: #c7c2b4; font-size: 13px; line-height: 1.65; }
