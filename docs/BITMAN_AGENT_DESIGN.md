@@ -43,3 +43,5 @@
 - PWA 캐시 버전: `bitman-v20261011-agent-motion-r2`.
 - 로컬 브라우저 검증: Home 320·390·820·1440px, Landing 390·1440px에서 수평 넘침 없음. 실제 transform 변화, 정지 후 동일 transform 유지, Enter·Space·클릭 인사 및 종료, 모션 감소의 초기·동적 전환을 확인했다. 320px에서 모션 버튼이 잘리지 않도록 캐릭터 그리드 트랙과 버튼 위치를 조정했다.
 - 프론트엔드 테스트 30개 통과, TypeScript/Vite 빌드 성공. 최종 JS `index-dyVAPefE.js`, CSS `index-DhOeHq3L.css`.
+- Cloudflare Pages main·production과 MiniPC에 같은 빌드를 배포했다. 두 Pages URL의 JS/CSS 해시와 SW 캐시 버전을 확인했고, 실제 공개 페이지·메인 화면에서 움직임과 인사·정지·재생을 확인했다.
+- MiniPC 배포 과정에서 백엔드 244개 테스트가 다시 실행되어 통과했다(2026-10-11 13:22 KST). 운영 DB 백업 후 재시작했으며 MiniPC 로컬·공개 API 모두 `status=ok`, Spring 정적 페이지도 같은 자산 해시를 제공한다.
