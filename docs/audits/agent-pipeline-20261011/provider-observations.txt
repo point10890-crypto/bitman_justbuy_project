@@ -1,0 +1,19 @@
+grok_incomplete=success, content=partial
+grok_empty=success, blank=true
+grok_multiple_parts=keepsSecond=false, parsed=false
+grok_official_citations=retained=false
+gemini_max_tokens=success, content=partial
+gemini_metadata=model=gemini-2.5-flash, measuredTotal=50, providerTotal=90
+gemini_sources_without_answer=success, blank=false
+gemini_real_spring_io_error=status=error, leaksQueryKey=false
+deepseek_no_finish_reason=success
+deepseek_truncated_usage=status=error, measuredTokens=0, providerTokens=50, candidateLength=0
+deepseek_host_boundary=acceptsArbitraryHttpHost=true, sendsProviderCredential=true
+chatgpt_synthesis_length=success
+chatgpt_analysis_incomplete=error
+verifier_missing_required=accepted=true, riskCount=0, invalidationEmpty=true, aiScore=99
+verifier_outside_candidate=retained=true
+verifier_invalid_enum=accepted=true, rejected=false
+verifier_duplicate=final=VALID
+structured_schema=nonNumericTicker=ABCDEF, confidence=NaN, scenarioProbabilitySum=0.0, reasons=0
+network=0 network requests; all exchanges are response stubs or a request factory that throws before connection

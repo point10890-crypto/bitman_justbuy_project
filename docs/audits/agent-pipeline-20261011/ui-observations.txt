@@ -1,0 +1,11 @@
+BitMan offline UI audit probe
+Repository: C:\bitman_justbuy_project
+Scope: real source read/transpile/VM/SSR; mocked network and browser storage only.
+OBSERVED mixed_endpoint_rows_and_main_time: {"oldRowsShown":true,"newRowsHidden":true,"displayedSnapshotTime":"12:00"}
+OBSERVED late_closed_question_overwrites_next_answer: {"secondAnswerFirst":"ANSWER_B","finalAnswerAfterLateFirstCompletion":"ANSWER_A"}
+OBSERVED candidate_style_summary_rendered_as_performance: {"renderedLabels":["검증 신호 1건","평균 +6.00%","승률 100.0%"]}
+OBSERVED two_hour_live_cache_keeps_fresh_flag: {"ageHours":2,"serverCalls":0,"content":"OLD_0900","isFresh":true,"isPrecomputed":false}
+SOURCE_SHA256 frontend/src/pages/HomePage.tsx 78ad37f4c062022f106ffe94f90fc591e14f915170176a1db12e47853db86e1c
+SOURCE_SHA256 frontend/src/hooks/useAnalysis.ts 5fc04075808eb33c3592aaa1b1d594c61eb65e3aa7ab9a1ae67356316d785a70
+SOURCE_SHA256 frontend/src/lib/analysisCache.ts c16892714b63363084525b48c3a2e32733d02b618de13491291b1c5a427f66b6
+Observed 4/4; no repository files changed.

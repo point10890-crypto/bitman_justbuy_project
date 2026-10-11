@@ -1,0 +1,5 @@
+P1_PERCENT_AS_PRICE entry=10000 signal.highPrice=+5.21% stored.targetPrice=521 actual.close=9700 closeReturn=-3.0 hitTarget=true
+P2_CAPTURE_DRIFT first.capturedAt=2026-05-18T10:00:00+09:00 first.capturePrice=10,000 second.capturedAt=2026-05-18T10:00:00+09:00 second.capturePrice=12,000 second.currentPrice=12,000
+P2_HORIZON_ALIAS currentDate=2026-10-11 analysisDate=2026-10-06 quote=11000 price1d=11000 price3d=11000 price5d=11000 status=COMPLETED
+P1_UNVERIFIED_AS_PERFORMANCE stock=current10000 targetMissing outcomeEvidence=NONE generated.maxReturn=+6.00% trackRecord.total=1 avg=+6.00% winRate=100%
+OBSERVED=4 reproduced; EXTERNAL_NETWORK_CALLS=0; REAL_DB_CALLS=0
