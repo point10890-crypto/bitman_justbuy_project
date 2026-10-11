@@ -77,6 +77,9 @@ public class GeminiAgent implements AiAgent {
             return AgentResult.skipped(name(), "API key not configured");
         }
 
+        var lease = ProviderCallLimiter.tryAcquire(name());
+        if (lease == null) return AgentResult.error(name(), model, "Provider request capacity is busy", System.currentTimeMillis() - start);
+
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -119,7 +122,9 @@ public class GeminiAgent implements AiAgent {
             return parseResponse(response.getBody(), model, start);
 
         } catch (Exception e) {
-            return AgentResult.error(name(), model, e.getMessage(), System.currentTimeMillis() - start);
+            return AgentResult.error(name(), model, "Provider request failed", System.currentTimeMillis() - start);
+        } finally {
+            lease.close();
         }
     }
 
@@ -130,54 +135,35 @@ public class GeminiAgent implements AiAgent {
      */
     private AgentResult parseResponse(String responseBody, String model, long start) throws Exception {
         JsonNode root = mapper.readTree(responseBody);
-
-        // 텍스트 추출 — candidates[0].content.parts[*].text 모두 합침
-        StringBuilder content = new StringBuilder();
-        JsonNode candidates = root.path("candidates");
-        if (candidates.isArray() && candidates.size() > 0) {
-            JsonNode parts = candidates.get(0).path("content").path("parts");
-            if (parts.isArray()) {
-                for (JsonNode p : parts) {
-                    String text = p.path("text").asText("");
-                    if (!text.isEmpty()) content.append(text);
-                }
-            }
-        }
-
-        String contentStr = content.toString();
-
-        // Grounding 인용 추출 (groundingMetadata.groundingChunks[].web.uri)
-        List<String> citations = new ArrayList<>();
-        JsonNode chunks = candidates.path(0).path("groundingMetadata").path("groundingChunks");
-        if (chunks.isArray()) {
-            for (JsonNode chunk : chunks) {
-                String uri = chunk.path("web").path("uri").asText("");
-                if (!uri.isEmpty()) citations.add(uri);
-            }
-        }
-
-        // 인용이 있으면 콘텐츠 끝에 append (GrokAgent 와 동일 포맷)
-        if (!citations.isEmpty()) {
-            StringBuilder sb = new StringBuilder(contentStr);
-            sb.append("\n\n**📎 Google 검색 출처 (").append(citations.size()).append("건)**\n");
-            for (int i = 0; i < Math.min(citations.size(), 10); i++) {
-                sb.append("- ").append(citations.get(i)).append("\n");
-            }
-            contentStr = sb.toString();
-        }
-
-        // 토큰 사용량
+        JsonNode candidate = root.path("candidates").path(0);
+        String actualModel = root.path("modelVersion").asText(model);
         int inputTokens = root.path("usageMetadata").path("promptTokenCount").asInt(0);
-        int outputTokens = root.path("usageMetadata").path("candidatesTokenCount").asInt(0);
-
-        // 빈 응답 처리 (safety filter 등)
-        if (contentStr.isBlank()) {
-            JsonNode finishReason = candidates.path(0).path("finishReason");
-            String reason = finishReason.asText("EMPTY");
-            return AgentResult.error(name(), model, "Empty response (finish=" + reason + ")", System.currentTimeMillis() - start);
+        int visibleTokens = root.path("usageMetadata").path("candidatesTokenCount").asInt(0);
+        int thoughtTokens = root.path("usageMetadata").path("thoughtsTokenCount").asInt(0);
+        int totalTokens = Math.max(inputTokens + visibleTokens + thoughtTokens,
+            root.path("usageMetadata").path("totalTokenCount").asInt(0));
+        int outputTokens = totalTokens - inputTokens;
+        StringBuilder content = new StringBuilder();
+        for (JsonNode part : candidate.path("content").path("parts")) {
+            if (part.path("thought").asBoolean(false)) continue;
+            String text = part.path("text").asText("");
+            if (!text.isBlank()) content.append(text);
         }
-
-        return new AgentResult(name(), contentStr, model, inputTokens, outputTokens,
-            "success", null, System.currentTimeMillis() - start);
+        String finish = candidate.path("finishReason").asText("MISSING");
+        if (!"STOP".equals(finish) || !ProviderEndpointPolicy.hasMeaningfulContent(content.toString())) {
+            return new AgentResult(name(), "", actualModel, inputTokens, outputTokens, "error",
+                "Incomplete Gemini analysis (finish=" + finish + ")", System.currentTimeMillis() - start, thoughtTokens, totalTokens);
+        }
+        var citations = new java.util.LinkedHashSet<String>();
+        for (JsonNode chunk : candidate.path("groundingMetadata").path("groundingChunks")) {
+            String uri = chunk.path("web").path("uri").asText("");
+            if (uri.startsWith("https://") || uri.startsWith("http://")) citations.add(uri);
+        }
+        if (!citations.isEmpty()) {
+            content.append("\n\n**📎 Google 검색 출처 (" + citations.size() + "건)**\n");
+            citations.stream().limit(10).forEach(uri -> content.append("- ").append(uri).append("\n"));
+        }
+        return new AgentResult(name(), content.toString(), actualModel, inputTokens, outputTokens,
+            "success", null, System.currentTimeMillis() - start, thoughtTokens, totalTokens);
     }
 }

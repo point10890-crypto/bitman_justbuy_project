@@ -33,6 +33,9 @@ public class DeepSeekAgent implements AiAgent {
     private final RestTemplate restTemplate;
     private final ObjectMapper mapper;
 
+    @org.springframework.beans.factory.annotation.Value("${bitman.ai.deepseek-trusted-proxy-urls:}")
+    private String trustedProxyUrls = "";
+
     public DeepSeekAgent(AiProperties props,
                          RuntimeAiConfigService runtimeAiConfigService,
                          RestTemplate restTemplate,
@@ -63,7 +66,11 @@ public class DeepSeekAgent implements AiAgent {
             return AgentResult.skipped(name(), "API key not configured");
         }
 
+        var lease = ProviderCallLimiter.tryAcquire(name());
+        if (lease == null) return AgentResult.error(name(), model, "Provider request capacity is busy", System.currentTimeMillis() - start);
+
         try {
+            String endpoint = ProviderEndpointPolicy.deepSeekBaseUrl(baseUrl(config), trustedProxyUrls);
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.setBearerAuth(config.apiKey());
@@ -80,7 +87,7 @@ public class DeepSeekAgent implements AiAgent {
 
             HttpEntity<String> request = new HttpEntity<>(mapper.writeValueAsString(body), headers);
             ResponseEntity<String> response = restTemplate.exchange(
-                baseUrl(config) + "/chat/completions",
+                endpoint + "/chat/completions",
                 HttpMethod.POST,
                 request,
                 String.class
@@ -93,16 +100,18 @@ public class DeepSeekAgent implements AiAgent {
             int outputTokens = root.path("usage").path("completion_tokens").asInt(0);
 
             String finishReason = root.path("choices").path(0).path("finish_reason").asText("");
-            if ((!finishReason.isEmpty() && !"stop".equals(finishReason)) || content.isBlank()) {
+            if (!"stop".equals(finishReason) || !ProviderEndpointPolicy.hasMeaningfulContent(content)) {
                 return AgentResult.error(name(), actualModel,
                     "Incomplete DeepSeek analysis: " + (content.isBlank() ? "empty response" : finishReason),
-                    System.currentTimeMillis() - start);
+                    System.currentTimeMillis() - start, inputTokens, outputTokens);
             }
 
             return new AgentResult(name(), content, actualModel, inputTokens, outputTokens,
                 "success", null, System.currentTimeMillis() - start);
         } catch (Exception e) {
-            return AgentResult.error(name(), model, e.getMessage(), System.currentTimeMillis() - start);
+            return AgentResult.error(name(), model, "Provider request failed", System.currentTimeMillis() - start);
+        } finally {
+            lease.close();
         }
     }
 

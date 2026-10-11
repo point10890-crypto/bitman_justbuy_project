@@ -146,6 +146,57 @@ describe('admin analysis refresh recovery', () => {
     expect(screen.getByText('EXECUTION_FAILED')).toBeTruthy()
     expect(refreshAllAnalysis).not.toHaveBeenCalled()
   })
+
+  it('uses explicit mixed outcomes and never treats terminal partial runs as active failures', async () => {
+    vi.mocked(fetchSystemStatus).mockResolvedValue({
+      analysisStats: { totalAnalyses: 4, completionRate: 25, outcomeCounts: { COMPLETE: 1, PARTIAL: 1, EMPTY: 1, FAILED: 1 } },
+      recentAnalyses: [
+        { mode: 'EMPTY_MODE', timestamp: '2026-10-11T12:00:00Z', success: false, outcome: 'EMPTY' },
+        { mode: 'PARTIAL_MODE', timestamp: '2026-10-11T12:00:00Z', success: false, outcome: 'PARTIAL' },
+        { mode: 'FAILED_MODE', timestamp: '2026-10-11T12:00:00Z', success: false, outcome: 'FAILED' },
+        { mode: 'COMPLETE_MODE', timestamp: '2026-10-11T12:00:00Z', success: true, outcome: 'COMPLETE' },
+      ],
+      conditionRuns: [{ runId: 'partial-run', traceId: 'partial-trace', trigger: 'ADMIN_REFRESH', mode: 'PARTIAL_MODE', query: null,
+        status: 'PARTIAL', attempt: 1, startedAt: '2026-10-11T12:00:00Z', updatedAt: '2026-10-11T12:01:00Z', finishedAt: '2026-10-11T12:01:00Z',
+        errorCode: null, errorMessage: null, pickCount: 1, agentsUsed: 2, agentsSucceeded: 1 }],
+    })
+    render(<MemoryRouter initialEntries={['/admin?view=system']}><AdminPage /></MemoryRouter>)
+
+    const results = await screen.findByRole('region', { name: '분석 실행 결과' })
+    expect(within(results).getByText('전체 완료율 25%')).toBeTruthy()
+    for (const [mode, label] of [['EMPTY_MODE', '추천 없음'], ['PARTIAL_MODE', '부분 완료'], ['FAILED_MODE', '실패'], ['COMPLETE_MODE', '완료']]) {
+      const row = within(results).getByText(mode).closest('tr')!
+      expect(within(row).getByText(label)).toBeTruthy()
+    }
+    expect(screen.getByText('No active run')).toBeTruthy()
+  })
+})
+
+describe('admin data source readiness', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(fetchAllUsers).mockResolvedValue([])
+    vi.mocked(fetchPendingSubscriptions).mockResolvedValue([])
+  })
+  afterEach(cleanup)
+
+  it('explains disabled sources, KIS rights and the missing ECOS key without activation controls', async () => {
+    vi.mocked(fetchSystemStatus).mockResolvedValue({ dataSources: [
+      { id: 'KIS', name: 'KIS 추가 근거', enabled: false, credentialsConfigured: true, state: 'DISABLED', message: '유료 회원 앱의 KIS 이용 권한 확인이 필요합니다.' },
+      { id: 'DART', name: 'DART 공시 근거', enabled: false, credentialsConfigured: true, state: 'DISABLED', message: '신규 공시 근거는 비활성 상태입니다.' },
+      { id: 'ECOS', name: '한국은행 ECOS', enabled: false, credentialsConfigured: false, state: 'DISABLED', message: 'ECOS 인증키 발급과 서버 설정이 필요합니다.' },
+    ] })
+    render(<MemoryRouter initialEntries={['/admin?view=system']}><AdminPage /></MemoryRouter>)
+
+    const sources = await screen.findByRole('region', { name: '신규 데이터 소스 준비 상태' })
+    expect(within(sources).getByText('KIS 추가 근거')).toBeTruthy()
+    expect(within(sources).getByText(/KIS 이용 권한 확인/)).toBeTruthy()
+    expect(within(sources).getByText(/ECOS 인증키 발급/)).toBeTruthy()
+    expect(within(sources).getAllByText('비활성')).toHaveLength(3)
+    expect(within(sources).getByText('실제 연결 미검증')).toBeTruthy()
+    expect(within(sources).queryByRole('button')).toBeNull()
+    expect(refreshAllAnalysis).not.toHaveBeenCalled()
+  })
 })
 
 describe('admin member editor preserves concurrent subscription requests', () => {

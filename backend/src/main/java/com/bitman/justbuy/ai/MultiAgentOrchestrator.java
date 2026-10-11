@@ -47,6 +47,15 @@ public class MultiAgentOrchestrator {
     private final TrackRecordService trackRecordService;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private com.bitman.justbuy.service.KisExtendedEvidenceService kisExtendedEvidenceService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void configureSourceEvidence(com.bitman.justbuy.service.KisExtendedEvidenceService kisEvidence) {
+        this.kisExtendedEvidenceService = kisEvidence;
+    }
+
+    @org.springframework.beans.factory.annotation.Value("${bitman.analysis.agent.timeout-ms:100000}")
+    private long agentTimeoutMs = 100000;
 
     public MultiAgentOrchestrator(List<AiAgent> allAgents,
                                    MarketDataService marketDataService, ConsensusEngine consensusEngine,
@@ -90,7 +99,7 @@ public class MultiAgentOrchestrator {
         + "* 창작 뉴스 금지\n"
         + "* 확인되지 않은 수급 수치 금지 — 출처 없는 '외국인 XX억 순매수' 등 절대 금지\n"
         + "* 확인 불가 시: \"확인 불가 — ○○ 데이터 확인 필요\"로 명시\n"
-        + "* 웹검색이 불가능한 환경이라면, 학습 데이터 기반으로 구체적 종목명·가격대·근거를 제시. 회피 답변 금지\n\n"
+        + "* 입력 후보 또는 검증된 시세가 없으면 구체적 종목·가격을 만들지 말고 확인 불가를 명시\n\n"
         + "## 🎯 종목 선택 필수 규칙 (위반 시 분석 무효)\n"
         + "입력에 '상승률 상위 종목' 또는 '거래량 상위 종목' 또는 'KIS 실시간 시장 데이터'가 포함되어 있으면:\n"
         + "* **반드시 해당 목록에 등장한 종목에서만 추천 선택**할 것\n"
@@ -164,7 +173,7 @@ public class MultiAgentOrchestrator {
             + "종가/시초가 매매 후보와 근거를 제시해.\n"
             + "  - 오늘의 핵심 뉴스/재료: (어떤 뉴스·이벤트가 이 종목을 움직이는지)\n"
             + "  - 테마 관련성: (현재 시장 주도 테마와의 연관도)\n"
-            + "\"데이터 접근 불가\" 같은 회피 답변 금지.");
+            + "후보 또는 시세가 부족하면 데이터 확인 불가를 명시하고 후보 수를 줄여도 된다.");
 
         m.put("\uC2A4\uC719\uB9E4\uB9E4",
             "3일~3주 스윙 매매 관점에서 분석해줘.\n"
@@ -219,7 +228,7 @@ public class MultiAgentOrchestrator {
             + "  - 시나리오 분석: 강세/기준/약세 확률\n"
             + "  - 리스크 요인과 모니터링 포인트\n"
             + "를 종합적으로 분석해. 만약 종목명이 없는 일반 질문이면 시장 전체 시황과 유망 종목을 분석해도 됨.\n"
-            + "\"데이터에 접근할 수 없다\"는 회피 답변 금지. 학습 데이터 기반으로라도 구체적 가격대와 근거를 반드시 제시할 것.");
+            + "입력에 없는 시세·가격대는 미확인으로 표시하고 학습 데이터로 추정하지 말 것.");
 
         // ─── 4 NEW CONCEPT MODES ─────────────────────────────────────────
         m.put("\uC885\uBAA9\uBD84\uC11D", m.get("\uBD84\uC11D\uD574\uC918"));
@@ -235,8 +244,8 @@ public class MultiAgentOrchestrator {
             + "  - 기술적 타겟: XX,XXX원 (돌파 후 목표 — 피보나치/전고점 기준)\n"
             + "  - 손절: XX,XXX원 (돌파 실패·되돌림 기준)\n"
             + "  - 제외 조건: 장중 고점 이탈, 거래대금 급감, 단일 호가 급등, 재료 미확인\n"
-            + "입력된 KIS 실시간 데이터의 상승률·거래량·거래대금 상위 종목 안에서 우선 선별. 최소 3종목 제시.\n"
-            + "회피 답변 금지. 기술적 근거가 있는 한 반드시 구체적 종목을 제시할 것.");
+            + "입력된 KIS 실시간 데이터의 후보 중 검증 가능한 종목만 선별. 후보가 없으면 0종목도 허용.\n"
+            + "검증된 가격과 기술적 근거가 없으면 확인 불가를 명시할 것.");
 
         m.put("FLOW_LEADER",
             "주도주 조건검색 전용 분석. 반드시 아래 공식으로 후보를 선별해:\n"
@@ -265,7 +274,7 @@ public class MultiAgentOrchestrator {
             + "  - 대장주 판별: 같은 테마 안에서 거래대금·상승률·뉴스 집중도가 가장 강한지\n"
             + "  - 목표가: XX,XXX원 / 손절: XX,XXX원\n"
             + "  - ChatGPT DART 공시 분석 + Grok 실시간 뉴스 검색 결합\n"
-            + "재료가 있는 종목부터 우선. 재료 발생 시간 반드시 명시. 회피 금지.");
+            + "검증된 재료가 있는 후보만 우선. 재료 발생 시간을 모르면 미확인으로 명시.");
 
         m.put("REVERSAL_EDGE",
             "스윙 조건검색 전용 분석. 반드시 아래 공식으로 후보를 선별해:\n"
@@ -294,10 +303,13 @@ public class MultiAgentOrchestrator {
         }
 
         long totalStart = System.currentTimeMillis();
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(1, agentTimeoutMs));
         String today = DateTimeFormatter.ofPattern("yyyy-MM-dd")
             .withZone(ZoneId.of("Asia/Seoul")).format(Instant.now());
 
-        String modeInstruction = MODE_PROMPTS.getOrDefault(mode, "");
+        String modeInstruction = MODE_PROMPTS.getOrDefault(mode, "")
+            .replace("3~5개", "최대 5개").replace("3~5종목", "최대 5종목")
+            + "\n입력 후보와 검증된 가격이 있는 종목만 출력한다. 후보가 없거나 시세가 없으면 0종목도 허용한다.";
 
         // Fetch market data
         String marketDataText;
@@ -305,10 +317,13 @@ public class MultiAgentOrchestrator {
             marketDataText = marketDataService.fetchFormattedMarketData();
         } catch (Exception e) {
             log.warn("Failed to fetch market data: {}", e.getMessage());
-            marketDataText = "\n[\uC8FC\uC758: \uC2E4\uC2DC\uAC04 \uC2DC\uC7A5 \uB370\uC774\uD130 \uC218\uC9D1\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4. \uD559\uC2B5 \uB370\uC774\uD130 \uAE30\uBC18\uC73C\uB85C \uBD84\uC11D\uD569\uB2C8\uB2E4.]\n";
+            marketDataText = "\n[실시간 시장 데이터 수집 실패. 후보·시세 확인 불가로 표시하고 종목·가격을 추정하지 않는다.]\n";
         }
 
         // ★ 쿼리에 포함된 종목의 실시간 가격을 추가 수집하여 프롬프트에 포함
+        Map<String, String> candidateSources = new LinkedHashMap<>();
+        Map<String, String> candidateNames = new LinkedHashMap<>();
+        collectCandidateRows(marketDataText, "MARKET_DATA", candidateSources, candidateNames);
         Map<String, String> queryStockPrices = new HashMap<>();
         try {
             String queryStockPriceText = fetchQueryStockPrices(query, queryStockPrices);
@@ -321,6 +336,11 @@ public class MultiAgentOrchestrator {
 
         // ★ DART 재무/공시 데이터 추가 (쿼리에 포함된 종목)
         Set<String> queryCodes = new LinkedHashSet<>(queryStockPrices.keySet());
+        queryCodes.forEach(code -> {
+            candidateSources.putIfAbsent(code, "QUERY_PRICE");
+            StockParser.KNOWN_STOCKS.entrySet().stream().filter(entry -> code.equals(entry.getValue()))
+                .findFirst().ifPresent(entry -> candidateNames.putIfAbsent(code, entry.getKey()));
+        });
         String dartText = fetchDartDataForStocks(queryCodes);
         if (!dartText.isEmpty()) {
             marketDataText += dartText;
@@ -328,8 +348,34 @@ public class MultiAgentOrchestrator {
 
         // ★ KIS 실시간 시세 + 수급 데이터 추가
         String kisText = fetchKisData(queryCodes, mode);
+        collectCandidateRows(kisText, "KIS_MARKET_DATA", candidateSources, candidateNames);
         if (!kisText.isEmpty()) {
             marketDataText += kisText;
+        }
+
+        // Facts enrich the existing deterministic set; they never create candidates.
+        Set<String> evidenceCodes = new LinkedHashSet<>();
+        queryCodes.stream().sorted().forEach(evidenceCodes::add);
+        evidenceCodes.addAll(candidateSources.keySet());
+        List<String> boundedEvidenceCodes = evidenceCodes.stream().filter(code -> code.matches("[0-9]{6}")).limit(5).toList();
+        if (!boundedEvidenceCodes.isEmpty()) {
+            checkBudget(deadline);
+            try {
+                if (kisExtendedEvidenceService != null)
+                    marketDataText += Objects.requireNonNullElse(
+                        kisExtendedEvidenceService.fetchFormattedExtendedEvidence(boundedEvidenceCodes), "");
+            } catch (Exception ignored) {
+                marketDataText += "\n[KIS 확장 증거 확인 불가. 수급·분봉 수치를 추정하지 않는다.]\n";
+            }
+            checkBudget(deadline);
+            try {
+                if (dartApiService != null)
+                    marketDataText += Objects.requireNonNullElse(
+                        dartApiService.fetchFormattedEventEvidence(boundedEvidenceCodes), "");
+            } catch (Exception ignored) {
+                marketDataText += "\n[DART 이벤트 증거 확인 불가. 공시 사실을 추정하지 않는다.]\n";
+            }
+            checkBudget(deadline);
         }
 
         String baseSystemPrompt = SYSTEM_PROMPT + "\n\n\uC624\uB298 \uB0A0\uC9DC: " + today + " (KST). \uBC18\uB4DC\uC2DC \uC774 \uB0A0\uC9DC \uAE30\uC900\uC73C\uB85C \uCD5C\uC2E0 \uC815\uBCF4\uB97C \uBD84\uC11D\uD560 \uAC83.\n\n"
@@ -351,9 +397,12 @@ public class MultiAgentOrchestrator {
         log.info("[Orchestrator] Starting Round 1: {} agents available", availableAgents.size());
 
         List<AgentResult> round1Results = new ArrayList<>();
-        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+        checkBudget(deadline);
+        var executor = Executors.newVirtualThreadPerTaskExecutor();
+        try {
             List<Future<AgentResult>> futures = availableAgents.stream()
                 .map(agent -> executor.submit(() -> {
+                    checkBudget(deadline);
                     // ★ 에이전트별 전문화 프롬프트 + 구조화 출력 지시 적용
                     String agentSystemPrompt = baseSystemPrompt + AgentRoles.getFullSuffix(agent.name());
 
@@ -397,6 +446,7 @@ public class MultiAgentOrchestrator {
                                 && !"success".equals(result.status())) {
                             log.warn("[Orchestrator] grok failed (status={}, {}ms) → Gemini 폴백 시작",
                                 result.status(), result.durationMs());
+                            checkBudget(deadline);
                             AgentResult fallback = geminiFallback.analyze(agentSystemPrompt, userMessage);
                             log.info("[Orchestrator] gemini fallback finished ({}ms, status={})",
                                 fallback.durationMs(), fallback.status());
@@ -413,16 +463,24 @@ public class MultiAgentOrchestrator {
 
             for (Future<AgentResult> future : futures) {
                 try {
-                    round1Results.add(future.get(180, TimeUnit.SECONDS));
+                    checkBudget(deadline);
+                    round1Results.add(future.get(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS));
                 } catch (java.util.concurrent.TimeoutException e) {
                     future.cancel(true);
-                    log.error("[Orchestrator] Agent timeout (180s), cancelled");
+                    throw new CancellationException("Analysis execution deadline exceeded");
+                } catch (InterruptedException e) {
+                    future.cancel(true);
+                    Thread.currentThread().interrupt();
+                    throw new CancellationException("Analysis execution interrupted");
                 } catch (Exception e) {
                     future.cancel(true);
-                    log.error("[Orchestrator] Agent failed: {}", e.getMessage(), e);
+                    log.error("[Orchestrator] Agent execution failed ({})", e.getClass().getSimpleName());
                 }
             }
+        } finally {
+            executor.shutdownNow();
         }
+        checkBudget(deadline);
 
         round1Results.addAll(skippedResults);
 
@@ -430,317 +488,158 @@ public class MultiAgentOrchestrator {
             .filter(r -> "success".equals(r.status()) && r.content() != null && !r.content().isBlank())
             .toList();
 
-        // ★ 구조화 출력 파싱 + 합의 엔진
-        Map<String, StructuredAnalysis> structuredResults = new LinkedHashMap<>();
-        for (AgentResult r : successResults) {
-            StructuredAnalysis parsed = StructuredAnalysisParser.parse(r.content());
-            if (parsed != null) {
-                structuredResults.put(r.agent(), parsed);
-                MonitorController.recordParseResult(r.agent(), true);
-                log.info("[Orchestrator] {}: 구조화 출력 파싱 성공 ({}개 종목)", r.agent(), parsed.stocks().size());
-            } else {
-                MonitorController.recordParseResult(r.agent(), false);
-                log.info("[Orchestrator] {}: 구조화 출력 없음 → 기존 파서 폴백", r.agent());
+        // Parse once, then gate every public representation against tool candidates and verified quotes.
+        Map<String, StructuredAnalysis> parsedResults = new LinkedHashMap<>();
+        Map<String, List<StockPick>> agentPicks = new LinkedHashMap<>();
+        for (AgentResult result : successResults) {
+            StructuredAnalysis parsed = StructuredAnalysisParser.parse(result.content());
+            MonitorController.recordParseResult(result.agent(), parsed != null);
+            if (parsed != null) parsedResults.putIfAbsent(result.agent(), parsed);
+            List<StockPick> picks = parsed != null
+                ? parsed.stocks().stream().map(stock -> new StockPick(stock.name(), stock.code(),
+                    formatPrice(stock.currentPrice()), formatPrice(stock.targetPrice()), formatPrice(stock.stopLoss()),
+                    stock.action(), String.join("; ", stock.reasons()))).toList()
+                : (result.content().contains("```json:analysis") ? List.of() : StockParser.parseStockPicks(result.content()));
+            agentPicks.putIfAbsent(result.agent(), picks);
+        }
+        Map<String, StockPick> draftPicks = new LinkedHashMap<>();
+        agentPicks.entrySet().stream().sorted(Comparator.comparingInt(entry -> "chatgpt".equals(entry.getKey()) ? 0 : 1))
+            .forEach(entry -> entry.getValue().forEach(pick -> {
+                if (candidateSources.containsKey(pick.code())) draftPicks.putIfAbsent(pick.code(), pick);
+            }));
+        Map<String, String> quotes = new HashMap<>(queryStockPrices);
+        if (!draftPicks.isEmpty()) {
+            try {
+                quotes.putAll(marketDataService.fetchStockPrices(new ArrayList<>(draftPicks.keySet())));
+            } catch (Exception e) {
+                log.warn("[Orchestrator] Quote verification unavailable; unquoted candidates excluded");
             }
         }
-
+        quotes.entrySet().removeIf(entry -> parseKoreanPrice(entry.getValue()) <= 0);
+        String quoteCheckedAt = Instant.now().toString(); // retrieval validation time, not exchange trade time
+        Map<String, StockPick> publishedPicks = new LinkedHashMap<>();
+        for (StockPick pick : draftPicks.values()) {
+            checkBudget(deadline);
+            long current = parseKoreanPrice(quotes.get(pick.code()));
+            String candidateName = candidateNames.get(pick.code());
+            if (current <= 0 || candidateName == null || candidateName.isBlank() || publishedPicks.size() >= 10) continue;
+            FinancialScore financial;
+            try {
+                financial = financialScorer.score(pick.code());
+            } catch (Exception e) {
+                financial = FinancialScore.empty();
+            }
+            if (financial == null) financial = FinancialScore.empty();
+            publishedPicks.put(pick.code(), new StockPick(candidateName, pick.code(), String.format("%,d", current),
+                validatePrice(pick.targetPrice(), current, pick.name(), "목표가"),
+                validatePrice(pick.stopLoss(), current, pick.name(), "손절가"), pick.action(), pick.reason(),
+                financial.score(), financial.summary(), candidateSources.get(pick.code()), "NAVER_FINANCE", quoteCheckedAt));
+        }
+        Map<String, StructuredAnalysis> verifiedResults = new LinkedHashMap<>();
+        for (var entry : parsedResults.entrySet()) {
+            var verified = entry.getValue().stocks().stream().filter(stock -> publishedPicks.containsKey(stock.code()))
+                .map(stock -> {
+                    StockPick pick = publishedPicks.get(stock.code());
+                    long current = parseKoreanPrice(pick.currentPrice());
+                    return new StructuredAnalysisParser.StructuredStock(pick.name(), stock.code(), stock.action(), stock.confidence(),
+                        current, positivePrice(validatePrice(formatPrice(stock.targetPrice()), current, stock.name(), "목표가")),
+                        positivePrice(validatePrice(formatPrice(stock.stopLoss()), current, stock.name(), "손절가")),
+                        stock.scenario(), stock.reasons(), stock.financialScore(), stock.financialSummary());
+                }).toList();
+            if (!verified.isEmpty()) verifiedResults.put(entry.getKey(), new StructuredAnalysis(verified,
+                entry.getValue().marketSentiment(), entry.getValue().keyRisks()));
+        }
         ConsensusResult consensus = null;
-        String consensusText = "";
-        if (structuredResults.size() >= 2) {
+        if (!verifiedResults.isEmpty()) {
             try {
-                String marketGate = fetchMarketGate();
-                Map<String, Map<String, String>> kisSupplyData = collectKisSupplyData(structuredResults);
-                consensus = consensusEngine.calculateConsensus(structuredResults, kisSupplyData, marketGate);
-                consensusText = consensusEngine.formatForSynthesis(consensus);
-                log.info("[Orchestrator] 합의 엔진: 전체 합의도 {}%, {}개 종목, {}개 이견",
-                    consensus.agreementScore(), consensus.stocks().size(), consensus.divergences().size());
+                consensus = consensusEngine.calculateConsensus(verifiedResults, collectKisSupplyData(verifiedResults), fetchMarketGate());
             } catch (Exception e) {
-                log.warn("[Orchestrator] 합의 엔진 오류 (분석은 계속): {}", e.getMessage());
-                consensus = null;
-                consensusText = "";
+                log.warn("[Orchestrator] Verified consensus unavailable");
             }
         }
-
-        // ★ v2.8.3 토큰 절감 (2026-04-25):
-        //   Round 2 (Synthesis) 단계 제거 — ChatGPT/Grok 둘 다 analyze 만 수행.
-        //   v2.8.4 (2026-04-26): SynthesisEngine 클래스 완전 삭제.
-        //   finalContent 선택 우선순위: ChatGPT analyze > Grok analyze > 첫 성공 결과.
-        //   ChatGPT 의 analyze 출력은 구조화된 인용/마크다운 포맷이 잘 잡혀 있어 그대로 사용 가능.
-        AgentResult synthesisResult = null;
-        String finalContent;
-        if (successResults.isEmpty()) {
-            finalContent = "\uBAA8\uB4E0 AI \uC5D4\uC9C4\uC774 \uC751\uB2F5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. API \uD0A4\uB97C \uD655\uC778\uD558\uACE0 \uC7A0\uC2DC \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
-        } else {
-            AgentResult chatgptResult = successResults.stream()
-                .filter(r -> "chatgpt".equals(r.agent()))
-                .findFirst().orElse(null);
-            finalContent = (chatgptResult != null && chatgptResult.content() != null && !chatgptResult.content().isBlank())
-                ? chatgptResult.content()
-                : successResults.getFirst().content();
-            log.info("[Orchestrator] Synthesis 단계 생략 (v2.8.3 토큰 절감) — finalContent={}",
-                chatgptResult != null ? "chatgpt" : successResults.getFirst().agent());
+        List<AgentResult> publicResults = new ArrayList<>();
+        for (AgentResult result : round1Results) {
+            List<StockPick> verified = agentPicks.getOrDefault(result.agent(), List.of()).stream()
+                .filter(pick -> publishedPicks.containsKey(pick.code()))
+                .map(pick -> {
+                    StockPick published = publishedPicks.get(pick.code());
+                    long current = parseKoreanPrice(published.currentPrice());
+                    return new StockPick(published.name(), pick.code(), published.currentPrice(),
+                        validatePrice(pick.targetPrice(), current, pick.name(), "목표가"),
+                        validatePrice(pick.stopLoss(), current, pick.name(), "손절가"), pick.action(), pick.reason(),
+                        published.financialScore(), published.financialSummary(), published.candidateSource(),
+                        published.quoteSource(), published.quoteCheckedAt());
+                }).distinct().toList();
+            publicResults.add(new AgentResult(result.agent(), "success".equals(result.status()) ? renderPublishedPicks(verified) : "",
+                result.model(), result.inputTokens(), result.outputTokens(), result.status(), result.error(), result.durationMs(),
+                result.thoughtTokens(), result.totalTokens()));
         }
-
-        // Extract stock picks
-        List<StockPick> stockPicks = new ArrayList<>(StockParser.parseStockPicks(finalContent));
-        if (stockPicks.size() < 2) {
-            for (AgentResult r : successResults) {
-                List<StockPick> morePicks = StockParser.parseStockPicks(r.content());
-                for (StockPick p : morePicks) {
-                    if (stockPicks.stream().noneMatch(sp -> sp.code().equals(p.code()))) {
-                        stockPicks.add(p);
-                    }
-                }
-            }
-        }
-
-        // ── STEP: 실시간 가격 교정 + 본문 교정 + 검증 푸터 ──
-        Map<String, String> realPrices = new HashMap<>(queryStockPrices);
-        if (!stockPicks.isEmpty()) {
-            try {
-                List<String> codes = stockPicks.stream()
-                    .map(StockPick::code)
-                    .filter(c -> c.length() == 6)
-                    .toList();
-                Map<String, String> fetchedPrices = marketDataService.fetchStockPrices(codes);
-                realPrices.putAll(fetchedPrices);
-
-                // 1) stockPick 현재가 교정 + 목표가/손절가 이상치 검증
-                List<StockPick> corrected = new ArrayList<>();
-                for (StockPick pick : stockPicks) {
-                    String realPrice = realPrices.get(pick.code());
-                    if (realPrice != null) {
-                        long current = parseKoreanPrice(realPrice);
-                        String fixedTarget = validatePrice(pick.targetPrice(), current, pick.name(), "목표가");
-                        String fixedStop = validatePrice(pick.stopLoss(), current, pick.name(), "손절가");
-                        corrected.add(new StockPick(pick.name(), pick.code(), realPrice,
-                            fixedTarget, fixedStop, pick.action(), pick.reason()));
-                    } else {
-                        corrected.add(pick);
-                    }
-                }
-                stockPicks = corrected;
-
-                // 2) finalContent 본문에서 잘못된 가격 aggressive regex 교정
-                for (StockPick pick : stockPicks) {
-                    String realPrice = realPrices.get(pick.code());
-                    if (realPrice == null || pick.name() == null) continue;
-                    String nameEsc = java.util.regex.Pattern.quote(pick.name());
-                    String codeEsc = java.util.regex.Pattern.quote(pick.code());
-
-                    // 패턴1: "종목명 (코드) — 현재가 약 XX,XXX원"
-                    finalContent = finalContent.replaceAll(
-                        "(" + nameEsc + "\\s*[\\(（]?" + codeEsc + "[\\)）]?[^\\n]{0,50}?)"
-                            + "(\ud604\uc7ac\uac00\\s*(?::\\s*)?(?:\uc57d\\s*)?)[0-9,]+(?:~[0-9,]+)?\\s*\uc6d0",
-                        "$1$2" + realPrice + "\uc6d0");
-
-                    // 패턴2: "종목명(코드)...약 XX,XXX원" (현재가 없이 "약" 으로 시작하는 가격)
-                    finalContent = finalContent.replaceAll(
-                        "(" + nameEsc + "\\s*[\\(（]" + codeEsc + "[\\)）][^\\n]{0,20}?)"
-                            + "(\uc57d\\s*)[0-9,]+(?:~[0-9,]+)?\\s*\uc6d0",
-                        "$1$2" + realPrice + "\uc6d0");
-
-                    // 패턴3: "📌 종목명 (코드) — 현재가 약 XX원" (📌로 시작하는 라인)
-                    finalContent = finalContent.replaceAll(
-                        "(\uD83D\uDCCC\\s*" + nameEsc + "\\s*[\\(（]" + codeEsc + "[\\)）][^\\n]*?)"
-                            + "(\ud604\uc7ac\uac00\\s*(?::\\s*)?(?:\uc57d\\s*)?)[0-9,]+(?:~[0-9,]+)?(?:\\s*\uc6d0)?",
-                        "$1$2" + realPrice + "\uc6d0");
-
-                    // 패턴4: "현재 주가: 약 XX,XXX원" (종목명 이후 같은 라인)
-                    finalContent = finalContent.replaceAll(
-                        "(" + nameEsc + "[^\\n]{0,60}?)"
-                            + "(\ud604\uc7ac\\s*\uc8fc\uac00\\s*(?::\\s*)?(?:\uc57d\\s*)?)[0-9,]+(?:~[0-9,]+)?\\s*\uc6d0",
-                        "$1$2" + realPrice + "\uc6d0");
-
-                    // 패턴5: "현재가는 약 XX,XXX원" (종목명 이후 같은 라인)
-                    finalContent = finalContent.replaceAll(
-                        "(" + nameEsc + "[^\\n]{0,60}?)"
-                            + "(\ud604\uc7ac\uac00\ub294?\\s*(?:\uc57d\\s*)?)[0-9,]+(?:~[0-9,]+)?\\s*\uc6d0",
-                        "$1$2" + realPrice + "\uc6d0");
-                }
-
-                // 2-b) 본문 내 목표가/손절가 이상치 교정
-                for (StockPick pick : stockPicks) {
-                    String realPrice = realPrices.get(pick.code());
-                    if (realPrice == null || pick.name() == null) continue;
-                    long current = parseKoreanPrice(realPrice);
-                    if (current <= 0) continue;
-                    String nameEsc2 = java.util.regex.Pattern.quote(pick.name());
-
-                    // 기술적 타겟/목표가 패턴: "기술적 타겟: XX,XXX원" 또는 "목표가: XX,XXX원"
-                    String targetPattern = "(" + nameEsc2 + "[^\\n]{0,200}?)"
-                        + "(\uae30\uc220\uc801\\s*\ud0c0(?:\ucf13|\uac9f)\\s*(?::\\s*)?|"
-                        + "\ubaa9\ud45c(?:\uac00)?\\s*(?::\\s*)?)"
-                        + "(?:\uc57d\\s*)?([0-9,]+)(?:\\s*\uc6d0)?";
-                    java.util.regex.Matcher tm = java.util.regex.Pattern.compile(targetPattern).matcher(finalContent);
-                    StringBuffer tbuf = new StringBuffer();
-                    while (tm.find()) {
-                        long val = parseKoreanPrice(tm.group(3));
-                        double r = (double) val / current;
-                        if (val > 0 && (r < 0.5 || r > 2.0)) {
-                            long fixed = Math.round(current * 1.05);
-                            log.warn("[ContentFix] {} 본문 목표가 교정: {}→{}", pick.name(), val, fixed);
-                            tm.appendReplacement(tbuf, tm.group(1) + tm.group(2) + String.format("%,d", fixed) + "원");
-                        }
-                    }
-                    tm.appendTail(tbuf);
-                    finalContent = tbuf.toString();
-
-                    // 손절 패턴: "손절: XX,XXX원" 또는 "손절가: XX,XXX원"
-                    String stopPattern = "(" + nameEsc2 + "[^\\n]{0,200}?)"
-                        + "(\uc190\uc808(?:\uac00)?\\s*(?::\\s*)?)"
-                        + "(?:\uc57d\\s*)?([0-9,]+)(?:\\s*\uc6d0)?";
-                    java.util.regex.Matcher sm = java.util.regex.Pattern.compile(stopPattern).matcher(finalContent);
-                    StringBuffer sbuf = new StringBuffer();
-                    while (sm.find()) {
-                        long val = parseKoreanPrice(sm.group(3));
-                        double r = (double) val / current;
-                        if (val > 0 && (r > 1.0 || r < 0.5)) {
-                            long fixed = Math.round(current * 0.95);
-                            log.warn("[ContentFix] {} 본문 손절가 교정: {}→{}", pick.name(), val, fixed);
-                            sm.appendReplacement(sbuf, sm.group(1) + sm.group(2) + String.format("%,d", fixed) + "원");
-                        }
-                    }
-                    sm.appendTail(sbuf);
-                    finalContent = sbuf.toString();
-                }
-
-                // 3) 실시간 검증 현재가 푸터 추가
-                StringBuilder footer = new StringBuilder();
-                for (StockPick pick : stockPicks) {
-                    String realPrice = realPrices.get(pick.code());
-                    if (realPrice != null) {
-                        footer.append("  ").append(pick.name()).append("(").append(pick.code())
-                              .append("): ").append(realPrice).append("\uc6d0\n");
-                    }
-                }
-                if (!footer.isEmpty()) {
-                    finalContent += "\n\n---\n\uD83D\uDCE1 **\uc2e4\uc2dc\uac04 \uac80\uc99d \ud604\uc7ac\uac00** (\ub124\uc774\ubc84\uae08\uc735 \uae30\uc900)\n"
-                        + footer
-                        + "\u203b \uc704 \ud604\uc7ac\uac00\ub294 \ub124\uc774\ubc84\uae08\uc735 \uc2e4\uc2dc\uac04 \uc2dc\uc138\ub85c \uac80\uc99d\ub41c \uac00\uaca9\uc785\ub2c8\ub2e4.";
-                }
-            } catch (Exception e) {
-                log.warn("Price correction failed: {}", e.getMessage());
-            }
-        }
-
-        // ★ Phase 3b — 각 stockPick 에 financial score 를 첨부하고,
-        //    최종 confidence-style 스코어에 30% 가중치로 블렌딩.
-        //    AI 스코어(aiScore) 는 StructuredAnalysis 의 합의 스코어(consensus)가 있으면 사용,
-        //    없으면 action 기반 기본치 사용.
-        if (!stockPicks.isEmpty()) {
-            // consensus 종목별 스코어 맵
-            Map<String, Integer> consensusScoreMap = new HashMap<>();
-            if (consensus != null && consensus.stocks() != null) {
-                for (var cs : consensus.stocks()) {
-                    consensusScoreMap.put(cs.code(), cs.consensusScore());
-                }
-            }
-
-            List<StockPick> blended = new ArrayList<>();
-            for (StockPick pick : stockPicks) {
-                FinancialScore fs;
-                try {
-                    fs = financialScorer.score(pick.code());
-                } catch (Exception e) {
-                    log.debug("[Orchestrator] FinancialScorer 실패 ({}): {}", pick.code(), e.getMessage());
-                    fs = FinancialScore.empty();
-                }
-
-                // AI 스코어: 합의 스코어 우선 → 없으면 action 기반 fallback
-                int aiScore = consensusScoreMap.getOrDefault(pick.code(),
-                    estimateAiScoreFromAction(pick.action()));
-                int finalScore = (int) Math.round(0.7 * aiScore + 0.3 * fs.score());
-
-                // financialSummary 는 기존 pick 의 reason 과 별개로 저장.
-                // finalScore 정보는 reason 에 soft-append (UI 하위호환)
-                String reason = pick.reason();
-                String finNote = String.format("[재무:%d/100, 최종:%d]", fs.score(), finalScore);
-                String newReason = (reason == null || reason.isBlank())
-                    ? finNote
-                    : reason + " " + finNote;
-
-                blended.add(new StockPick(
-                    pick.name(), pick.code(), pick.currentPrice(),
-                    pick.targetPrice(), pick.stopLoss(),
-                    pick.action(), newReason,
-                    fs.score(), fs.summary()
-                ));
-            }
-            stockPicks = blended;
-        }
-
         long totalDuration = System.currentTimeMillis() - totalStart;
-        log.info("[Orchestrator] Analysis complete: {}ms, {}/{} agents succeeded",
-            totalDuration, successResults.size(), availableAgents.size());
-
-        var response = new AnalysisResponse(
-            mode, query, round1Results, synthesisResult, finalContent,
-            stockPicks.stream().limit(10).toList(),
-            consensus,
-            Instant.now().toString(), true,
+        checkBudget(deadline);
+        List<StockPick> finalPicks = List.copyOf(publishedPicks.values());
+        // The caller persists and tracks only its final publication after all periodic filters.
+        return new AnalysisResponse(mode, query, publicResults, null, renderPublishedPicks(finalPicks), finalPicks, consensus,
+            Instant.now().toString(), !finalPicks.isEmpty(),
             new AnalysisResponse.Metadata(totalDuration, availableAgents.size(), successResults.size()));
-
-        // 성과 추적 기록 (실패해도 분석 결과에 영향 없음)
-        try {
-            trackRecordService.recordAnalysis(response);
-        } catch (Exception e) {
-            log.warn("[Orchestrator] Track record failed: {}", e.getMessage());
-        }
-
-        return response;
     }
 
-    /** action 문자열 기반 AI 스코어 추정 (consensus 없을 때 폴백) */
-    private static int estimateAiScoreFromAction(String action) {
-        if (action == null) return 50;
-        return switch (action) {
-            case "매수" -> 70;
-            case "주목" -> 55;
-            case "관망" -> 45;
-            case "매도" -> 25;
-            default -> 50;
-        };
+    private static void collectCandidateRows(String text, String source, Map<String, String> out, Map<String, String> names) {
+        if (text == null) return;
+        var matcher = java.util.regex.Pattern.compile("[（(]([0-9]{6})[）)]").matcher(text);
+        while (matcher.find()) {
+            int lineStart = text.lastIndexOf('\n', matcher.start()) + 1;
+            String name = text.substring(lineStart, matcher.start()).trim();
+            int colon = name.lastIndexOf(':');
+            if (colon >= 0) name = name.substring(colon + 1).trim();
+            name = name.replaceFirst("^(?:[★📌•*\\-]\\s*|[0-9]+[.)]\\s*)+", "").trim();
+            if (name.isBlank()) continue;
+            out.putIfAbsent(matcher.group(1), source);
+            names.putIfAbsent(matcher.group(1), name);
+        }
+    }
+
+    private static void checkBudget(long deadline) {
+        if (Thread.currentThread().isInterrupted() || System.nanoTime() >= deadline)
+            throw new CancellationException("Analysis execution interrupted or deadline exceeded");
+    }
+
+    private static String formatPrice(Long price) {
+        return price == null || price <= 0 ? "미확인" : String.format("%,d", price);
+    }
+
+    private static Long positivePrice(String price) {
+        long amount = parseKoreanPrice(price);
+        return amount > 0 ? amount : null;
+    }
+
+    private static String renderPublishedPicks(List<StockPick> picks) {
+        if (picks.isEmpty()) return "후보 소속과 현재가 검증을 통과한 종목이 없습니다. 데이터를 확인한 뒤 다시 분석해 주세요.";
+        StringBuilder content = new StringBuilder("검증된 후보의 조건 분석\n");
+        for (StockPick pick : picks) {
+            content.append("\n📌 ").append(pick.name()).append(" (").append(pick.code()).append(") — 현재가 ")
+                .append(pick.currentPrice()).append("원\n")
+                .append("판단: ").append(pick.action()).append("\n근거: ").append(pick.reason())
+                .append("\n목표가: ").append(pick.targetPrice()).append(" / 손절가: ").append(pick.stopLoss())
+                .append("\n후보 출처: ").append(pick.candidateSource()).append(" / 시세 출처: ").append(pick.quoteSource())
+                .append(" / 시세 확인 시각: ").append(pick.quoteCheckedAt()).append("\n");
+        }
+        return content.toString();
     }
 
     /** 한국식 가격 문자열 → long 변환 ("191,100" → 191100, "약 36,000원" → 36000) */
     private static long parseKoreanPrice(String priceStr) {
         if (priceStr == null || priceStr.isBlank()) return 0;
-        String digits = priceStr.replaceAll("[^0-9]", "");
-        if (digits.isEmpty()) return 0;
-        try { return Long.parseLong(digits); } catch (NumberFormatException e) { return 0; }
+        String clean = priceStr.trim().replaceFirst("원$", "").trim();
+        if (!clean.matches("(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)")) return 0;
+        try { return Long.parseLong(clean.replace(",", "")); } catch (NumberFormatException e) { return 0; }
     }
 
-    /**
-     * 목표가/손절가가 현재가 대비 비정상적이면 자동 보정.
-     * - 매수 목표가가 현재가의 50% 미만 또는 200% 초과 → "현재가 ±N%" 기반 보정
-     * - 손절가가 현재가보다 높거나 50% 미만 → 보정
-     */
     private String validatePrice(String priceStr, long currentPrice, String stockName, String label) {
-        if (priceStr == null || currentPrice <= 0) return priceStr;
         long price = parseKoreanPrice(priceStr);
-        if (price <= 0) return priceStr;
-
+        if (price <= 0 || currentPrice <= 0) return "미확인";
         double ratio = (double) price / currentPrice;
-
-        if (label.contains("목표")) {
-            // 목표가: 현재가의 50%~200% 범위 밖이면 비정상
-            if (ratio < 0.5 || ratio > 2.0) {
-                long fixed = Math.round(currentPrice * 1.05); // 기본 +5%
-                log.warn("[PriceValidation] {} {} 이상치 보정: {}→{} (현재가: {})",
-                    stockName, label, price, fixed, currentPrice);
-                return String.format("%,d", fixed);
-            }
-        } else if (label.contains("손절")) {
-            // 손절가: 현재가보다 높거나 50% 미만이면 비정상
-            if (ratio > 1.0 || ratio < 0.5) {
-                long fixed = Math.round(currentPrice * 0.95); // 기본 -5%
-                log.warn("[PriceValidation] {} {} 이상치 보정: {}→{} (현재가: {})",
-                    stockName, label, price, fixed, currentPrice);
-                return String.format("%,d", fixed);
-            }
-        }
-        return priceStr;
+        if (ratio < 0.5 || ratio > (label.contains("목표") ? 2.0 : 1.0)) return "미확인";
+        return String.format("%,d", price);
     }
 
     /**
@@ -767,7 +666,8 @@ public class MultiAgentOrchestrator {
 
         // 실시간 가격 조회
         Map<String, String> prices = marketDataService.fetchStockPrices(new ArrayList<>(foundCodes));
-        outPrices.putAll(prices);
+        prices.entrySet().stream().filter(entry -> foundCodes.contains(entry.getKey()) && parseKoreanPrice(entry.getValue()) > 0)
+            .forEach(entry -> outPrices.put(entry.getKey(), entry.getValue()));
 
         if (prices.isEmpty()) return "";
 

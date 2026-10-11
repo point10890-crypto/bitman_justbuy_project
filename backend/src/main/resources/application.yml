@@ -52,15 +52,25 @@ bitman:
     deepseek-model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
   dart:
     api-key: ${DART_API_KEY:}
+    event-evidence:
+      enabled: ${BITMAN_DART_EVENT_EVIDENCE_ENABLED:false}
   kis:
     app-key: ${BITMAN_KIS_APP_KEY:}
     app-secret: ${BITMAN_KIS_APP_SECRET:}
+    extended-evidence:
+      enabled: ${BITMAN_KIS_EXTENDED_EVIDENCE_ENABLED:false}
+  ecos:
+    enabled: ${BITMAN_ECOS_ENABLED:false}
+    api-key: ${ECOS_API_KEY:}
+  performance:
+    measured-since: ${BITMAN_PERFORMANCE_MEASURED_SINCE:2026-10-12}
   cors:
     allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://localhost:5173,https://bitman-justbuy.pages.dev,https://production.bitman-justbuy.pages.dev,https://api.bit-man.net}
   storage:
     data-dir: ${STORAGE_DIR:./data}
   scheduler:
     enabled: ${SCHEDULER_ENABLED:true}
+    startup-refresh-enabled: ${BITMAN_STARTUP_REFRESH_ENABLED:true}
   short-term:
     realtime:
       enabled: ${BITMAN_SHORT_TERM_REALTIME_ENABLED:true}

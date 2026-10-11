@@ -56,7 +56,8 @@ public class LeaderConditionEngine {
 
     private final KisApiService kisApiService;
     private final DeepSeekConditionVerifier verifier;
-    private final Map<String, String> firstSeenByCode = new ConcurrentHashMap<>();
+    private record Capture(String capturedAt, String price) {}
+    private final Map<String, Capture> firstSeenByCode = new ConcurrentHashMap<>();
     private volatile LocalDate firstSeenDate = LocalDate.MIN;
     private volatile LeaderSnapshot latest = LeaderSnapshot.empty();
 
@@ -138,6 +139,7 @@ public class LeaderConditionEngine {
             if (candidate.code() == null || !candidate.code().matches("\\d{6}")) continue;
             if (candidate.name() == null || candidate.name().isBlank()) continue;
             if (StockUniverseFilters.isExchangeTradedProductName(candidate.name())) continue;
+            if (parsePrice(candidate.currentPrice()) <= 0) continue;
 
             double changeRate = parseDouble(candidate.changeRate());
             ConditionSignalScoring.ScoreBreakdown breakdown = ConditionSignalScoring.leader(
@@ -163,8 +165,9 @@ public class LeaderConditionEngine {
         for (Scored s : verifyPool) {
             EvidenceVerdict verdict = verdicts.get(s.candidate.code());
             if (verdict != null && verdict.rejected()) continue;
-            String capturedAt = firstSeenByCode.computeIfAbsent(s.candidate.code(), ignored -> nowKst(now));
-            signals.add(toSignal(s, verdict, signalRank++, capturedAt));
+            Capture capture = firstSeenByCode.computeIfAbsent(s.candidate.code(),
+                ignored -> new Capture(nowKst(now), formatPrice(s.candidate.currentPrice())));
+            signals.add(toSignal(s, verdict, signalRank++, capture));
             if (signals.size() >= SIGNAL_LIMIT) break;
         }
         return signals;
@@ -199,16 +202,15 @@ public class LeaderConditionEngine {
         }
     }
 
-    private ConditionSignalDto toSignal(Scored s, EvidenceVerdict verdict, int rank, String capturedAt) {
+    private ConditionSignalDto toSignal(Scored s, EvidenceVerdict verdict, int rank, Capture capture) {
         KisApiService.ConditionCandidate candidate = s.candidate;
-        long current = parseLong(candidate.currentPrice());
         String price = formatPrice(candidate.currentPrice());
-        String target = current > 0 ? formatLong(roundUpToTick(Math.round(current * 1.06))) : "-";
-        String stop = current > 0 ? formatLong(roundDownToTick(Math.round(current * 0.96))) : "-";
-        String maxReturnPct = calculateReturn(current, target);
+        String target = "-";
+        String stop = "-";
+        String maxReturnPct = calculateReturn(parsePrice(capture.price()), price);
 
         int ruleScore = s.breakdown.ruleScore();
-        int aiScore = verdict != null ? verdict.aiScore() : s.breakdown.aiScore();
+        int aiScore = verdict != null ? verdict.aiScore() : 0;
         int finalScore = verdict != null
             ? clamp((int) Math.round(0.6 * ruleScore + 0.4 * aiScore), 0, 99)
             : s.breakdown.finalScore();
@@ -252,7 +254,7 @@ public class LeaderConditionEngine {
             rank,
             candidate.name(),
             candidate.code(),
-            price,
+            capture.price(),
             price,
             target,
             stop,
@@ -265,7 +267,7 @@ public class LeaderConditionEngine {
             List.copyOf(evidence),
             List.copyOf(riskFlags),
             invalidation,
-            capturedAt
+            capture.capturedAt()
         );
     }
 
@@ -313,7 +315,7 @@ public class LeaderConditionEngine {
     }
 
     private static String calculateReturn(long current, String target) {
-        long targetPrice = parseLong(target);
+        long targetPrice = parsePrice(target);
         if (current <= 0 || targetPrice <= 0) return "-";
         return formatPercent(((double) targetPrice - current) / current * 100.0);
     }
@@ -329,20 +331,18 @@ public class LeaderConditionEngine {
         }
     }
 
-    private static long parseLong(String value) {
-        if (value == null) return 0;
-        String normalized = value.replaceAll("[^0-9]", "");
-        if (normalized.isBlank()) return 0;
+    private static long parsePrice(String value) {
+        if (value == null || !value.trim().matches("(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)\\s*원?")) return 0;
         try {
-            return Long.parseLong(normalized);
+            return Math.max(0, Long.parseLong(value.trim().replace(",", "").replace("원", "").trim()));
         } catch (NumberFormatException ignored) {
             return 0;
         }
     }
 
     private static String formatPrice(String value) {
-        long price = parseLong(value);
-        if (price <= 0) return value == null || value.isBlank() ? "-" : value;
+        long price = parsePrice(value);
+        if (price <= 0) return "-";
         return formatLong(price);
     }
 

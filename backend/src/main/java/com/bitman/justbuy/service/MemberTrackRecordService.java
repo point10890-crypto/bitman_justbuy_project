@@ -22,8 +22,7 @@ import java.util.Map;
  * 시장 대비 초과수익을 낸다. 새로 수집하는 데이터는 없다 — 화면이 없었을 뿐이다.
  *
  * <p>수익률 기준은 모드마다 다르게 채워진다. 종가매매는 익일 종가({@code closeReturn}),
- * 나머지 모드는 가격 갱신 잡이 채우는 {@code return1d} 다. 둘 다 "추천일 → 다음 세션"
- * 이라 같은 축으로 비교할 수 있으므로 closeReturn 을 우선 쓰고 없으면 return1d 를 쓴다.
+ * 나머지 모드는 가격 갱신 잡이 과거 일봉으로 채우는 {@code return1d} 다.
  */
 @Service
 @Transactional(readOnly = true)
@@ -38,7 +37,7 @@ public class MemberTrackRecordService {
      *
      * <p>단타는 장중 포착가 대비 <b>같은 날</b> 종가({@code verifyTodayShortTermClose} 가 당일을 검증),
      * 종가매매는 추천일 종가 대비 <b>다음 세션</b> 종가, 나머지 프리컴퓨트 모드는 가격 갱신 잡이
-     * 캘린더 1일 이후 현재가로 채우는 값이다.
+     * 1거래일 이후 해당 날짜의 종가로 채우는 값이다.
      *
      * <p>{@code benchmarkComparable} 은 시장 대비 초과수익을 계산해도 되는지다. 벤치마크는
      * "추천일 종가 → 다음 세션 종가" 창이라, 장중 진입(단타)이나 창이 불분명한 모드에 빼면
@@ -49,9 +48,9 @@ public class MemberTrackRecordService {
 
     private static final List<ModeSpec> MODE_SPECS = List.of(
         new ModeSpec("BREAKOUT", "단타", "장중 포착가 → 당일 종가", "추적 기간 중 도달", false),
-        new ModeSpec("REVERSAL_EDGE", "스윙", "추천가 → 1일 후 시세", "추적 기간(최대 5일) 중 도달", false),
-        new ModeSpec("FLOW_LEADER", "주도주", "추천가 → 1일 후 시세", "추적 기간(최대 5일) 중 도달", false),
-        new ModeSpec("CATALYST_BURST", "테마주", "추천가 → 1일 후 시세", "추적 기간(최대 5일) 중 도달", false),
+        new ModeSpec("REVERSAL_EDGE", "스윙", "추천가 → 1거래일 후 종가", "추적 기간(최대 5거래일) 중 도달", false),
+        new ModeSpec("FLOW_LEADER", "주도주", "추천가 → 1거래일 후 종가", "추적 기간(최대 5거래일) 중 도달", false),
+        new ModeSpec("CATALYST_BURST", "테마주", "추천가 → 1거래일 후 종가", "추적 기간(최대 5거래일) 중 도달", false),
         new ModeSpec("JONGGA_V2", "종가매매", "추천일 종가 → 익일 종가", "익일 고가/저가 기준", true)
     );
 
@@ -105,6 +104,7 @@ public class MemberTrackRecordService {
         // 모드마다 수익률 기준이 다르므로 한 문장으로 뭉뚱그리지 않는다.
         String base = "모드마다 성과 기준이 다릅니다. 각 카드의 기준 표기를 함께 확인하세요."
             + " 시장 대비 초과수익은 진입·청산 구간이 벤치마크와 일치하는 종가매매에만 표시됩니다."
+            + " 기간별 종가 추적 기준 변경 전 기록은 당시 저장된 계산값이며, 새로운 측정 기준으로 검증된 값이 아닙니다."
             + " 과거 성과는 미래 수익을 보장하지 않습니다.";
         return benchmarkMissing ? base + " 현재 시장 지수 조회에 실패해 초과수익은 표시하지 않습니다." : base;
     }
@@ -121,7 +121,7 @@ public class MemberTrackRecordService {
         List<Sample> samples = new ArrayList<>();
         for (AnalysisTrackRecord record : records) {
             Double ret = primaryReturn(record);
-            if (ret == null) continue;
+            if (ret == null || !Double.isFinite(ret)) continue;
             // 하루에 나올 수 없는 수익률은 액면분할 등으로 기준이 어긋난 값이다. 성과로 세지 않는다.
             if (Math.abs(ret) > DAILY_PRICE_LIMIT_PCT) continue;
 
@@ -133,12 +133,24 @@ public class MemberTrackRecordService {
                 if (market != null) excess = round2(ret - market);
             }
             Double maxRet = record.getMaxReturn1d();
-            if (maxRet != null && Math.abs(maxRet) > DAILY_PRICE_LIMIT_PCT) maxRet = null;
+            if (maxRet != null && (!Double.isFinite(maxRet) || Math.abs(maxRet) > DAILY_PRICE_LIMIT_PCT)) maxRet = null;
 
             samples.add(new Sample(ret, excess, record.isHitTarget(), record.isHitStop(),
-                record.getTargetPrice() != null, record.getStopLoss() != null, maxRet));
+                validTarget(record), validStop(record), maxRet));
         }
         return samples;
+    }
+
+    private static boolean validTarget(AnalysisTrackRecord record) {
+        Long entry = record.getPriceAtAnalysis();
+        Long target = record.getTargetPrice();
+        return entry != null && entry > 0 && target != null && target > entry;
+    }
+
+    private static boolean validStop(AnalysisTrackRecord record) {
+        Long entry = record.getPriceAtAnalysis();
+        Long stop = record.getStopLoss();
+        return entry != null && entry > 0 && stop != null && stop > 0 && stop < entry;
     }
 
     /** 종가매매는 closeReturn, 나머지 모드는 return1d 로 채워진다. */

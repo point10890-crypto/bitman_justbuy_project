@@ -4,6 +4,8 @@ import com.bitman.justbuy.ai.agent.DeepSeekAgent;
 import com.bitman.justbuy.dto.AgentResult;
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.StockPick;
+import com.bitman.justbuy.dto.condition.EvidencePacket;
+import com.bitman.justbuy.dto.condition.EvidenceVerdict;
 import com.bitman.justbuy.service.KisApiService.ConditionCandidate;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
@@ -48,7 +50,8 @@ public class KeywordConditionAnalysisService {
 
     public AnalysisResponse analyze(String query, String requestedMode) {
         long start = System.currentTimeMillis();
-        List<ConditionCandidate> candidates = kisApiService.fetchDoubleNetBuyCandidates(5, 3);
+        List<ConditionCandidate> candidates = verifiedCandidates(kisApiService.fetchDoubleNetBuyCandidates(5, 3));
+        String checkedAt = Instant.now().toString();
 
         String detectorContent = buildDetectorContent(query, candidates);
         AgentResult detector = new AgentResult(
@@ -62,10 +65,12 @@ public class KeywordConditionAnalysisService {
             System.currentTimeMillis() - start
         );
 
-        AgentResult analyst = runDeepSeekAnalyst(query, candidates);
+        AgentResult analyst = candidates.isEmpty()
+            ? AgentResult.skipped("deepseek", "No verified KIS candidates")
+            : runDeepSeekAnalyst(query, candidates, checkedAt);
         List<AgentResult> round1 = List.of(detector, analyst);
         List<StockPick> picks = candidates.stream()
-            .map(this::toStockPick)
+            .map(candidate -> toStockPick(candidate, checkedAt))
             .toList();
 
         String finalContent = buildTextReport(query, candidates, analyst);
@@ -80,12 +85,25 @@ public class KeywordConditionAnalysisService {
             picks,
             null,
             Instant.now().toString(),
-            true,
+            !picks.isEmpty(),
             new AnalysisResponse.Metadata(System.currentTimeMillis() - start, round1.size(), succeeded)
         );
     }
 
-    private AgentResult runDeepSeekAnalyst(String query, List<ConditionCandidate> candidates) {
+    private List<ConditionCandidate> verifiedCandidates(List<ConditionCandidate> input) {
+        Map<String, ConditionCandidate> verified = new LinkedHashMap<>();
+        if (input != null) for (ConditionCandidate candidate : input) {
+            if (candidate == null || candidate.code() == null || !candidate.code().matches("[0-9]{6}")
+                || candidate.name() == null || candidate.name().isBlank()
+                || candidate.source() == null || candidate.source().isBlank()
+                || positivePrice(candidate.currentPrice()) == null) continue;
+            verified.putIfAbsent(candidate.code(), candidate);
+            if (verified.size() == 5) break;
+        }
+        return List.copyOf(verified.values());
+    }
+
+    private AgentResult runDeepSeekAnalyst(String query, List<ConditionCandidate> candidates, String checkedAt) {
         if (!deepSeekAgent.isAvailable()) {
             return AgentResult.skipped("deepseek", "API key not configured");
         }
@@ -94,15 +112,43 @@ public class KeywordConditionAnalysisService {
             You are BitMan's Korean stock condition-search analyst.
             Use only the provided KIS OpenAPI candidate data.
             Do not invent stock names, stock codes, foreign/institution values, targets, or news.
-            Never output a markdown table. Never use pipe-delimited rows.
-            Write concise Korean text only, grouped by stock name.
-            For every stock, show the company name before the code, like "셀트리온(068270)".
-            Focus on practical reading: why it matched, flow strength, and risk.
+            Return one JSON object only. Do not use markdown or prose outside JSON.
+            Use only candidate stockCode values. aiScore must be an integer from 0 to 99.
+            verdict must be VALID, WATCH, OVERHEATED or REJECT. Do not give buy instructions.
+            Every signal needs nonempty Korean summary, evidence, riskFlags and invalidation.
+            Schema: {"signals":[{"stockCode":"000000","aiScore":82,"verdict":"WATCH","summary":"...","evidence":["..."],"riskFlags":["..."],"invalidation":"...","displayStatus":"관찰"}]}
             """;
         String user = "사용자 검색어: " + query + "\n"
             + "KST 기준일: " + DateTimeFormatter.ISO_LOCAL_DATE.format(Instant.now().atZone(KST)) + "\n"
             + "KIS 후보 데이터:\n" + toJson(candidatePayload(candidates));
-        return deepSeekAgent.analyze(system, user);
+        AgentResult result = deepSeekAgent.analyze(system, user);
+        if (!"success".equals(result.status())) return safeAnalystResult(result, "", result.status(), result.error());
+        List<EvidencePacket> packets = candidates.stream().map(candidate -> new EvidencePacket(
+            "KEYWORD", MODE_DUAL_NET_BUY, checkedAt, candidate.code(), candidate.name(),
+            candidate.currentPrice(), candidate.changeRate(), 0, List.of(candidate.reason()),
+            Map.of("source", candidate.source(), "foreignNet", candidate.foreignNet(),
+                "institutionNet", candidate.institutionNet(), "totalSmartNet", candidate.totalSmartNet())
+        )).toList();
+        Map<String, EvidenceVerdict> verdicts = new DeepSeekConditionVerifier(deepSeekAgent, mapper)
+            .parse(result.content(), packets);
+        if (verdicts.isEmpty()) return safeAnalystResult(result, "", "error", "Invalid candidate evidence response");
+        StringBuilder safeContent = new StringBuilder();
+        for (ConditionCandidate candidate : candidates) {
+            EvidenceVerdict verdict = verdicts.get(candidate.code());
+            if (verdict == null) continue;
+            safeContent.append(displayName(candidate)).append("\n")
+                .append("판정: ").append(verdict.verdict()).append("\n")
+                .append(verdict.summary()).append("\n")
+                .append("근거: ").append(String.join(", ", verdict.evidence())).append("\n")
+                .append("리스크: ").append(String.join(", ", verdict.riskFlags())).append("\n")
+                .append("무효화: ").append(verdict.invalidation()).append("\n\n");
+        }
+        return safeAnalystResult(result, safeContent.toString().trim(), "success", null);
+    }
+
+    private AgentResult safeAnalystResult(AgentResult result, String content, String status, String error) {
+        return new AgentResult(result.agent(), content, result.model(), result.inputTokens(), result.outputTokens(),
+            status, error, result.durationMs(), result.thoughtTokens(), result.totalTokens());
     }
 
     private List<Map<String, Object>> candidatePayload(List<ConditionCandidate> candidates) {
@@ -124,7 +170,7 @@ public class KeywordConditionAnalysisService {
         return payload;
     }
 
-    private StockPick toStockPick(ConditionCandidate candidate) {
+    private StockPick toStockPick(ConditionCandidate candidate, String checkedAt) {
         return new StockPick(
             candidate.name(),
             candidate.code(),
@@ -132,7 +178,12 @@ public class KeywordConditionAnalysisService {
             "",
             "",
             "주목",
-            candidate.reason()
+            candidate.reason(),
+            0,
+            "",
+            "KIS_DOUBLE_NET_BUY",
+            candidate.source(),
+            checkedAt
         );
     }
 
@@ -161,7 +212,7 @@ public class KeywordConditionAnalysisService {
                     .append("판단: ").append(c.reason()).append("\n\n");
             }
         }
-        String analystText = stripMarkdownTables(analyst != null ? analyst.content() : "");
+        String analystText = analyst != null && "success".equals(analyst.status()) ? analyst.content() : "";
         if (analystText != null && !analystText.isBlank()) {
             sb.append("DeepSeek 애널리스트 코멘트\n")
                 .append(analystText.trim()).append("\n\n");
@@ -181,14 +232,19 @@ public class KeywordConditionAnalysisService {
     }
 
     private String formatPriceText(String value) {
-        if (value == null || value.isBlank()) return "-";
-        String digits = value.replaceAll("[^0-9]", "");
-        if (digits.isBlank()) return value.trim();
+        Long price = positivePrice(value);
+        return price == null ? "미확인" : String.format(Locale.KOREA, "%,d원", price);
+    }
+
+    private Long positivePrice(String value) {
+        if (value == null) return null;
+        String numeric = value.trim().replaceFirst("원$", "").trim();
+        if (!numeric.matches("(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)")) return null;
         try {
-            long price = Long.parseLong(digits);
-            return String.format(Locale.KOREA, "%,d원", price);
+            long price = Long.parseLong(numeric.replace(",", ""));
+            return price > 0 ? price : null;
         } catch (NumberFormatException e) {
-            return value.trim();
+            return null;
         }
     }
 
@@ -198,6 +254,7 @@ public class KeywordConditionAnalysisService {
         if (cleaned.isBlank()) return "-";
         try {
             double rate = Double.parseDouble(cleaned);
+            if (!Double.isFinite(rate)) return "미확인";
             return (rate > 0 ? "+" : "") + cleaned + "%";
         } catch (NumberFormatException e) {
             return value.trim();
@@ -206,18 +263,6 @@ public class KeywordConditionAnalysisService {
 
     private String valueOrDash(String value) {
         return value == null || value.isBlank() ? "-" : value;
-    }
-
-    private String stripMarkdownTables(String content) {
-        if (content == null || content.isBlank()) return "";
-        StringBuilder cleaned = new StringBuilder();
-        for (String line : content.split("\\R")) {
-            String trimmed = line.trim();
-            if (trimmed.startsWith("|") && trimmed.endsWith("|")) continue;
-            if (trimmed.matches("^[|:\\-\\s]+$")) continue;
-            cleaned.append(line).append("\n");
-        }
-        return cleaned.toString().trim();
     }
 
     private String normalize(String value) {

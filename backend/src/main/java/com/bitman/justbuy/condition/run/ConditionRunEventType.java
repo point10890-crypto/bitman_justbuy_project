@@ -11,6 +11,7 @@ public enum ConditionRunEventType {
     SAVED,
     NOTIFIED,
     NOTIFICATION_SKIPPED,
+    NOTIFICATION_FAILED,
     COMPLETED,
     FAILED
 }

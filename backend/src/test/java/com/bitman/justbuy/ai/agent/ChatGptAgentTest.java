@@ -105,7 +105,8 @@ class ChatGptAgentTest {
             .thenThrow(new RuntimeException("connection refused"));
         AgentResult result = agent.analyze("system", "user");
         assertThat(result.status()).isEqualTo("error");
-        assertThat(result.error()).contains("connection refused");
+        assertThat(result.error()).isEqualTo("Provider request failed");
+        assertThat(result.error()).doesNotContain("connection refused", "https://", "Authorization");
     }
 
     // ── synthesize ───────────────────────────────────────────
@@ -198,6 +199,7 @@ class ChatGptAgentTest {
         String json = mapper.writeValueAsString(java.util.Map.of(
             "model", model,
             "choices", java.util.List.of(java.util.Map.of(
+                "finish_reason", "stop",
                 "message", java.util.Map.of("role", "assistant", "content", content)
             )),
             "usage", java.util.Map.of(

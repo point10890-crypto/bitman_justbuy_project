@@ -30,7 +30,8 @@ class MainConditionPreviewTest {
 
     private MainConditionService service() {
         when(pipeline.getPrecomputed("BREAKOUT")).thenReturn(response("BREAKOUT",
-            new StockPick("삼성전자", "005930", "78,100", "82,000", "75,000", "주목", "단타 후보")));
+            new StockPick("삼성전자", "005930", "78,100", "82,000", "75,000", "주목", "단타 후보",
+                0, "", "KIS", "KIS", "2026-07-28T00:10:00Z")));
         when(pipeline.getPrecomputed("REVERSAL_EDGE")).thenReturn(response("REVERSAL_EDGE"));
         when(pipeline.getPrecomputed("FLOW_LEADER")).thenReturn(response("FLOW_LEADER"));
         when(pipeline.getPrecomputed("CATALYST_BURST")).thenReturn(response("CATALYST_BURST"));

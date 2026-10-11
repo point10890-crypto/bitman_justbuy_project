@@ -3,6 +3,7 @@ package com.bitman.justbuy.service;
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.StockPick;
 import com.bitman.justbuy.dto.condition.ConditionSignalDto;
+import com.bitman.justbuy.dto.condition.TrackRecordSummary;
 import com.bitman.justbuy.dto.performance.DailyClosePerformanceResponse;
 import com.bitman.justbuy.dto.performance.SwingCumulativePerformanceResponse;
 import com.bitman.justbuy.entity.AnalysisTrackRecord;
@@ -11,6 +12,7 @@ import com.bitman.justbuy.repository.TrackRecordRepository;
 import com.bitman.justbuy.util.KoreanMarketCalendar;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +42,10 @@ public class TrackRecordService {
     private final TrackRecordRepository repository;
     private final KisApiService kisApiService;
 
+    /** Earlier rows lack dated-observation provenance and are retained as legacy history. */
+    @Value("${bitman.performance.measured-since:2026-10-12}")
+    private String measuredSince = "2026-10-12";
+
     public TrackRecordService(TrackRecordRepository repository, KisApiService kisApiService) {
         this.repository = repository;
         this.kisApiService = kisApiService;
@@ -57,6 +63,7 @@ public class TrackRecordService {
 
             try {
                 Long priceAtAnalysis = parsePrice(pick.currentPrice());
+                if (priceAtAnalysis == null) continue;
                 if (SHORT_TERM_MODE.equals(response.mode())
                     && !isShortTermRecordingWindow(Instant.now().atZone(KST))) {
                     continue;
@@ -83,8 +90,8 @@ public class TrackRecordService {
                 }
 
                 record.setPriceAtAnalysis(priceAtAnalysis);
-                record.setTargetPrice(parsePrice(pick.targetPrice()));
-                record.setStopLoss(parsePrice(pick.stopLoss()));
+                record.setTargetPrice(validTarget(parsePrice(pick.targetPrice()), priceAtAnalysis));
+                record.setStopLoss(validStop(parsePrice(pick.stopLoss()), priceAtAnalysis));
 
                 repository.save(record);
             } catch (Exception e) {
@@ -123,7 +130,8 @@ public class TrackRecordService {
             record.setAction(firstNonBlank(signal.status(), "실시간 포착"));
             record.setConsensusScore(signal.finalScore());
             record.setPriceAtAnalysis(entryPrice);
-            record.setTargetPrice(parsePrice(signal.highPrice()));
+            record.setTargetPrice(validTarget(parsePrice(signal.highPrice()), entryPrice));
+            record.setStopLoss(validStop(parsePrice(signal.stopLoss()), entryPrice));
 
             repository.save(record);
             recorded++;
@@ -186,40 +194,47 @@ public class TrackRecordService {
 
         for (AnalysisTrackRecord record : tracking) {
             try {
-                long daysSince = ChronoUnit.DAYS.between(record.getAnalysisDate(), today);
-                if (daysSince < 1) continue;
-
                 Long basePrice = record.getPriceAtAnalysis();
-                if (basePrice == null || basePrice <= 0) continue;
+                if (basePrice == null || basePrice <= 0 || record.getAnalysisDate() == null) continue;
+                LocalDate first = observationDate(record.getAnalysisDate(), 1);
+                LocalDate third = observationDate(record.getAnalysisDate(), 3);
+                LocalDate fifth = observationDate(record.getAnalysisDate(), 5);
+                if (first == null || third == null || fifth == null || first.isAfter(today)) continue;
+                LocalDate availableThrough = LocalTime.now(KST).isAfter(MARKET_CLOSE)
+                    ? today : today.minusDays(1);
+                LocalDate end = fifth.isBefore(availableThrough) ? fifth : availableThrough;
+                if (end.isBefore(first)) continue;
+                Map<LocalDate, KisApiService.DailyOhlc> candles = kisApiService.fetchDailyOhlc(
+                    record.getStockCode(), first, end);
+                if (candles == null || candles.isEmpty()) continue;
 
-                Map<String, String> priceData = kisApiService.fetchCurrentPrice(record.getStockCode());
-                String currentPriceStr = priceData.get("현재가");
-                if (currentPriceStr == null || currentPriceStr.isBlank()) continue;
+                Long price1d = observedClose(candles, first, end);
+                Long price3d = observedClose(candles, third, end);
+                Long price5d = observedClose(candles, fifth, end);
+                if (record.getPrice1d() == null && price1d != null) {
+                    record.setPrice1d(price1d);
+                    record.setReturn1d(returnPct(basePrice, price1d));
+                }
+                if (record.getPrice3d() == null && price3d != null) {
+                    record.setPrice3d(price3d);
+                    record.setReturn3d(returnPct(basePrice, price3d));
+                }
+                if (record.getPrice5d() == null && price5d != null) {
+                    record.setPrice5d(price5d);
+                    record.setReturn5d(returnPct(basePrice, price5d));
+                }
+                if (!fifth.isAfter(end) && record.getPrice1d() != null && record.getPrice3d() != null
+                    && record.getPrice5d() != null) record.setStatus(TrackStatus.COMPLETED);
 
-                long currentPrice = Long.parseLong(currentPriceStr.replaceAll("[^0-9]", ""));
-                double returnPct = ((double) (currentPrice - basePrice) / basePrice) * 100;
-                returnPct = Math.round(returnPct * 100.0) / 100.0;
-
-                if (daysSince >= 1 && record.getPrice1d() == null) {
-                    record.setPrice1d(currentPrice);
-                    record.setReturn1d(returnPct);
-                }
-                if (daysSince >= 3 && record.getPrice3d() == null) {
-                    record.setPrice3d(currentPrice);
-                    record.setReturn3d(returnPct);
-                }
-                if (daysSince >= 5 && record.getPrice5d() == null) {
-                    record.setPrice5d(currentPrice);
-                    record.setReturn5d(returnPct);
-                    record.setStatus(TrackStatus.COMPLETED);
-                }
-
-                // 목표가/손절가 도달 체크
-                if (record.getTargetPrice() != null && currentPrice >= record.getTargetPrice()) {
-                    record.setHitTarget(true);
-                }
-                if (record.getStopLoss() != null && currentPrice <= record.getStopLoss()) {
-                    record.setHitStop(true);
+                for (var entry : candles.entrySet()) {
+                    LocalDate date = entry.getKey();
+                    KisApiService.DailyOhlc candle = entry.getValue();
+                    if (date == null || candle == null || !date.equals(candle.date())
+                        || date.isBefore(first) || date.isAfter(end) || !KoreanMarketCalendar.isTradingDay(date)) continue;
+                    if (validTarget(record.getTargetPrice(), basePrice) != null
+                        && candle.high() > 0 && candle.high() >= record.getTargetPrice()) record.setHitTarget(true);
+                    if (validStop(record.getStopLoss(), basePrice) != null
+                        && candle.low() > 0 && candle.low() <= record.getStopLoss()) record.setHitStop(true);
                 }
 
                 repository.save(record);
@@ -306,10 +321,10 @@ public class TrackRecordService {
                 record.setCloseReturn(returnPct);
                 record.setCloseVerifiedAt(Instant.now());
 
-                if (record.getTargetPrice() != null && close >= record.getTargetPrice()) {
+                if (validTarget(record.getTargetPrice(), entry) != null && close >= record.getTargetPrice()) {
                     record.setHitTarget(true);
                 }
-                if (record.getStopLoss() != null && close <= record.getStopLoss()) {
+                if (validStop(record.getStopLoss(), entry) != null && close <= record.getStopLoss()) {
                     record.setHitStop(true);
                 }
 
@@ -467,12 +482,64 @@ public class TrackRecordService {
     }
 
     private Long parsePrice(String priceStr) {
-        if (priceStr == null || priceStr.isBlank()) return null;
+        if (priceStr == null || !priceStr.trim().matches("(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)\\s*원?")) return null;
         try {
-            return Long.parseLong(priceStr.replaceAll("[^0-9]", ""));
+            long price = Long.parseLong(priceStr.trim().replace(",", "").replace("원", "").trim());
+            return price > 0 ? price : null;
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    private static Long validTarget(Long target, long entry) {
+        return target != null && target > entry ? target : null;
+    }
+
+    private static Long validStop(Long stop, long entry) {
+        return stop != null && stop > 0 && stop < entry ? stop : null;
+    }
+
+    private static LocalDate observationDate(LocalDate analysisDate, int days) {
+        LocalDate date = analysisDate;
+        for (int i = 0; i < days && date != null; i++) date = KoreanMarketCalendar.nextTradingDay(date);
+        return date;
+    }
+
+    private static Long observedClose(Map<LocalDate, KisApiService.DailyOhlc> candles, LocalDate date, LocalDate end) {
+        if (date == null || date.isAfter(end)) return null;
+        KisApiService.DailyOhlc candle = candles.get(date);
+        return candle != null && date.equals(candle.date()) && candle.close() > 0 ? candle.close() : null;
+    }
+
+    private static double returnPct(long base, long observed) {
+        return roundPct(((double) observed - base) / base * 100);
+    }
+
+    /** Only completed five-trading-day observations contribute to the Home summary. */
+    public TrackRecordSummary getMeasuredSummary() {
+        LocalDate rollout;
+        try {
+            rollout = LocalDate.parse(measuredSince);
+        } catch (RuntimeException invalidRollout) {
+            log.warn("[TrackRecord] Invalid measurement rollout date; verified summary unavailable");
+            return new TrackRecordSummary(0, "-", "-");
+        }
+        ZonedDateTime now = ZonedDateTime.now(KST);
+        LocalDate closedThrough = now.toLocalTime().isAfter(MARKET_CLOSE)
+            ? now.toLocalDate() : now.toLocalDate().minusDays(1);
+        List<Double> measured = repository.findByStatus(TrackStatus.COMPLETED).stream()
+            .filter(record -> record.getAnalysisDate() != null)
+            .filter(record -> !record.getAnalysisDate().isBefore(rollout))
+            .filter(record -> {
+                LocalDate fifth = observationDate(record.getAnalysisDate(), 5);
+                return fifth != null && !fifth.isAfter(closedThrough);
+            })
+            .filter(record -> record.getPriceAtAnalysis() != null && record.getPriceAtAnalysis() > 0)
+            .filter(record -> record.getPrice5d() != null && record.getPrice5d() > 0)
+            .filter(record -> record.getReturn5d() != null && Double.isFinite(record.getReturn5d()))
+            .map(record -> returnPct(record.getPriceAtAnalysis(), record.getPrice5d()))
+            .toList();
+        return new TrackRecordSummary(measured.size(), avgPercent(measured), winRate(measured));
     }
 
     private Long parseCurrentPrice(Map<String, String> priceData) {

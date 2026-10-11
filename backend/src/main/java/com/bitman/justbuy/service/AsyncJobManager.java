@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -23,50 +24,66 @@ public class AsyncJobManager {
 
     private final Map<String, JobEntry> jobs = new ConcurrentHashMap<>();
 
-    public enum JobStatus { PENDING, RUNNING, COMPLETE, ERROR }
+    public enum JobStatus { PENDING, RUNNING, COMPLETE, PARTIAL, ERROR }
 
     public record JobEntry(
         JobStatus status,
         AnalysisResponse result,
         String error,
-        Instant createdAt
-    ) {}
+        Instant createdAt,
+        UUID ownerId,
+        Instant updatedAt
+    ) {
+        public JobEntry(JobStatus status, AnalysisResponse result, String error, Instant createdAt, UUID ownerId) {
+            this(status, result, error, createdAt, ownerId, createdAt);
+        }
+    }
 
-    public String createJob() {
-        String jobId = UUID.randomUUID().toString().substring(0, 8);
-        jobs.put(jobId, new JobEntry(JobStatus.PENDING, null, null, Instant.now()));
+    public synchronized String createJob(UUID ownerId) {
+        Objects.requireNonNull(ownerId, "Job owner is required");
         cleanup();
+        if (jobs.size() >= 256) throw new IllegalStateException("Analysis job capacity exceeded");
+        String jobId = UUID.randomUUID().toString();
+        jobs.put(jobId, new JobEntry(JobStatus.PENDING, null, null, Instant.now(), ownerId));
         return jobId;
     }
 
     public void markRunning(String jobId) {
-        JobEntry existing = jobs.get(jobId);
-        if (existing != null) {
-            jobs.put(jobId, new JobEntry(JobStatus.RUNNING, null, null, existing.createdAt()));
-        }
+        jobs.computeIfPresent(jobId, (key, existing) -> existing.status() == JobStatus.PENDING
+            ? new JobEntry(JobStatus.RUNNING, null, null, existing.createdAt(), existing.ownerId(), Instant.now()) : existing);
     }
 
     public void markComplete(String jobId, AnalysisResponse result) {
-        JobEntry existing = jobs.get(jobId);
-        Instant created = existing != null ? existing.createdAt() : Instant.now();
-        jobs.put(jobId, new JobEntry(JobStatus.COMPLETE, result, null, created));
+        if (AnalysisOutcome.classify(result) == AnalysisOutcome.FAILED) {
+            markError(jobId, "Analysis failed: no successful agents");
+            return;
+        }
+        jobs.computeIfPresent(jobId, (key, existing) -> existing.status() == JobStatus.PENDING || existing.status() == JobStatus.RUNNING
+            ? new JobEntry(AnalysisOutcome.classify(result) == AnalysisOutcome.COMPLETE ? JobStatus.COMPLETE : JobStatus.PARTIAL,
+                result, null, existing.createdAt(), existing.ownerId(), Instant.now()) : existing);
         log.info("[AsyncJob] Job {} complete", jobId);
     }
 
     public void markError(String jobId, String error) {
-        JobEntry existing = jobs.get(jobId);
-        Instant created = existing != null ? existing.createdAt() : Instant.now();
-        jobs.put(jobId, new JobEntry(JobStatus.ERROR, null, error, created));
+        jobs.computeIfPresent(jobId, (key, existing) -> existing.status() == JobStatus.PENDING || existing.status() == JobStatus.RUNNING
+            ? new JobEntry(JobStatus.ERROR, null, error, existing.createdAt(), existing.ownerId(), Instant.now()) : existing);
         log.error("[AsyncJob] Job {} error: {}", jobId, error);
     }
 
     public JobEntry getJob(String jobId) {
+        cleanup();
         return jobs.get(jobId);
+    }
+
+    public JobEntry getJob(String jobId, UUID ownerId) {
+        JobEntry job = getJob(jobId);
+        return job != null && ownerId != null && ownerId.equals(job.ownerId()) ? job : null;
     }
 
     private void cleanup() {
         Instant cutoff = Instant.now().minusMillis(JOB_TTL_MS);
-        jobs.entrySet().removeIf(e -> e.getValue().createdAt().isBefore(cutoff));
+        jobs.entrySet().removeIf(e -> e.getValue().status() != JobStatus.PENDING && e.getValue().status() != JobStatus.RUNNING
+            && e.getValue().updatedAt().isBefore(cutoff));
     }
 
     /**

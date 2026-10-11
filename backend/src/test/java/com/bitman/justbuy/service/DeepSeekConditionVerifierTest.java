@@ -36,7 +36,7 @@ class DeepSeekConditionVerifierTest {
             + "\"summary\":\"쌍끌이 수급 동반\",\"evidence\":[\"외국인 순매수\"],"
             + "\"riskFlags\":[\"변동성\"],\"invalidation\":\"수급 이탈\",\"displayStatus\":\"포착\"}]}";
 
-        Map<String, EvidenceVerdict> verdicts = verifier.parse(content, List.of());
+        Map<String, EvidenceVerdict> verdicts = verifier.parse(content, List.of(packet("196170")));
 
         assertThat(verdicts).containsKey("196170");
         EvidenceVerdict verdict = verdicts.get("196170");
@@ -48,13 +48,22 @@ class DeepSeekConditionVerifierTest {
     }
 
     @Test
-    void parseClampsScoreAndToleratesBareArray() {
+    void invalidScoreCannotEnterVerdicts() {
         String content = "[{\"stockCode\":\"042660\",\"aiScore\":150,\"verdict\":\"REJECT\"}]";
 
-        Map<String, EvidenceVerdict> verdicts = verifier.parse(content, List.of());
+        Map<String, EvidenceVerdict> verdicts = verifier.parse(content, List.of(packet("042660")));
 
-        assertThat(verdicts.get("042660").aiScore()).isEqualTo(99);
-        assertThat(verdicts.get("042660").rejected()).isTrue();
+        assertThat(verdicts).isEmpty();
+    }
+
+    @Test void rejectsMissingEvidenceRiskInvalidationAndUnknownVerdict() {
+        String valid = "{\"stockCode\":\"196170\",\"aiScore\":82,\"verdict\":\"VALID\",\"summary\":\"근거 요약\",\"evidence\":[\"외국인 순매수\"],\"riskFlags\":[\"변동성\"],\"invalidation\":\"수급 이탈\"}";
+        assertThat(verifier.parse("{\"stockCode\":\"196170\",\"aiScore\":99,\"verdict\":\"VALID\"}", List.of(packet("196170")))).isEmpty();
+        assertThat(verifier.parse(valid.replace("VALID", "UNKNOWN"), List.of(packet("196170")))).isEmpty();
+        assertThat(verifier.parse(valid.replace("[\"변동성\"]", "[]"), List.of(packet("196170")))).isEmpty();
+        assertThat(verifier.parse(valid.replace("수급 이탈", ""), List.of(packet("196170")))).isEmpty();
+        assertThat(verifier.parse(valid.replace("196170", "999999"), List.of(packet("196170")))).isEmpty();
+        assertThat(verifier.parse("[" + valid.replace("VALID", "REJECT") + "," + valid + "]", List.of(packet("196170")))).isEmpty();
     }
 
     private static EvidencePacket packet(String code) {

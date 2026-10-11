@@ -71,7 +71,7 @@ class AnalysisControllerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).isSameAs(cached);
-        verify(jobManager, never()).createJob();
+        verify(jobManager, never()).createJob(any());
 
         var run = conditionRunService.recent(1).get(0);
         assertThat(run.status()).isEqualTo(ConditionRunStatus.COMPLETE);
@@ -87,7 +87,7 @@ class AnalysisControllerTest {
         AnalysisResponse analysis = response("BREAKOUT");
         when(conditionSearchPipeline.isValidMode("BREAKOUT")).thenReturn(true);
         when(conditionSearchPipeline.getCachedLive("breakout query", "BREAKOUT")).thenReturn(null);
-        when(jobManager.createJob()).thenReturn("job-123");
+        when(jobManager.createJob(userId)).thenReturn("job-123");
         when(conditionSearchPipeline.runLiveAnalysis("breakout query", "BREAKOUT")).thenReturn(analysis);
 
         var response = controller.liveAnalysis(userId, new AnalysisRequest("breakout query", "BREAKOUT"));
@@ -120,8 +120,8 @@ class AnalysisControllerTest {
     void completedJobExposesTradingAgentsResearchViewWithoutExecution() {
         UUID userId = allowProUser();
         AnalysisResponse analysis = response("BREAKOUT");
-        when(jobManager.getJob("job-123")).thenReturn(new AsyncJobManager.JobEntry(
-            AsyncJobManager.JobStatus.COMPLETE, analysis, null, Instant.now()
+        when(jobManager.getJob("job-123", userId)).thenReturn(new AsyncJobManager.JobEntry(
+            AsyncJobManager.JobStatus.COMPLETE, analysis, null, Instant.now(), userId
         ));
 
         var response = controller.getTradingResearch(userId, "job-123");

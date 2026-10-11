@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -23,6 +24,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.ExecutionException;
 
 @Service
 public class AnalysisService {
@@ -58,6 +64,10 @@ public class AnalysisService {
     private final ObjectMapper mapper;
     private final Path dataDir;
     private final Clock clock;
+    private TrackRecordService trackRecordService;
+    private final Semaphore executionSlots = new Semaphore(4);
+    @Value("${bitman.analysis.run-timeout-ms:120000}")
+    private long runTimeoutMs = 120_000L;
     private final Set<String> runningAnalyses = ConcurrentHashMap.newKeySet();
     private final Map<String, CachedResult> liveCache = new ConcurrentHashMap<>();
 
@@ -72,6 +82,11 @@ public class AnalysisService {
                            ObjectMapper mapper,
                            @Value("${bitman.storage.data-dir:./data}") String dataDir) {
         this(orchestrator, formulaCatalog, keywordConditionAnalysisService, mapper, dataDir, Clock.systemUTC());
+    }
+
+    @Autowired
+    void configureTracking(TrackRecordService trackRecordService) {
+        this.trackRecordService = trackRecordService;
     }
 
     AnalysisService(MultiAgentOrchestrator orchestrator,
@@ -103,30 +118,11 @@ public class AnalysisService {
             String json = Files.readString(file);
             AnalysisResponse data = mapper.readValue(json, AnalysisResponse.class);
 
-            // TTL 만료 체크: 모드별 유효 시간 초과 시 null 반환
-            Long ttlMinutes = MODE_TTL_MINUTES.get(mode);
-            if (ttlMinutes != null && data.updatedAt() != null) {
-                try {
-                    Instant updatedAt = Instant.parse(data.updatedAt());
-                    Instant now = clock.instant();
-                    long elapsed = Duration.between(updatedAt, now).toMinutes();
-                    if (elapsed > ttlMinutes) {
-                        log.info("[Storage] {} 프리컴퓨트 만료 (경과 {}분 > TTL {}분)", mode, elapsed, ttlMinutes);
-                        return null;
-                    }
-
-                    // ★ v2.8.3: 장마감(15:30 KST) 이후 당일자 캐시는 강제 만료.
-                    //    14:50 분석 결과가 TTL(175분)으로 17:45까지 남는 것을 차단.
-                    //    "오후 2시 50분에 분석해서 장마감 까지 캐시" 사용자 요구사항 준수.
-                    if (isMarketCloseExpired(updatedAt, now)) {
-                        log.info("[Storage] {} 당일 캐시 만료 (장마감 15:30 KST 경과)", mode);
-                        return null;
-                    }
-                } catch (Exception e) {
-                    log.debug("[Storage] updatedAt 파싱 실패, TTL 검사 건너뜀: {}", e.getMessage());
-                }
+            String invalidReason = cacheValidationError(mode, data, clock.instant());
+            if (invalidReason != null) {
+                log.info("[Storage] {} fresh cache unavailable: {}", mode, invalidReason);
+                return null;
             }
-
             return data;
         } catch (IOException e) {
             log.error("Failed to load precomputed result for {}: {}", mode, e.getMessage());
@@ -153,11 +149,26 @@ public class AnalysisService {
             && updatedAt.atZone(KST).toLocalDate().equals(nowKst.toLocalDate());
     }
 
+    private static String cacheValidationError(String mode, AnalysisResponse data, Instant now) {
+        if (data == null || data.updatedAt() == null) return "INVALID_TIMESTAMP";
+        long ttlMinutes = MODE_TTL_MINUTES.getOrDefault(mode, 30L);
+        try {
+            Instant updatedAt = Instant.parse(data.updatedAt());
+            Duration age = Duration.between(updatedAt, now);
+            if (age.isNegative()) return "FUTURE_TIMESTAMP";
+            if (age.toMinutes() > ttlMinutes) return "EXPIRED";
+            if (MODE_TTL_MINUTES.containsKey(mode) && isMarketCloseExpired(updatedAt, now)) return "MARKET_CLOSED";
+        } catch (RuntimeException e) { return "INVALID_TIMESTAMP"; }
+        if (AnalysisOutcome.classify(data) == AnalysisOutcome.FAILED || data.stockPicks() == null || data.stockPicks().isEmpty()
+            || data.stockPicks().stream().anyMatch(pick -> !AnalysisOutcome.isVerifiedPick(pick, now, ttlMinutes))) return "LEGACY_UNVERIFIED";
+        return null;
+    }
+
     /** 캐시된 라이브 분석 결과 조회 (컨트롤러에서 호출) */
     public AnalysisResponse getCachedLive(String query, String mode) {
         String key = mode + ":" + query;
         CachedResult cached = liveCache.get(key);
-        if (cached != null && !cached.isExpired()) {
+        if (cached != null && !cached.isExpired() && cacheValidationError(mode, cached.response(), clock.instant()) == null) {
             log.info("[Cache] 라이브 캐시 적중: {} ({}분 전)", key,
                 (System.currentTimeMillis() - cached.timestamp) / 60000);
             return cached.response;
@@ -166,45 +177,76 @@ public class AnalysisService {
     }
 
     public AnalysisResponse runLiveAnalysis(String query, String mode) {
+        AnalysisResponse result = runAnalysisForPublication(query, mode);
+        if (AnalysisOutcome.classify(result) == AnalysisOutcome.EMPTY) return result;
+        saveAnalysis(mode, result);
+        recordPublishedAnalysis(result);
+        liveCache.put(mode + ":" + query, new CachedResult(result, System.currentTimeMillis()));
+        liveCache.entrySet().removeIf(e -> e.getValue().isExpired());
+        return result;
+    }
+
+    /** Computes a validated response without publishing before periodic exclusions. */
+    public AnalysisResponse runAnalysisForPublication(String query, String mode) {
         String key = mode + ":" + query;
-
-        if (!runningAnalyses.add(key)) {
-            throw new DuplicateAnalysisException("\ub3d9\uc77c\ud55c \ubd84\uc11d\uc774 \uc774\ubbf8 \uc9c4\ud589 \uc911\uc785\ub2c8\ub2e4.");
-        }
-
-        try {
-            AnalysisResponse result = keywordConditionAnalysisService.supports(query, mode)
-                ? keywordConditionAnalysisService.analyze(query, mode)
-                : orchestrator.runAnalysis(query, mode);
-
-            // 방어 로직: 빈 결과(에이전트 0/0 또는 모든 에이전트 실패)는 캐시하지 않는다.
-            // 외부 데이터 소스 장애·API 키 만료 등으로 빈 결과가 생기면, 다음 요청에서 즉시 재시도하도록 fresh 캐시 저장을 막는다.
-            int agentsUsed = result.metadata() != null ? result.metadata().agentsUsed() : 0;
-            int agentsSucceeded = result.metadata() != null ? result.metadata().agentsSucceeded() : 0;
-            int picks = result.stockPicks() != null ? result.stockPicks().size() : 0;
-            if (agentsUsed == 0 || agentsSucceeded == 0 || picks == 0) {
-                log.warn("[Cache] {} 빈 결과 — 캐시 저장 건너뜀 (agents={}/{}, picks={})",
-                    mode, agentsSucceeded, agentsUsed, picks);
-            } else {
-                saveAnalysis(mode, result);
-                liveCache.put(key, new CachedResult(result, System.currentTimeMillis()));
-                // 만료된 캐시 정리
-                liveCache.entrySet().removeIf(e -> e.getValue().isExpired());
-            }
-            return result;
-        } finally {
+        if (!runningAnalyses.add(key)) throw new DuplicateAnalysisException("동일한 분석이 이미 진행 중입니다.");
+        if (!executionSlots.tryAcquire()) {
             runningAnalyses.remove(key);
+            throw new IllegalStateException("Analysis capacity is busy; retry after the current runs finish");
+        }
+        var task = new FutureTask<AnalysisResponse>(() -> keywordConditionAnalysisService != null
+            && keywordConditionAnalysisService.supports(query, mode)
+            ? keywordConditionAnalysisService.analyze(query, mode) : orchestrator.runAnalysis(query, mode));
+        Thread.startVirtualThread(() -> {
+            try { task.run(); }
+            finally {
+                runningAnalyses.remove(key);
+                executionSlots.release();
+            }
+        });
+        try {
+            AnalysisResponse result = task.get(Math.max(1, runTimeoutMs), TimeUnit.MILLISECONDS);
+            AnalysisOutcome.requireSuccessfulAgents(result);
+            return AnalysisOutcome.describe(result);
+        } catch (TimeoutException e) {
+            task.cancel(true);
+            throw new IllegalStateException("ANALYSIS_TIMEOUT: execution budget exceeded", e);
+        } catch (InterruptedException e) {
+            task.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Analysis interrupted", e);
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof RuntimeException cause) throw cause;
+            throw new IllegalStateException("Analysis execution failed", e.getCause());
+        }
+    }
+
+    /** Only callers which have already persisted the final published set use this. */
+    public void recordPublishedAnalysis(AnalysisResponse response) {
+        if (trackRecordService != null && response.stockPicks() != null && !response.stockPicks().isEmpty()) {
+            trackRecordService.recordAnalysis(response);
         }
     }
 
     public void saveAnalysis(String mode, AnalysisResponse result) {
+        Path temporary = null;
         try {
             Files.createDirectories(dataDir);
             String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(result);
-            Files.writeString(dataDir.resolve(mode + ".json"), json);
+            Path target = dataDir.resolve(mode + ".json").normalize();
+            if (!target.getParent().equals(dataDir.normalize())) throw new IOException("Invalid analysis storage mode");
+            temporary = Files.createTempFile(dataDir, ".analysis-", ".tmp");
+            Files.writeString(temporary, json);
+            Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             log.info("[Storage] Saved analysis for mode: {}", mode);
         } catch (IOException e) {
             log.error("Failed to save analysis for {}: {}", mode, e.getMessage());
+            throw new AnalysisPersistenceException("Analysis persistence failed for mode " + mode, e);
+        } finally {
+            if (temporary != null) {
+                try { Files.deleteIfExists(temporary); }
+                catch (IOException e) { log.warn("Failed to remove analysis temporary file: {}", e.getMessage()); }
+            }
         }
     }
 
@@ -234,11 +276,13 @@ public class AnalysisService {
                         if (data.updatedAt() != null) {
                             Instant updatedAt = Instant.parse(data.updatedAt());
                             long elapsed = Duration.between(updatedAt, now).toMinutes();
-                            boolean valid = elapsed <= ttlMinutes && !isMarketCloseExpired(updatedAt, now);
+                            String invalidReason = cacheValidationError(mode, data, now);
+                            boolean valid = invalidReason == null;
 
                             modeStatus.put("valid", valid);
                             modeStatus.put("updatedAt", data.updatedAt());
                             modeStatus.put("elapsedMinutes", elapsed);
+                            if (invalidReason != null) modeStatus.put("unavailableReason", invalidReason);
                         } else {
                             modeStatus.put("valid", false);
                             modeStatus.put("updatedAt", "N/A");
@@ -274,5 +318,9 @@ public class AnalysisService {
         public DuplicateAnalysisException(String message) {
             super(message);
         }
+    }
+
+    public static class AnalysisPersistenceException extends IllegalStateException {
+        public AnalysisPersistenceException(String message, IOException cause) { super(message, cause); }
     }
 }

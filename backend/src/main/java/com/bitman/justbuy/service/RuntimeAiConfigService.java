@@ -1,6 +1,7 @@
 package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.config.AiProperties;
+import com.bitman.justbuy.ai.agent.ProviderEndpointPolicy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,9 @@ public class RuntimeAiConfigService {
     private final AiProperties aiProperties;
     private final ObjectMapper mapper;
     private final Path configPath;
+
+    @Value("${bitman.ai.deepseek-trusted-proxy-urls:}")
+    private String trustedProxyUrls = "";
 
     public RuntimeAiConfigService(AiProperties aiProperties,
                                   ObjectMapper mapper,
@@ -54,9 +58,11 @@ public class RuntimeAiConfigService {
             throw new IllegalArgumentException("DeepSeek API key is required.");
         }
 
+        String approvedBase = ProviderEndpointPolicy.deepSeekBaseUrl(
+            firstNonBlank(baseUrl, aiProperties.deepseekBaseUrl(), DEFAULT_DEEPSEEK_BASE_URL), trustedProxyUrls);
         Map<String, String> config = readConfig();
         config.put(DEEPSEEK_API_KEY, cleanKey);
-        config.put(DEEPSEEK_BASE_URL, firstNonBlank(baseUrl, aiProperties.deepseekBaseUrl(), DEFAULT_DEEPSEEK_BASE_URL));
+        config.put(DEEPSEEK_BASE_URL, approvedBase);
         config.put(DEEPSEEK_MODEL, firstNonBlank(model, aiProperties.deepseekModel(), DEFAULT_DEEPSEEK_MODEL));
         config.put(DEEPSEEK_UPDATED_AT, Instant.now().toString());
         writeConfig(config);

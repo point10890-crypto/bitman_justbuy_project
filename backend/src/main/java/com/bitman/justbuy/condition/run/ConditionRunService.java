@@ -1,6 +1,7 @@
 package com.bitman.justbuy.condition.run;
 
 import com.bitman.justbuy.dto.AnalysisResponse;
+import com.bitman.justbuy.service.AnalysisOutcome;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -75,14 +76,22 @@ public class ConditionRunService {
         run.pickCount = response != null && response.stockPicks() != null ? response.stockPicks().size() : 0;
         run.agentsUsed = metadata != null ? metadata.agentsUsed() : null;
         run.agentsSucceeded = metadata != null ? metadata.agentsSucceeded() : null;
-        run.status = ConditionRunStatus.COMPLETE;
+        AnalysisOutcome outcome = AnalysisOutcome.classify(response);
+        if (outcome == AnalysisOutcome.FAILED) {
+            markFailed(runId, "Analysis failed: no successful agents");
+            return;
+        }
+        if (run.status == ConditionRunStatus.FAILED || run.status == ConditionRunStatus.CANCELLED
+            || run.status == ConditionRunStatus.EXPIRED) return;
+        run.status = outcome == AnalysisOutcome.COMPLETE ? ConditionRunStatus.COMPLETE : ConditionRunStatus.PARTIAL;
         run.finishedAt = clock.instant();
         run.updatedAt = run.finishedAt;
 
-        append(run, ConditionRunEventType.COMPLETED, "condition run completed", Map.of(
+        append(run, ConditionRunEventType.COMPLETED, "condition run " + outcome.name().toLowerCase(), Map.of(
             "pickCount", run.pickCount,
             "agentsUsed", run.agentsUsed != null ? run.agentsUsed : 0,
-            "agentsSucceeded", run.agentsSucceeded != null ? run.agentsSucceeded : 0
+            "agentsSucceeded", run.agentsSucceeded != null ? run.agentsSucceeded : 0,
+            "outcome", outcome.name()
         ));
     }
 

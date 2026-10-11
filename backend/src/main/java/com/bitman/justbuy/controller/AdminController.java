@@ -15,7 +15,11 @@ import com.bitman.justbuy.service.RuntimeAiConfigService;
 import com.bitman.justbuy.service.SubscriptionService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.env.Environment;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,6 +28,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 관리자 전용 API.
@@ -44,12 +50,18 @@ public class AdminController {
     private final RuntimeAiConfigService runtimeAiConfigService;
     private final DeepSeekEndpointService deepSeekEndpointService;
     private final ConditionRunService conditionRunService;
+    private final Map<String, RefreshJob> refreshJobs = new ConcurrentHashMap<>();
+    private final AtomicBoolean refreshRunning = new AtomicBoolean();
+    private record RefreshJob(UUID ownerId, Instant createdAt, Instant finishedAt, Map<String, Object> payload) {}
 
     @Autowired(required = false)
     private PrecomputeScheduler precomputeScheduler;
 
     @Autowired(required = false)
     private BackupService backupService;
+
+    @Autowired
+    private Environment environment;
 
     public AdminController(SubscriptionService subscriptionService,
                            AnalysisService analysisService,
@@ -192,6 +204,9 @@ public class AdminController {
             result.put("kisAvailable", false);
         }
 
+        // Configuration presence only. Never probe providers or return credential values.
+        result.put("dataSources", dataSourceReadiness());
+
         // 메인 조건검색식 파이프라인
         try {
             result.put("pipeline", conditionSearchPipeline.describe());
@@ -202,11 +217,46 @@ public class AdminController {
         // 스케줄러 상태
         result.put("schedulerEnabled", precomputeScheduler != null);
         result.put("conditionRuns", conditionRunService.recent(10));
+        result.put("analysisStats", MonitorController.analysisStatistics());
+        result.put("recentAnalyses", MonitorController.analysisLogSnapshot().stream().limit(10).toList());
 
         // 응답 시간
         result.put("responseTime", System.currentTimeMillis() - startMs);
 
         return ResponseEntity.ok(result);
+    }
+
+    private List<Map<String, Object>> dataSourceReadiness() {
+        boolean kisConfigured = hasConfiguration("bitman.kis.app-key") && hasConfiguration("bitman.kis.app-secret");
+        boolean dartConfigured = hasConfiguration("bitman.dart.api-key");
+        boolean ecosConfigured = hasConfiguration("bitman.ecos.api-key");
+        return List.of(
+            sourceReadiness("KIS", "KIS 추가 근거", configurationEnabled("bitman.kis.extended-evidence.enabled"),
+                kisConfigured, true, "유료 회원 앱의 KIS 이용 권한 확인이 필요합니다."),
+            sourceReadiness("DART", "DART 공시 근거", configurationEnabled("bitman.dart.event-evidence.enabled"),
+                dartConfigured, false, dartConfigured ? "공시 근거 설정 확인. 실제 연결은 미검증 상태입니다."
+                    : "DART 인증키의 서버 설정이 필요합니다."),
+            sourceReadiness("ECOS", "한국은행 ECOS", configurationEnabled("bitman.ecos.enabled"),
+                ecosConfigured, false, ecosConfigured ? "일별 공표 통계 설정 확인. 실제 연결과 관측일 검증이 필요합니다."
+                    : "ECOS 인증키 발급과 서버 설정이 필요합니다.")
+        );
+    }
+
+    private boolean hasConfiguration(String property) {
+        String value = environment != null ? environment.getProperty(property) : null;
+        return value != null && !value.isBlank();
+    }
+
+    private boolean configurationEnabled(String property) {
+        return environment != null && Boolean.parseBoolean(environment.getProperty(property, "false"));
+    }
+
+    private Map<String, Object> sourceReadiness(String id, String name, boolean enabled, boolean credentialsConfigured,
+                                              boolean rightsCheckRequired, String message) {
+        String state = !enabled ? "DISABLED" : !credentialsConfigured ? "CREDENTIALS_MISSING"
+            : rightsCheckRequired ? "RIGHTS_CHECK_REQUIRED" : "CONFIGURED";
+        return Map.of("id", id, "name", name, "enabled", enabled, "credentialsConfigured", credentialsConfigured,
+            "state", state, "message", message);
     }
 
     // --- AI provider runtime config ---
@@ -295,7 +345,8 @@ public class AdminController {
     public record RefreshAllRequest(List<String> modes) {}
 
     @PostMapping("/system/refresh-all")
-    public ResponseEntity<Map<String, Object>> refreshAll(@RequestBody(required = false) RefreshAllRequest request) {
+    public ResponseEntity<Map<String, Object>> refreshAll(@AuthenticationPrincipal UUID userId,
+                                                         @RequestBody(required = false) RefreshAllRequest request) {
         Map<String, Object> result = new LinkedHashMap<>();
 
         if (precomputeScheduler == null) {
@@ -304,20 +355,66 @@ public class AdminController {
             return ResponseEntity.badRequest().body(result);
         }
 
-        result.put("startedAt", Instant.now().toString());
-        Map<String, String> refreshResults;
+        if (userId == null) throw new ApiException(HttpStatus.UNAUTHORIZED, "관리자 인증이 필요합니다.");
+        List<String> modes;
         try {
-            refreshResults = precomputeScheduler.refreshModes(request != null ? request.modes() : null);
+            modes = precomputeScheduler.normalizeRefreshModes(request != null ? request.modes() : null);
         } catch (IllegalArgumentException e) {
             result.put("status", "error");
             result.put("message", e.getMessage());
             return ResponseEntity.badRequest().body(result);
         }
-        long failures = refreshResults.values().stream().filter(value -> !"success".equals(value)).count();
-        result.put("status", failures == 0 ? "ok" : failures == refreshResults.size() ? "error" : "partial");
-        result.put("results", refreshResults);
-        result.put("completedAt", Instant.now().toString());
+        cleanupRefreshJobs();
+        if (!refreshRunning.compareAndSet(false, true)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("status", "error", "message", "분석 갱신 작업이 이미 실행 중입니다."));
+        }
+        String jobId = UUID.randomUUID().toString();
+        Instant createdAt = Instant.now();
+        result.put("jobId", jobId);
+        result.put("status", "running");
+        result.put("startedAt", createdAt.toString());
+        refreshJobs.put(jobId, new RefreshJob(userId, createdAt, null, Map.copyOf(result)));
+        Thread.startVirtualThread(() -> {
+            Map<String, Object> completed = new LinkedHashMap<>(result);
+            try {
+                Map<String, String> refreshResults = precomputeScheduler.refreshModes(modes);
+                long fullSuccess = refreshResults.values().stream().filter("success"::equals).count();
+                long errors = refreshResults.values().stream().filter(value -> value.startsWith("error:")).count();
+                completed.put("status", fullSuccess == refreshResults.size() ? "ok"
+                    : errors == refreshResults.size() ? "error" : "partial");
+                completed.put("results", refreshResults);
+            } catch (Exception e) {
+                completed.put("status", "error");
+                completed.put("error", e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
+            } finally {
+                completed.put("completedAt", Instant.now().toString());
+                Instant finishedAt = Instant.now();
+                refreshJobs.computeIfPresent(jobId, (key, existing) -> new RefreshJob(existing.ownerId(), existing.createdAt(), finishedAt, Map.copyOf(completed)));
+                refreshRunning.set(false);
+            }
+        });
+        return ResponseEntity.accepted().body(result);
+    }
 
-        return ResponseEntity.ok(result);
+    @GetMapping("/system/refresh-all/{jobId}")
+    public ResponseEntity<Map<String, Object>> refreshStatus(@AuthenticationPrincipal UUID userId, @PathVariable String jobId) {
+        if (userId == null) throw new ApiException(HttpStatus.UNAUTHORIZED, "관리자 인증이 필요합니다.");
+        cleanupRefreshJobs();
+        RefreshJob job = refreshJobs.get(jobId);
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        boolean admin = authentication != null && authentication.getAuthorities().stream()
+            .anyMatch(authority -> "ROLE_ADMIN".equals(authority.getAuthority()));
+        if (job == null || (!userId.equals(job.ownerId()) && !admin)) throw new ApiException(HttpStatus.NOT_FOUND, "Refresh job not found");
+        return ResponseEntity.ok(job.payload());
+    }
+
+    private void cleanupRefreshJobs() {
+        Instant cutoff = Instant.now().minusSeconds(30 * 60);
+        refreshJobs.entrySet().removeIf(entry -> entry.getValue().finishedAt() != null && entry.getValue().finishedAt().isBefore(cutoff));
+        if (refreshJobs.size() >= 64) {
+            refreshJobs.entrySet().stream().filter(entry -> !"running".equals(entry.getValue().payload().get("status")))
+                .min(java.util.Comparator.comparing(entry -> entry.getValue().createdAt()))
+                .ifPresent(entry -> refreshJobs.remove(entry.getKey()));
+        }
     }
 }

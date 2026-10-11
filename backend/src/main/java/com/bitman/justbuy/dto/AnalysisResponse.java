@@ -14,5 +14,9 @@ public record AnalysisResponse(
         boolean isFresh,
         Metadata metadata
 ) {
-    public record Metadata(long totalDurationMs, int agentsUsed, int agentsSucceeded) {}
+    public record Metadata(long totalDurationMs, int agentsUsed, int agentsSucceeded, String publicationStatus) {
+        public Metadata(long totalDurationMs, int agentsUsed, int agentsSucceeded) {
+            this(totalDurationMs, agentsUsed, agentsSucceeded, null);
+        }
+    }
 }

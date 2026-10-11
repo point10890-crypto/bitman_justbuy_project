@@ -30,6 +30,7 @@ public class DartApiService {
     private final DartCorpCodeMapper corpCodeMapper;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private DartEventEvidenceService eventEvidence;
 
     // 내부 캐시 (TTL별 관리)
     private record CachedEntry(String data, Instant expiry) {
@@ -43,6 +44,17 @@ public class DartApiService {
         this.corpCodeMapper = corpCodeMapper;
         this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DartApiService(DartProperties properties, DartCorpCodeMapper corpMapper,
+        RestTemplate client, ObjectMapper mapper, DartEventEvidenceService eventEvidence) {
+        this(properties, corpMapper, client, mapper);
+        this.eventEvidence = eventEvidence;
+    }
+
+    public String fetchFormattedEventEvidence(List<String> stockCodes) {
+        return eventEvidence == null ? "" : eventEvidence.fetchFormattedEvidence(stockCodes);
     }
 
     public boolean isAvailable() {
@@ -89,7 +101,7 @@ public class DartApiService {
             cache.put(cacheKey, new CachedEntry(result, Instant.now().plus(4, ChronoUnit.HOURS)));
             return result;
         } catch (Exception e) {
-            log.warn("[DART] {} 데이터 조회 실패: {}", stockCode, e.getMessage());
+            log.warn("[DART] {} 데이터 조회 실패: {}", stockCode, e.getClass().getSimpleName());
             return "";
         }
     }
@@ -144,7 +156,7 @@ public class DartApiService {
                 cache.put(cacheKey, new CachedEntry(result, Instant.now().plus(24, ChronoUnit.HOURS)));
                 return result;
             } catch (Exception e) {
-                log.debug("[DART] 재무제표 조회 실패 ({}/{}): {}", year, reprtCode, e.getMessage());
+                log.debug("[DART] 재무제표 조회 실패 ({}/{}): {}", year, reprtCode, e.getClass().getSimpleName());
             }
         }
 
@@ -269,7 +281,7 @@ public class DartApiService {
             cache.put(cacheKey, new CachedEntry(result, Instant.now().plus(4, ChronoUnit.HOURS)));
             return result;
         } catch (Exception e) {
-            log.debug("[DART] 공시 조회 실패: {}", e.getMessage());
+            log.debug("[DART] 공시 조회 실패: {}", e.getClass().getSimpleName());
             return "";
         }
     }
@@ -291,7 +303,7 @@ public class DartApiService {
                 return root.path("corp_name").asText(null);
             }
         } catch (Exception e) {
-            log.debug("[DART] 기업개황 조회 실패: {}", e.getMessage());
+            log.debug("[DART] 기업개황 조회 실패: {}", e.getClass().getSimpleName());
         }
         return null;
     }

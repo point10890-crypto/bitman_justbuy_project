@@ -44,6 +44,12 @@ public class MarketDataService {
 
     private final RestTemplate restTemplate;
     private final ObjectMapper mapper;
+    private EcosMarketContextService ecosMarketContextService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void configureEcosContext(EcosMarketContextService service) {
+        this.ecosMarketContextService = service;
+    }
 
     public MarketDataService(RestTemplate restTemplate, ObjectMapper mapper) {
         this.restTemplate = restTemplate;
@@ -172,6 +178,7 @@ public class MarketDataService {
         }
 
         text.append("\n\u2501\u2501\u2501 [\uc704 \ub370\uc774\ud130\ub294 \ub124\uc774\ubc84\uae08\uc735 \uc2e4\uc2dc\uac04 \uc2dc\uc138\uc785\ub2c8\ub2e4. \ubc18\ub4dc\uc2dc \uc774 \uac00\uaca9\uc744 \uae30\uc900\uc73c\ub85c \ubd84\uc11d\ud558\uc138\uc694!] \u2501\u2501\u2501\n");
+        if (ecosMarketContextService != null) text.append(ecosMarketContextService.fetchFormattedContext());
         return text.toString();
     }
 

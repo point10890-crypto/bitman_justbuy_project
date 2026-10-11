@@ -1,6 +1,7 @@
 package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.dto.AnalysisResponse;
+import com.bitman.justbuy.dto.StockPick;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -71,7 +72,8 @@ class AnalysisServiceCacheStatusTest {
 
     private AnalysisResponse saveResult(String updatedAt) throws Exception {
         var response = new AnalysisResponse("BREAKOUT", "fixture query", List.of(), null,
-            "fixture result", List.of(), null, updatedAt, true, new AnalysisResponse.Metadata(1, 2, 2));
+            "fixture result", List.of(new StockPick("Samsung", "005930", "70,000", null, null, "watch", "fixture",
+                80, "fixture", "kis-rank", "kis-quote", updatedAt)), null, updatedAt, true, new AnalysisResponse.Metadata(1, 2, 2));
         mapper.writeValue(dataDir.resolve("BREAKOUT.json").toFile(), response);
         return response;
     }

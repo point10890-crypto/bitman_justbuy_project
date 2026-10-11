@@ -45,6 +45,7 @@ public class MainConditionService {
     private final ShortTermRealtimeScanner shortTermRealtimeScanner;
     private final JonggaV2SearchService jonggaV2SearchService;
     private final LeaderConditionEngine leaderConditionEngine;
+    private final TrackRecordService trackRecordService;
 
     public MainConditionService(ConditionSearchPipeline conditionSearchPipeline) {
         this(conditionSearchPipeline, (ShortTermRealtimeScanner) null, null, null);
@@ -54,11 +55,12 @@ public class MainConditionService {
     public MainConditionService(ConditionSearchPipeline conditionSearchPipeline,
                                 ObjectProvider<ShortTermRealtimeScanner> shortTermRealtimeScannerProvider,
                                 ObjectProvider<JonggaV2SearchService> jonggaV2SearchServiceProvider,
-                                ObjectProvider<LeaderConditionEngine> leaderConditionEngineProvider) {
+                                ObjectProvider<LeaderConditionEngine> leaderConditionEngineProvider,
+                                ObjectProvider<TrackRecordService> trackRecordServiceProvider) {
         this(conditionSearchPipeline,
             shortTermRealtimeScannerProvider.getIfAvailable(),
             jonggaV2SearchServiceProvider.getIfAvailable(),
-            leaderConditionEngineProvider.getIfAvailable());
+            leaderConditionEngineProvider.getIfAvailable(), trackRecordServiceProvider.getIfAvailable());
     }
 
     MainConditionService(ConditionSearchPipeline conditionSearchPipeline,
@@ -76,10 +78,19 @@ public class MainConditionService {
                          ShortTermRealtimeScanner shortTermRealtimeScanner,
                          JonggaV2SearchService jonggaV2SearchService,
                          LeaderConditionEngine leaderConditionEngine) {
+        this(conditionSearchPipeline, shortTermRealtimeScanner, jonggaV2SearchService, leaderConditionEngine, null);
+    }
+
+    MainConditionService(ConditionSearchPipeline conditionSearchPipeline,
+                         ShortTermRealtimeScanner shortTermRealtimeScanner,
+                         JonggaV2SearchService jonggaV2SearchService,
+                         LeaderConditionEngine leaderConditionEngine,
+                         TrackRecordService trackRecordService) {
         this.conditionSearchPipeline = conditionSearchPipeline;
         this.shortTermRealtimeScanner = shortTermRealtimeScanner;
         this.jonggaV2SearchService = jonggaV2SearchService;
         this.leaderConditionEngine = leaderConditionEngine;
+        this.trackRecordService = trackRecordService;
     }
 
     public MainConditionResponse getMain() {
@@ -101,7 +112,7 @@ public class MainConditionService {
         return MainConditionResponse.full(
             asOf,
             new MainConditionResponse.Sections(shortTerm, swing, leaders, themes, closingBet, alerts),
-            summarize(allSignals),
+            trackRecordService != null ? trackRecordService.getMeasuredSummary() : new TrackRecordSummary(0, "-", "-"),
             NOTICE
         );
     }
@@ -294,9 +305,11 @@ public class MainConditionService {
         boolean hasPicks = response != null
             && response.stockPicks() != null
             && !response.stockPicks().isEmpty();
+        boolean hasVerifiedPicks = hasPicks && response.stockPicks().stream()
+            .anyMatch(pick -> AnalysisOutcome.isVerifiedPick(pick, Instant.now(), Long.MAX_VALUE));
         List<ConditionSignalDto> signals = toSignals(section, response);
         String asOf = response != null && response.updatedAt() != null ? response.updatedAt() : nowKst();
-        String sourceStatus = hasPicks
+        String sourceStatus = hasPicks && !hasVerifiedPicks ? "LEGACY_UNVERIFIED" : hasPicks
             ? stale ? "STALE_CACHE" : "PRECOMPUTED"
             : "DATA_UNAVAILABLE";
 
@@ -597,6 +610,8 @@ public class MainConditionService {
         if (picks.isEmpty()) return List.of();
 
         List<StockPick> eligiblePicks = picks.stream()
+            // Proven historical rows retain STALE_CACHE; absent or invalid provenance cannot become signals.
+            .filter(pick -> AnalysisOutcome.isVerifiedPick(pick, Instant.now(), Long.MAX_VALUE))
             .filter(pick -> isEligiblePick(section, pick))
             .limit(3)
             .toList();
@@ -604,19 +619,25 @@ public class MainConditionService {
         List<ConditionSignalDto> signals = new ArrayList<>();
         for (int i = 0; i < eligiblePicks.size(); i++) {
             StockPick pick = eligiblePicks.get(i);
-            String currentPrice = normalizeDisplay(pick.currentPrice(), "-");
+            long price = parseLongPrice(pick.currentPrice());
+            String currentPrice = price > 0 ? formatLongPrice(price) : "-";
             String targetPrice = ensureValidTargetPrice(
                 section,
                 currentPrice,
-                normalizeDisplay(firstNonBlank(pick.targetPrice(), extractAgentPrice(response, pick, false)), "-")
+                normalizeDisplay(pick.targetPrice(), "-")
             );
             String stopLoss = ensureValidStopLoss(
                 section,
                 currentPrice,
-                normalizeDisplay(firstNonBlank(pick.stopLoss(), extractAgentPrice(response, pick, true)), "-")
+                normalizeDisplay(pick.stopLoss(), "-")
             );
             String maxReturnPct = calculateReturn(currentPrice, targetPrice);
-            int score = Math.max(55, 88 - (i * 7));
+            int aiScore = response.consensus() != null && response.consensus().stocks() != null
+                ? response.consensus().stocks().stream()
+                    .filter(stock -> pick.code().equals(stock.code()))
+                    .mapToInt(stock -> Math.max(0, Math.min(100, stock.consensusScore())))
+                    .findFirst().orElse(0)
+                : 0;
 
             signals.add(new ConditionSignalDto(
                 section.responseKey(),
@@ -630,9 +651,9 @@ public class MainConditionService {
                 stopLoss,
                 maxReturnPct,
                 normalizeStatus(pick.action()),
-                score,
-                score,
-                score,
+                0, // Stored AI picks do not contain a measured deterministic rule score.
+                aiScore,
+                aiScore,
                 normalizeDisplay(pick.reason(), section.title() + " 조건검색에 포착된 후보입니다."),
                 evidenceFor(section),
                 riskFlagsFor(section),
@@ -716,24 +737,6 @@ public class MainConditionService {
             invalidationFor(section),
             nowKst()
         );
-    }
-
-    private TrackRecordSummary summarize(List<ConditionSignalDto> signals) {
-        double avg = signals.stream()
-            .map(ConditionSignalDto::maxReturnPct)
-            .mapToDouble(MainConditionService::parsePercent)
-            .filter(value -> !Double.isNaN(value))
-            .average()
-            .orElse(0);
-        long wins = signals.stream()
-            .map(ConditionSignalDto::maxReturnPct)
-            .mapToDouble(MainConditionService::parsePercent)
-            .filter(value -> !Double.isNaN(value) && value > 0)
-            .count();
-        String winRate = signals.isEmpty()
-            ? "0%"
-            : Math.round((double) wins / signals.size() * 100) + "%";
-        return new TrackRecordSummary(signals.size(), formatPercent(avg), winRate);
     }
 
     private List<String> riskFlagsFor(ConditionSection section) {
@@ -848,21 +851,13 @@ public class MainConditionService {
     private static String ensureValidTargetPrice(ConditionSection section, String currentPrice, String targetPrice) {
         long current = parseLongPrice(currentPrice);
         long target = parseLongPrice(targetPrice);
-        if (current <= 0) return normalizeDisplay(targetPrice, "-");
-        if (target > current) return formatLongPrice(target);
-
-        double upside = section == ConditionSection.SWING ? 0.06 : 0.05;
-        return formatLongPrice(roundUpToTick(Math.round(current * (1.0 + upside))));
+        return current > 0 && target > current ? formatLongPrice(target) : "-";
     }
 
     private static String ensureValidStopLoss(ConditionSection section, String currentPrice, String stopLoss) {
         long current = parseLongPrice(currentPrice);
         long stop = parseLongPrice(stopLoss);
-        if (current <= 0) return normalizeDisplay(stopLoss, "-");
-        if (stop > 0 && stop < current) return formatLongPrice(stop);
-
-        double downside = section == ConditionSection.SWING ? 0.05 : 0.04;
-        return formatLongPrice(roundDownToTick(Math.round(current * (1.0 - downside))));
+        return current > 0 && stop > 0 && stop < current ? formatLongPrice(stop) : "-";
     }
 
     private static long roundUpToTick(long price) {
@@ -897,11 +892,9 @@ public class MainConditionService {
     }
 
     private static long parseLongPrice(String value) {
-        if (value == null) return 0;
-        String normalized = value.replaceAll("[^0-9]", "");
-        if (normalized.isBlank()) return 0;
+        if (value == null || !value.trim().matches("(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)\\s*원?")) return 0;
         try {
-            return Long.parseLong(normalized);
+            return Math.max(0, Long.parseLong(value.trim().replace(",", "").replace("원", "").trim()));
         } catch (NumberFormatException ignored) {
             return 0;
         }

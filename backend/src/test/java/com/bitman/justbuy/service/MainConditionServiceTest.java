@@ -178,14 +178,15 @@ class MainConditionServiceTest {
     }
 
     @Test
-    void swingSectionBackfillsMissingRiskPricesFromAgentContent() {
+    void swingSectionLeavesAbsentRiskPricesUnavailableInsteadOfParsingUnverifiedProse() {
         AnalysisResponse cached = new AnalysisResponse(
             "REVERSAL_EDGE",
             "REVERSAL_EDGE query",
             List.of(),
             null,
             "Robotis\n1\uCC28 \uBAA9\uD45C: 34,350\uC6D0\n\uC190\uC808\uAC00: 29,000\uC6D0",
-            List.of(new StockPick("Robotis", "108490", "31,200", null, null, "watch", "swing setup")),
+            List.of(new StockPick("Robotis", "108490", "31,200", null, null, "watch", "swing setup",
+                0, "", "KIS", "KIS", "2026-05-17T00:10:00Z")),
             null,
             "2026-05-17T09:10:00+09:00",
             true,
@@ -196,22 +197,23 @@ class MainConditionServiceTest {
         MainConditionService service = new MainConditionService(conditionSearchPipeline);
 
         ConditionSignalDto signal = service.getSection("swing").signals().get(0);
-        assertThat(signal.highPrice()).isEqualTo("34,350");
-        assertThat(signal.stopLoss()).isEqualTo("29,000");
+        assertThat(signal.highPrice()).isEqualTo("-");
+        assertThat(signal.stopLoss()).isEqualTo("-");
     }
 
     @Test
-    void swingSectionCalculatesRiskPricesWhenAgentValuesAreMissingOrInvalid() {
+    void swingSectionLeavesMissingOrInvalidRiskPricesUnavailable() {
         when(conditionSearchPipeline.getPrecomputed("REVERSAL_EDGE"))
             .thenReturn(response("REVERSAL_EDGE",
-                new StockPick("LG Display", "034220", "16,690", "16,690", null, "watch", "swing setup")
+                new StockPick("LG Display", "034220", "16,690", "16,690", null, "watch", "swing setup",
+                    0, "", "KIS", "KIS", "2026-05-17T00:10:00Z")
             ));
 
         MainConditionService service = new MainConditionService(conditionSearchPipeline);
 
         ConditionSignalDto signal = service.getSection("swing").signals().get(0);
-        assertThat(signal.highPrice()).isEqualTo("17,700");
-        assertThat(signal.stopLoss()).isEqualTo("15,850");
+        assertThat(signal.highPrice()).isEqualTo("-");
+        assertThat(signal.stopLoss()).isEqualTo("-");
         assertThat(signal.highPrice()).isNotEqualTo(signal.capturePrice());
     }
 
@@ -238,7 +240,8 @@ class MainConditionServiceTest {
             targetPrice,
             null,
             action,
-            name + " 조건검색 포착"
+            name + " 조건검색 포착",
+            0, "", "KIS", "KIS", "2026-05-17T00:10:00Z"
         );
     }
 }

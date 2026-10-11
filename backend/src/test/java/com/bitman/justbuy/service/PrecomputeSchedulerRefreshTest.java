@@ -11,6 +11,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
+import java.time.Clock;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,9 +39,9 @@ class PrecomputeSchedulerRefreshTest {
 
     @Test
     void failedModeReturnsItsErrorAndOtherModesStillComplete() {
-        when(analysisService.runLiveAnalysis(anyString(), anyString()))
+        when(analysisService.runAnalysisForPublication(anyString(), anyString()))
             .thenAnswer(invocation -> response(invocation.getArgument(1)));
-        when(analysisService.runLiveAnalysis(anyString(), eq("BREAKOUT")))
+        when(analysisService.runAnalysisForPublication(anyString(), eq("BREAKOUT")))
             .thenThrow(new IllegalStateException("provider timed out"));
 
         var result = scheduler.refreshAll();
@@ -48,7 +50,7 @@ class PrecomputeSchedulerRefreshTest {
             .containsEntry("REVERSAL_EDGE", "success")
             .containsEntry("FLOW_LEADER", "success")
             .containsEntry("CATALYST_BURST", "success");
-        verify(analysisService).runLiveAnalysis(anyString(), eq("CATALYST_BURST"));
+        verify(analysisService).runAnalysisForPublication(anyString(), eq("CATALYST_BURST"));
         var failedRun = runs.recent(10).stream().filter(run -> "BREAKOUT".equals(run.mode())).findFirst().orElseThrow();
         assertThat(failedRun.status()).isEqualTo(ConditionRunStatus.FAILED);
         assertThat(failedRun.errorMessage()).isEqualTo("provider timed out");
@@ -58,7 +60,7 @@ class PrecomputeSchedulerRefreshTest {
 
     @Test
     void allExecutionFailuresReturnErrorsInsteadOfSuccess() {
-        when(analysisService.runLiveAnalysis(anyString(), anyString()))
+        when(analysisService.runAnalysisForPublication(anyString(), anyString()))
             .thenThrow(new IllegalStateException("source unavailable"));
 
         var result = scheduler.refreshAll();
@@ -71,20 +73,24 @@ class PrecomputeSchedulerRefreshTest {
 
     @Test
     void failedNotificationDoesNotReplaceTheOriginalExecutionFailure() {
-        when(analysisService.runLiveAnalysis(anyString(), anyString()))
+        when(analysisService.runAnalysisForPublication(anyString(), anyString()))
             .thenThrow(new IllegalStateException("provider timed out"));
         doThrow(new IllegalStateException("notification unavailable"))
             .when(notifier).sendAnalysisFailed(anyString(), anyString());
 
-        var result = scheduler.refreshAll();
+        scheduler = new PrecomputeScheduler(analysisService, new ConditionSearchFormulaCatalog(), notifier, null, null, runs,
+            Clock.fixed(Instant.parse("2026-10-11T23:50:00Z"), ZoneOffset.UTC));
+        scheduler.scheduledPrecompute();
 
-        assertThat(result.values()).allMatch(value -> value.equals("error: provider timed out"));
+        assertThat(runs.recent(10)).hasSize(4);
         assertThat(runs.recent(10)).allSatisfy(run -> assertThat(run.errorMessage()).isEqualTo("provider timed out"));
     }
 
     private static AnalysisResponse response(String mode) {
+        String code = switch (mode) { case "BREAKOUT" -> "005930"; case "REVERSAL_EDGE" -> "000660";
+            case "FLOW_LEADER" -> "035420"; default -> "068270"; };
         return new AnalysisResponse(mode, "fixture query", List.of(), null, "fixture result",
-            List.of(new StockPick("삼성전자", "005930", "100", "110", "90", "watch", "fixture")),
+            List.of(new StockPick("fixture " + code, code, "100", "110", "90", "watch", "fixture")),
             null, Instant.now().toString(), true, new AnalysisResponse.Metadata(20, 2, 2));
     }
 }

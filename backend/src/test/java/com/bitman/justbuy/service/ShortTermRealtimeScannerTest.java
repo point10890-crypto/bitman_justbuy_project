@@ -78,7 +78,8 @@ class ShortTermRealtimeScannerTest {
         assertThat(signals.getFirst().stockCode()).isEqualTo("222222");
         assertThat(signals.getFirst().summary()).contains("외국인 순매수 1위");
         assertThat(signals.getFirst().evidence()).contains("외국인 순매수 상위 1위");
-        assertThat(signals.getFirst().aiScore()).isGreaterThan(50);
+        assertThat(signals.getFirst().ruleScore()).isGreaterThan(50);
+        assertThat(signals.getFirst().aiScore()).isZero();
     }
 
     @Test

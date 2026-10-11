@@ -60,7 +60,7 @@ class KisApiRetryTest {
         String rateLimitBody =
             "{\"rt_cd\":\"1\",\"msg_cd\":\"EGW00201\",\"msg1\":\"초당 거래건수를 초과하였습니다.\"}";
         String successBody =
-            "{\"output\":{\"stck_prpr\":\"70000\",\"prdy_vrss\":\"100\",\"prdy_ctrt\":\"0.14\","
+            "{\"rt_cd\":\"0\",\"output\":{\"stck_prpr\":\"70000\",\"prdy_vrss\":\"100\",\"prdy_ctrt\":\"0.14\","
             + "\"acml_vol\":\"1000\",\"acml_tr_pbmn\":\"70000000\",\"stck_oprc\":\"69900\","
             + "\"stck_hgpr\":\"70100\",\"stck_lwpr\":\"69800\",\"stck_mxpr\":\"80000\","
             + "\"stck_llam\":\"50000\",\"per\":\"15\",\"pbr\":\"1.2\",\"hts_avls\":\"100000\"}}";
@@ -91,7 +91,7 @@ class KisApiRetryTest {
     @Test
     void fetchRealtimeVolumeRanking_usesDomesticStockMarketCode() {
         String rankingBody =
-            "{\"output\":[{\"hts_kor_isnm\":\"삼성전자\",\"mksc_shrn_iscd\":\"005930\","
+            "{\"rt_cd\":\"0\",\"output\":[{\"hts_kor_isnm\":\"삼성전자\",\"mksc_shrn_iscd\":\"005930\","
             + "\"stck_prpr\":\"70000\",\"prdy_ctrt\":\"1.23\",\"acml_vol\":\"1000000\"}]}";
         when(restTemplate.exchange(contains("/uapi/domestic-stock/v1/quotations/volume-rank"),
                 eq(HttpMethod.GET), any(), eq(String.class)))
@@ -109,7 +109,7 @@ class KisApiRetryTest {
     @Test
     void fetchForeignNetBuyRankingStocks_usesForeignInstitutionTotalEndpoint() {
         String rankingBody =
-            "{\"output\":[{\"hts_kor_isnm\":\"삼성전자\",\"mksc_shrn_iscd\":\"005930\","
+            "{\"rt_cd\":\"0\",\"output\":[{\"hts_kor_isnm\":\"삼성전자\",\"mksc_shrn_iscd\":\"005930\","
             + "\"stck_prpr\":\"70000\",\"prdy_ctrt\":\"1.23\",\"acml_vol\":\"1000000\","
             + "\"frgn_ntby_qty\":\"12345\",\"orgn_ntby_qty\":\"6789\"}]}";
         when(restTemplate.exchange(contains("/uapi/domestic-stock/v1/quotations/foreign-institution-total"),

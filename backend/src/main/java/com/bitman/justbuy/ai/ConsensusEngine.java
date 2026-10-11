@@ -51,7 +51,9 @@ public class ConsensusEngine {
         for (var entry : agentResults.entrySet()) {
             String agent = entry.getKey();
             StructuredAnalysis analysis = entry.getValue();
+            Set<String> seenCodes = new HashSet<>();
             for (StructuredStock stock : analysis.stocks()) {
+                if (!seenCodes.add(stock.code())) continue;
                 stockMap.computeIfAbsent(stock.code(), k -> new StockAggregate(stock.name()))
                     .entries.add(new AgentEntry(agent, stock));
             }

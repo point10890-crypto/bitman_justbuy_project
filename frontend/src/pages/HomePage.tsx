@@ -25,7 +25,7 @@ const sections: Section[] = [
     title: '단타',
     mode: 'BREAKOUT',
     query: '오늘 장중 단타 돌파 후보 분석',
-    columns: ['종목명', '포착가', '현재가', '단기 수익률'],
+    columns: ['종목명', '포착가', '현재가', '당일 등락률'],
     rows: [],
   },
   {
@@ -43,7 +43,7 @@ const sections: Section[] = [
     title: '주도주',
     mode: 'FLOW_LEADER',
     query: '기관 외국인 수급 주도 종목 분석',
-    columns: ['종목명', '거래대금', '등락률', '강도'],
+    columns: ['종목명', '포착가', '현재가', '포착 후 등락률'],
     rows: [],
   },
   {
@@ -52,7 +52,7 @@ const sections: Section[] = [
     title: '테마주',
     mode: 'CATALYST_BURST',
     query: '오늘 시장 이슈와 테마 대장주 분석',
-    columns: ['테마명', '대장주', '상승률', '강도'],
+    columns: ['종목명', '포착가', '현재가', '목표 상승 여력'],
     rows: [],
   },
   {
@@ -95,7 +95,7 @@ function rowsFromCondition(section: ConditionSectionResponse | undefined, fallba
     name: signal.stockName,
     code: signal.stockCode,
     a: signal.capturePrice || signal.currentPrice || '-',
-    b: signal.highPrice || signal.currentPrice || '-',
+    b: usesRiskPriceColumns(section) ? signal.highPrice || '-' : signal.currentPrice || '-',
     c: usesRiskPriceColumns(section) ? signal.stopLoss || '-' : signal.maxReturnPct && signal.maxReturnPct !== '-' ? signal.maxReturnPct : signal.status,
     summary: signal.summary,
     capturedAt: signal.capturedAt,
@@ -210,11 +210,14 @@ export default function HomePage() {
   const [query, setQuery] = useState('')
   const [activeQuery, setActiveQuery] = useState('')
   const [panelOpen, setPanelOpen] = useState(false)
-  const [endpointRows, setEndpointRows] = useState<Record<string, Section['rows']>>({})
+  const [endpointSections, setEndpointSections] = useState<Record<string, { data: ConditionSectionResponse; feed: typeof mainConditions }>>({})
   const [endpointStatus, setEndpointStatus] = useState<Record<string, string>>({})
   const [endpointLoading, setEndpointLoading] = useState<string | null>(null)
   const handledActionRef = useRef('')
   const queryRef = useRef('')
+  const feedRef = useRef(mainConditions)
+  feedRef.current = mainConditions
+  const endpointGeneration = useRef(0)
   const locked = user?.role !== 'ADMIN' && user?.subscription !== 'pro'
 
   useEffect(() => {
@@ -240,17 +243,21 @@ export default function HomePage() {
 
   const loadConditionEndpoint = async (section: Section) => {
     if (section.id === 'alerts') return
+    const request = ++endpointGeneration.current
+    const feed = feedRef.current
     setEndpointLoading(section.id)
     setEndpointStatus(prev => ({ ...prev, [section.id]: '최신 후보 불러오는 중' }))
 
     try {
       const latest = await fetchConditionSection(section.id, getStoredToken() || undefined)
-      setEndpointRows(prev => ({ ...prev, [section.id]: rowsFromCondition(latest, section.rows) }))
-      setEndpointStatus(prev => ({ ...prev, [section.id]: latest.signals?.length ? `${latest.title} 최신 후보 반영` : `${latest.title} 결과 없음` }))
+      if (request === endpointGeneration.current && feed === feedRef.current) {
+        setEndpointSections(prev => ({ ...prev, [section.id]: { data: latest, feed } }))
+        setEndpointStatus(prev => ({ ...prev, [section.id]: latest.signals?.length ? `${latest.title} 최신 후보 반영` : `${latest.title} 결과 없음` }))
+      }
     } catch (err) {
-      setEndpointStatus(prev => ({ ...prev, [section.id]: err instanceof Error ? err.message : '최신 후보를 불러오지 못했습니다' }))
+      if (request === endpointGeneration.current && feed === feedRef.current) setEndpointStatus(prev => ({ ...prev, [section.id]: err instanceof Error ? err.message : '최신 후보를 불러오지 못했습니다' }))
     }
-    setEndpointLoading(null)
+    if (request === endpointGeneration.current) setEndpointLoading(null)
   }
 
   const runUsageEndpoint = () => {
@@ -306,7 +313,7 @@ export default function HomePage() {
   }, [])
 
   const displayedSections = sections.map(section => {
-    const apiSection =
+    const mainSection =
       section.id === 'short-term' ? mainConditions?.sections.shortTerm :
       section.id === 'swing' ? mainConditions?.sections.swing :
       section.id === 'leaders' ? mainConditions?.sections.leaders :
@@ -315,10 +322,22 @@ export default function HomePage() {
       section.id === 'alerts' ? mainConditions?.sections.alerts :
       undefined
 
+    const manual = endpointSections[section.id]
+    const usesManual = !!manual && manual.feed === mainConditions
+      && (!mainSection || Date.parse(manual.data.asOf) >= Date.parse(mainSection.asOf))
+    const apiSection = manual && usesManual ? manual.data : mainSection
+    const observedChange = (section.id === 'short-term' && apiSection?.sourceStatus === 'REALTIME_SCAN')
+      || (section.id === 'leaders' && apiSection?.sourceStatus === 'LEADER_SCAN')
+    const columns = [...section.columns]
+    if ((section.id === 'short-term' || section.id === 'leaders') && apiSection && !observedChange) {
+      columns[3] = '목표 상승 여력'
+    }
+
     return {
       ...section,
-      rows: endpointRows[section.id] || rowsFromCondition(apiSection, section.rows),
-      sourceStatus: endpointLoading === section.id ? '최신 후보 불러오는 중' : endpointStatus[section.id] || sectionSourceStatus(apiSection),
+      columns,
+      rows: rowsFromCondition(apiSection, section.rows),
+      sourceStatus: endpointLoading === section.id ? '최신 후보 불러오는 중' : (usesManual ? endpointStatus[section.id] : undefined) || sectionSourceStatus(apiSection),
       asOf: apiSection?.asOf,
       asOfLabel: formatKstTime(apiSection?.asOf),
       warning: sectionWarning(apiSection),
@@ -364,9 +383,9 @@ export default function HomePage() {
 
       {mainConditions?.trackRecord && (
         <div className="condition-track-summary" aria-label="조건검색 성과 요약">
-          <span>검증 신호 {mainConditions.trackRecord.totalSignals}건</span>
-          <span>평균 {mainConditions.trackRecord.avgMaxReturnPct}</span>
-          <span>승률 {mainConditions.trackRecord.winRate5d}</span>
+          <span>측정 완료 {mainConditions.trackRecord.totalSignals}건</span>
+          <span>5거래일 평균 {mainConditions.trackRecord.avgMaxReturnPct === '-' ? '자료 없음' : mainConditions.trackRecord.avgMaxReturnPct}</span>
+          <span>5거래일 승률 {mainConditions.trackRecord.winRate5d === '-' ? '자료 없음' : mainConditions.trackRecord.winRate5d}</span>
           {mainConditions.asOf && <span>{formatKstTime(mainConditions.asOf)} 기준</span>}
         </div>
       )}

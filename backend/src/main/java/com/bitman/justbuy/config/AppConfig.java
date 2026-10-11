@@ -50,9 +50,12 @@ public class AppConfig {
             "marketData",      // 시장 데이터: 30분
             "analysis",        // 분석 결과: 1시간
             "userData",        // 사용자 데이터: 30분
-            "health",          // 헬스체크: 5분
+            "health",          // 헬스체크: 별도 30초 캐시
             "static"           // 정적 데이터: 4시간
         ));
+
+        manager.registerCustomCache("health", Caffeine.newBuilder().maximumSize(10)
+            .expireAfterWrite(Duration.ofSeconds(30)).build());
 
         return manager;
     }

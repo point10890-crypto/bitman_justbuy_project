@@ -2,6 +2,8 @@ package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.StockPick;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,6 +29,7 @@ public class TelegramNotifier {
     private static final String API_URL = "https://api.telegram.org/bot%s/sendMessage";
     private static final int MAX_MESSAGE_LENGTH = 4000;
     private static final String NOTICE_TRUNCATED = "\n\n... (생략)";
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private final String botToken;
     private final String chatId;
@@ -36,7 +39,7 @@ public class TelegramNotifier {
     public TelegramNotifier(@Value("${bitman.telegram.bot-token}") String botToken,
                             @Value("${bitman.telegram.chat-id}") String chatId,
                             @Value("${bitman.telegram.channel-chat-id:}") String channelChatId,
-                            RestTemplate restTemplate) {
+                            @Qualifier("telegram") RestTemplate restTemplate) {
         this.botToken = botToken;
         this.chatId = chatId;
         this.channelChatId = channelChatId;
@@ -47,7 +50,10 @@ public class TelegramNotifier {
                 channelChatId != null && !channelChatId.isEmpty() ? channelChatId : "none");
     }
 
-    public void send(String message) {
+    public enum DeliveryStatus { SENT, PARTIAL, SKIPPED, FAILED }
+    public record DeliveryReport(DeliveryStatus status, int sentCount, int failedCount) {}
+
+    public DeliveryReport send(String message) {
         String footer = "\n\n\ud83d\udd17 https://api.bit-man.net";
         String text;
         if (message.length() > MAX_MESSAGE_LENGTH) {
@@ -62,12 +68,19 @@ public class TelegramNotifier {
         }
 
         // 1) 개인 봇
-        sendTo(chatId, text);
+        int sent = 0, failed = 0;
+        boolean enabled = botToken != null && !botToken.isBlank();
+        if (enabled && chatId != null && !chatId.isBlank()) {
+            if (sendTo(chatId, text)) sent++; else failed++;
+        }
 
         // 2) 채널 (설정된 경우)
-        if (channelChatId != null && !channelChatId.isEmpty()) {
-            sendTo(channelChatId, text);
+        if (enabled && channelChatId != null && !channelChatId.isBlank()) {
+            if (sendTo(channelChatId, text)) sent++; else failed++;
         }
+        DeliveryStatus status = sent > 0 ? failed > 0 ? DeliveryStatus.PARTIAL : DeliveryStatus.SENT
+            : failed > 0 ? DeliveryStatus.FAILED : DeliveryStatus.SKIPPED;
+        return new DeliveryReport(status, sent, failed);
     }
 
     /**
@@ -108,7 +121,7 @@ public class TelegramNotifier {
     }
 
     private boolean sendTo(String targetChatId, String text) {
-        if (botToken == null || botToken.isBlank()) {
+        if (botToken == null || botToken.isBlank() || targetChatId == null || targetChatId.isBlank()) {
             log.warn("[Telegram] botToken empty — cannot send to {} (check TELEGRAM_BOT_TOKEN env)", targetChatId);
             return false;
         }
@@ -124,19 +137,19 @@ public class TelegramNotifier {
             );
 
             String resp = restTemplate.postForObject(url, new HttpEntity<>(body, headers), String.class);
-            // Telegram returns HTTP 200 even when ok=false for some cases — inspect body
-            if (resp != null && resp.contains("\"ok\":false")) {
-                log.warn("[Telegram] API rejected send to {}: {}", targetChatId,
-                    resp.length() > 300 ? resp.substring(0, 300) : resp);
+            // Only Telegram's explicit boolean acknowledgement confirms delivery.
+            var acknowledgement = resp != null ? JSON.readTree(resp) : null;
+            if (acknowledgement == null || !acknowledgement.path("ok").isBoolean()
+                || !acknowledgement.path("ok").booleanValue()) {
+                log.warn("[Telegram] Send to {} was not acknowledged", targetChatId);
                 return false;
             }
             log.info("[Telegram] ✉ sent to {} ({} chars)", targetChatId, text.length());
             return true;
         } catch (org.springframework.web.client.HttpStatusCodeException hse) {
-            log.warn("[Telegram] HTTP {} sending to {}: {}",
-                hse.getStatusCode(), targetChatId, hse.getResponseBodyAsString());
+            log.warn("[Telegram] HTTP {} sending to {}", hse.getStatusCode(), targetChatId);
         } catch (Exception e) {
-            log.warn("[Telegram] Failed to send to {}: {}", targetChatId, e.getMessage());
+            log.warn("[Telegram] Failed to send to {}: {}", targetChatId, e.getClass().getSimpleName());
         }
         return false;
     }
@@ -153,7 +166,7 @@ public class TelegramNotifier {
         };
     }
 
-    public void sendAnalysisResult(String mode, AnalysisResponse result) {
+    public DeliveryReport sendAnalysisResult(String mode, AnalysisResponse result) {
         log.info("[Telegram] sendAnalysisResult called: mode={}, metadata={}, picks={}",
             mode,
             result.metadata() != null,
@@ -192,13 +205,13 @@ public class TelegramNotifier {
                 String _tgt = pick.targetPrice();
                 String _stp = pick.stopLoss();
                 if (_cur != null && !_cur.isEmpty()) {
-                    long _curN = parsePrice(_cur);
-                    if ((_tgt == null || _tgt.isEmpty()) && _curN > 0) _tgt = String.format("%,d", Math.round(_curN * 1.10));
-                    if ((_stp == null || _stp.isEmpty()) && _curN > 0) _stp = String.format("%,d", Math.round(_curN * 0.95));
-                    sb.append(String.format("   \ub9e4\uc218: %s", _cur));
-                    if (_tgt != null && !_tgt.isEmpty()) sb.append(String.format(" \u2192 \ubaa9\ud45c: %s", _tgt));
-                    if (_stp != null && !_stp.isEmpty()) sb.append(String.format(" | \uc190\uc808: %s", _stp));
-                    sb.append("\n");
+                    long current = parsePrice(_cur), target = parsePrice(_tgt), stop = parsePrice(_stp);
+                    if (current > 0) {
+                        sb.append(String.format("   현재가: %,d", current));
+                        if (target > current) sb.append(String.format(" → 목표: %,d", target));
+                        if (stop > 0 && stop < current) sb.append(String.format(" | 손절: %,d", stop));
+                        sb.append("\n");
+                    }
                 }
 
                 if (pick.action() != null && !pick.action().isEmpty()) {
@@ -240,14 +253,15 @@ public class TelegramNotifier {
 
         // v2.8.8: removed final-analysis section
         sb.append("\n\n🔗 https://api.bit-man.net");
-        send(sb.toString());
+        return send(sb.toString());
     }
 
     private long parsePrice(String s) {
         if (s == null) return -1;
-        String digits = s.replaceAll("[^0-9]", "");
-        if (digits.isEmpty()) return -1;
-        try { return Long.parseLong(digits); } catch (NumberFormatException e) { return -1; }
+        String clean = s.trim();
+        if (!clean.matches("(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)\\s*원?")) return -1;
+        try { return Long.parseLong(clean.replace(",", "").replace("원", "").trim()); }
+        catch (NumberFormatException e) { return -1; }
     }
 
     /** finalContent에서 JSON 코드블록, HTML 태그, 검증 섹션 제거 */

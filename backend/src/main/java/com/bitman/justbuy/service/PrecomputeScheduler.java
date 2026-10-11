@@ -15,6 +15,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.Clock;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -28,6 +30,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 
 /**
  * 홈 카드 4개 컨셉 모드 프리컴퓨트 스케줄러.
@@ -59,7 +64,12 @@ public class PrecomputeScheduler {
     private final MarketDataService marketDataService;
     private final ConditionRunService conditionRunService;
     private final Map<String, String> lastRunTimes = new ConcurrentHashMap<>();
+    private final Clock clock;
+    private final AtomicBoolean startupAttempted = new AtomicBoolean();
+    @Value("${bitman.scheduler.startup-refresh-enabled:true}")
+    private boolean startupRefreshEnabled = true;
 
+    @Autowired
     public PrecomputeScheduler(AnalysisService analysisService,
                                ConditionSearchFormulaCatalog formulaCatalog,
                                @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -67,23 +77,45 @@ public class PrecomputeScheduler {
                                KisApiService kisApiService,
                                MarketDataService marketDataService,
                                ConditionRunService conditionRunService) {
+        this(analysisService, formulaCatalog, telegramNotifier, kisApiService, marketDataService, conditionRunService, Clock.systemUTC());
+    }
+
+    PrecomputeScheduler(AnalysisService analysisService, ConditionSearchFormulaCatalog formulaCatalog,
+                        TelegramNotifier telegramNotifier, KisApiService kisApiService,
+                        MarketDataService marketDataService, ConditionRunService conditionRunService, Clock clock) {
         this.analysisService = analysisService;
         this.formulaCatalog = formulaCatalog;
         this.telegramNotifier = telegramNotifier;
         this.kisApiService = kisApiService;
         this.marketDataService = marketDataService;
         this.conditionRunService = conditionRunService;
+        this.clock = clock;
         log.info("[Scheduler] 컨셉 모드 4종 스케줄러 초기화 (매시 50분, KST), telegram={}", telegramNotifier != null);
     }
 
     /** 서버 시작 후 캐시 없는 모드 자동 분석 */
     @PostConstruct
     public void onStartup() {
-        new Thread(this::runStartupPrecompute, "startup-precompute").start();
+        Thread.startVirtualThread(() -> {
+            try { Thread.sleep(30_000); }
+            catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+            runStartupPrecompute();
+        });
     }
 
     private void runStartupPrecompute() {
-        try { Thread.sleep(30_000); } catch (InterruptedException e) { return; }
+        if (!startupAttempted.compareAndSet(false, true)) return;
+        if (!isStartupRefreshAllowed()) {
+            for (String mode : formulaCatalog.scheduledQueries().keySet()) {
+                var stored = analysisService.getStoredPrecomputed(mode);
+                if (stored != null && AnalysisOutcome.classify(stored) != AnalysisOutcome.FAILED
+                    && stored.stockPicks() != null && !stored.stockPicks().isEmpty() && stored.updatedAt() != null) {
+                    lastRunTimes.put(mode, stored.updatedAt());
+                }
+            }
+            log.info("[Scheduler] Startup refresh skipped by trading-day/time/cost policy");
+            return;
+        }
 
         log.info("[Scheduler] 🚀 서버 시작 — 캐시 확인 중...");
         int success = 0, total = 0;
@@ -98,16 +130,21 @@ public class PrecomputeScheduler {
                 if (cached != null) {
                     var run = conditionRunService.create(ConditionRunTrigger.SCHEDULER_STARTUP, mode, query);
                     try {
-                        if (cached.updatedAt() != null) lastRunTimes.put(mode, cached.updatedAt());
                         log.info("[Scheduler] ✅ {} — 캐시 유효, 건너뜀", mode);
                         // ★ v2.8.7 (2026-04-29): 캐시된 결과도 dedup + name disambiguation 적용
                         //   — 옛 캐시(중복 포함) 그대로 재발송 방지
                         cached = postProcessPicks(mode, cached, seenCodes);
+                        AnalysisOutcome.requireSuccessfulAgents(cached);
+                        if (AnalysisOutcome.classify(cached) != AnalysisOutcome.EMPTY) {
+                            analysisService.saveAnalysis(mode, cached);
+                            updateSeen(seenCodes, cached.stockPicks());
+                            if (cached.updatedAt() != null) lastRunTimes.put(mode, cached.updatedAt());
+                        }
                         conditionRunService.recordEvent(run.runId(), ConditionRunEventType.CACHE_HIT,
                             "startup precompute cache hit", Map.of("mode", mode));
                         // 장 시간(8~15시) 재시작이면 캐시 결과 즉시 발송 — 누락 방지
                         // v2.8.5 (2026-04-27): 1차 cron(08:50) 결과 발송 허용 위해 08시 포함
-                        int kstHour = ZonedDateTime.now(ZoneId.of("Asia/Seoul")).getHour();
+                        int kstHour = nowKst().getHour();
                         boolean isMarketHours = kstHour >= 8 && kstHour < 16;
                         var picks = cached.stockPicks();
                         var meta  = cached.metadata();
@@ -115,9 +152,7 @@ public class PrecomputeScheduler {
                         int succeeded = meta != null ? meta.agentsSucceeded() : 0;
                         if (telegramNotifier != null && isMarketHours && pickCount > 0 && succeeded > 0) {
                             log.info("[Scheduler] 📨 {} — 장중 재시작 감지, 캐시 결과 즉시 발송 (dedup 적용)", mode);
-                            telegramNotifier.sendAnalysisResult(mode, cached);
-                            conditionRunService.recordEvent(run.runId(), ConditionRunEventType.NOTIFIED,
-                                "startup cached result sent", Map.of("pickCount", pickCount));
+                            recordDelivery(run.runId(), telegramNotifier.sendAnalysisResult(mode, cached), pickCount);
                         } else {
                             conditionRunService.recordEvent(run.runId(), ConditionRunEventType.NOTIFICATION_SKIPPED,
                                 "startup cached notification skipped", Map.of(
@@ -128,7 +163,7 @@ public class PrecomputeScheduler {
                                 ));
                         }
                         conditionRunService.markComplete(run.runId(), cached);
-                        success++;
+                        if (AnalysisOutcome.classify(cached) == AnalysisOutcome.COMPLETE) success++;
                     } catch (Exception e) {
                         conditionRunService.markFailed(run.runId(), e.getMessage());
                         throw e;
@@ -136,8 +171,7 @@ public class PrecomputeScheduler {
                     continue;
                 }
                 log.info("[Scheduler] ▶ {} — 캐시 없음, 자동 실행", mode);
-                execute(mode, query, seenCodes, ConditionRunTrigger.SCHEDULER_STARTUP);
-                success++;
+                if ("success".equals(execute(mode, query, seenCodes, ConditionRunTrigger.SCHEDULER_STARTUP))) success++;
             } catch (Exception e) {
                 log.error("[Scheduler] ❌ {} 시작 시 실행 실패: {}", mode, e.getMessage());
             }
@@ -165,7 +199,7 @@ public class PrecomputeScheduler {
             return;
         }
 
-        int hour = ZonedDateTime.now(ZoneId.of("Asia/Seoul")).getHour();
+        int hour = nowKst().getHour();
         String round = switch (hour) {
             case 8 -> "1차";
             case 11 -> "2차";
@@ -179,8 +213,7 @@ public class PrecomputeScheduler {
         Map<String, String> scheduledModes = formulaCatalog.scheduledQueries();
         for (var entry : scheduledModes.entrySet()) {
             try {
-                execute(entry.getKey(), entry.getValue(), seenCodes, ConditionRunTrigger.SCHEDULER_CRON);
-                success++;
+                if ("success".equals(execute(entry.getKey(), entry.getValue(), seenCodes, ConditionRunTrigger.SCHEDULER_CRON))) success++;
             } catch (Exception e) {
                 log.error("[Scheduler] ❌ {}:50 {} 실패: {}", hour, entry.getKey(), e.getMessage());
             }
@@ -191,7 +224,15 @@ public class PrecomputeScheduler {
     }
 
     private boolean isTradingDay() {
-        return KoreanMarketCalendar.isTradingDay(LocalDate.now(ZoneId.of("Asia/Seoul")));
+        return KoreanMarketCalendar.isTradingDay(nowKst().toLocalDate());
+    }
+
+    private ZonedDateTime nowKst() { return clock.instant().atZone(ZoneId.of("Asia/Seoul")); }
+
+    boolean isStartupRefreshAllowed() {
+        LocalTime time = nowKst().toLocalTime();
+        return startupRefreshEnabled && isTradingDay()
+            && !time.isBefore(LocalTime.of(8, 50)) && !time.isAfter(LocalTime.of(15, 30));
     }
 
     /**
@@ -222,8 +263,8 @@ public class PrecomputeScheduler {
                 invalidCodeDropped++;
                 continue;
             }
-            // 2) Naver 미가용 시 fallback (AI 그대로 유지)
-            if (marketDataService == null) {
+            // Published source identity is already verified; avoid serial network lookups.
+            if (AnalysisOutcome.isVerifiedPick(p, clock.instant(), Long.MAX_VALUE) || marketDataService == null) {
                 nameFixed.add(p);
                 continue;
             }
@@ -241,7 +282,7 @@ public class PrecomputeScheduler {
                     nameFixed.add(new StockPick(
                         canonName, code, p.currentPrice(), p.targetPrice(),
                         p.stopLoss(), p.action(), p.reason(),
-                        p.financialScore(), p.financialSummary()
+                        p.financialScore(), p.financialSummary(), p.candidateSource(), p.quoteSource(), p.quoteCheckedAt()
                     ));
                     nameFixedCount++;
                 } else {
@@ -278,9 +319,8 @@ public class PrecomputeScheduler {
                 result.finalContent(), java.util.List.of(), result.consensus(),
                 result.updatedAt(), result.isFresh(), result.metadata()
             );
-            analysisService.saveAnalysis(mode, emptied);
-            log.warn("[Scheduler] {} 모든 픽이 검증 실패로 제거됨 — 빈 결과 저장", mode);
-            return emptied;
+            log.warn("[Scheduler] {} 모든 픽이 최종 조건으로 제거됨 — 정상 캐시 보존", mode);
+            return AnalysisPublicationView.finalizePicks(emptied, List.of());
         }
 
         // ★ v2.8.8 (2026-04-29): 같은 모드 내 동일 이름 dedup (코드 다르더라도 1개만 유지)
@@ -309,11 +349,7 @@ public class PrecomputeScheduler {
                 .filter(p -> p.code() == null || !seenCodes.contains(p.code()))
                 .toList();
             int removed = intraDedup.size() - candidate.size();
-            if (candidate.isEmpty() && !intraDedup.isEmpty()) {
-                // 전부 중복 → dedup 적용 안 함 (UX 우선 — 모드별 빈 화면 방지)
-                log.warn("[Scheduler] {} cross-mode dedup 후 picks=0 → dedup 스킵 (앱 UX 보호, {}종목 유지)",
-                    mode, intraDedup.size());
-            } else if (removed > 0) {
+            if (removed > 0) {
                 filtered = candidate;
                 log.info("[Scheduler] {} cross-mode dedup: {} 종목 제거 (이전 모드 중복)", mode, removed);
             }
@@ -338,8 +374,7 @@ public class PrecomputeScheduler {
 
         // 변경 없으면 원본 반환
         if (!changed) {
-            updateSeen(seenCodes, filtered);
-            return result;
+            return AnalysisOutcome.describe(result);
         }
 
         // 변경 있음 — 새 AnalysisResponse + 캐시 재저장
@@ -348,9 +383,7 @@ public class PrecomputeScheduler {
             result.finalContent(), filtered, result.consensus(),
             result.updatedAt(), result.isFresh(), result.metadata()
         );
-        analysisService.saveAnalysis(mode, updated);
-        updateSeen(seenCodes, filtered);
-        return updated;
+        return AnalysisPublicationView.finalizePicks(updated, filtered);
     }
 
     private void updateSeen(Set<String> seenCodes, List<StockPick> picks) {
@@ -376,8 +409,8 @@ public class PrecomputeScheduler {
         execute(mode, query, seenCodes, ConditionRunTrigger.UNKNOWN);
     }
 
-    private void execute(String mode, String query, Set<String> seenCodes, ConditionRunTrigger trigger) {
-        String now = ZonedDateTime.now(ZoneId.of("Asia/Seoul"))
+    private String execute(String mode, String query, Set<String> seenCodes, ConditionRunTrigger trigger) {
+        String now = nowKst()
             .format(DateTimeFormatter.ofPattern("HH:mm:ss"));
         log.info("[Scheduler] ▶ {} 실행 시작 ({})", mode, now);
 
@@ -387,13 +420,28 @@ public class PrecomputeScheduler {
             conditionRunService.markStarted(run.runId(), "scheduler analysis started");
             conditionRunService.recordEvent(run.runId(), ConditionRunEventType.AI_STARTED,
                 "scheduler pipeline run started", Map.of("mode", mode));
-            AnalysisResponse result = analysisService.runLiveAnalysis(query, mode);
-            if (result.updatedAt() != null) lastRunTimes.put(mode, result.updatedAt());
+            AnalysisResponse result = analysisService.runAnalysisForPublication(query, mode);
+            AnalysisOutcome.requireSuccessfulAgents(result);
 
             // ★ v2.8.7 (2026-04-29): Cross-mode dedup + name disambiguation
             //   1) seenCodes 에 있는 코드는 이번 모드 picks 에서 제거 (이전 모드 중복 방지)
             //   2) 같은 모드 내 동일 이름 + 다른 코드는 "이름(code)" 로 disambiguate
             result = postProcessPicks(mode, result, seenCodes);
+            AnalysisOutcome outcome = AnalysisOutcome.classify(result);
+            if (outcome == AnalysisOutcome.EMPTY) {
+                conditionRunService.recordEvent(run.runId(), ConditionRunEventType.NOTIFICATION_SKIPPED,
+                    "empty publication; last good cache preserved", Map.of("outcome", "EMPTY", "pickCount", 0));
+                conditionRunService.markComplete(run.runId(), result);
+                com.bitman.justbuy.controller.MonitorController.recordAnalysis(mode, false,
+                    System.currentTimeMillis() - startMs, result.metadata().agentsUsed(), result.metadata().agentsSucceeded(), 0, "EMPTY");
+                return "empty";
+            }
+            analysisService.saveAnalysis(mode, result);
+            conditionRunService.recordEvent(run.runId(), ConditionRunEventType.SAVED,
+                "final publication saved", Map.of("pickCount", result.stockPicks().size(), "outcome", outcome.name()));
+            analysisService.recordPublishedAnalysis(result);
+            updateSeen(seenCodes, result.stockPicks());
+            if (result.updatedAt() != null) lastRunTimes.put(mode, result.updatedAt());
 
             // metadata 가 null 일 수 있는 경로(폴백 응답 등)를 NPE 없이 처리
             var meta = result.metadata();
@@ -408,34 +456,36 @@ public class PrecomputeScheduler {
                 mode, durationMs, agentsSucceeded, agentsUsed);
 
             com.bitman.justbuy.controller.MonitorController.recordAnalysis(
-                mode, true, durationMs, agentsUsed, agentsSucceeded, picks, null);
+                mode, outcome == AnalysisOutcome.COMPLETE, durationMs, agentsUsed, agentsSucceeded, picks,
+                outcome == AnalysisOutcome.PARTIAL ? "PARTIAL" : null);
 
             // 에이전트 일부 실패는 지금까지 로그에만 남아 조용히 지나갔다.
             // 2개 중 1개만 성공해도 합의(consensus)가 비고 픽 품질이 떨어지므로 즉시 알린다.
-            notifyAgentDegradation(mode, agentsUsed, agentsSucceeded, picks);
+            if (trigger != ConditionRunTrigger.ADMIN_REFRESH) notifyAgentDegradation(mode, agentsUsed, agentsSucceeded, picks);
 
             // 텔레그램 발송 조건 3가지 동시 충족 시에만 발송:
             // 1) picks > 0  — 빈 분석 결과 발송 방지
             // 2) agentsSucceeded > 0  — 모든 AI 실패 시 발송 방지
             // 3) 장 시간(08:00~15:59 KST)  — 서버 재시작/장외 자동 분석 발송 방지
             //    v2.8.5 (2026-04-27): 08:50 1차 cron 결과 발송 허용 위해 08시 포함
-            int kstHour = ZonedDateTime.now(ZoneId.of("Asia/Seoul")).getHour();
-            boolean isMarketHours = kstHour >= 8 && kstHour < 16;
-            if (telegramNotifier != null && picks > 0 && agentsSucceeded > 0 && isMarketHours) {
-                telegramNotifier.sendAnalysisResult(mode, result);
-                conditionRunService.recordEvent(run.runId(), ConditionRunEventType.NOTIFIED,
-                    "scheduler result sent", Map.of("pickCount", picks));
+            int kstHour = nowKst().getHour();
+            boolean isMarketHours = isTradingDay() && kstHour >= 8 && kstHour < 16;
+            if (trigger != ConditionRunTrigger.ADMIN_REFRESH && telegramNotifier != null && picks > 0 && agentsSucceeded > 0 && isMarketHours) {
+                recordDelivery(run.runId(), telegramNotifier.sendAnalysisResult(mode, result), picks);
             } else {
-                log.info("[Scheduler] {} 텔레그램 Skip — picks={}, agents={}/{}, marketHours={}({}시)",
-                    mode, picks, agentsSucceeded, agentsUsed, isMarketHours, kstHour);
+                log.info("[Scheduler] {} 텔레그램 Skip — picks={}, agents={}/{}, marketHours={}({}시), trigger={}",
+                    mode, picks, agentsSucceeded, agentsUsed, isMarketHours, kstHour, trigger);
                 conditionRunService.recordEvent(run.runId(), ConditionRunEventType.NOTIFICATION_SKIPPED,
                     "scheduler notification skipped", Map.of(
                         "pickCount", picks,
                         "agentsSucceeded", agentsSucceeded,
-                        "marketHours", isMarketHours
+                        "marketHours", isMarketHours,
+                        "trigger", trigger.name(),
+                        "manualSilent", trigger == ConditionRunTrigger.ADMIN_REFRESH
                     ));
             }
             conditionRunService.markComplete(run.runId(), result);
+            return outcome == AnalysisOutcome.COMPLETE ? "success" : "partial";
         } catch (Exception e) {
             log.error("[Scheduler] ❌ {} 실패: {}", mode, e.getMessage());
 
@@ -444,7 +494,7 @@ public class PrecomputeScheduler {
             com.bitman.justbuy.controller.MonitorController.recordAnalysis(
                 mode, false, System.currentTimeMillis() - startMs, 0, 0, 0, e.getMessage());
 
-            if (telegramNotifier != null) {
+            if (trigger != ConditionRunTrigger.ADMIN_REFRESH && telegramNotifier != null) {
                 try {
                     telegramNotifier.sendAnalysisFailed(mode, e.getMessage());
                 } catch (Exception notificationError) {
@@ -463,6 +513,25 @@ public class PrecomputeScheduler {
 
     /** 선택 모드만 다시 실행한다. 모든 모드는 실행 전에 검증한다. */
     public Map<String, String> refreshModes(List<String> modes) {
+        List<String> selectedModes = normalizeRefreshModes(modes);
+        Map<String, String> scheduledModes = formulaCatalog.scheduledQueries();
+        Map<String, String> results = new LinkedHashMap<>();
+        log.info("[Scheduler] 검색식 새로고침 시작: {}", selectedModes);
+
+        Set<String> seenCodes = new HashSet<>();
+        for (String mode : selectedModes) {
+            try {
+                results.put(mode, execute(mode, scheduledModes.get(mode), seenCodes, ConditionRunTrigger.ADMIN_REFRESH));
+            } catch (Exception e) {
+                log.error("[Scheduler] {} 새로고침 실패: {}", mode, e.getMessage());
+                results.put(mode, "error: " + e.getMessage());
+            }
+        }
+        log.info("[Scheduler] 전체 새로고침 완료: {} — 누적 추천 {}종목", results, seenCodes.size());
+        return results;
+    }
+
+    public List<String> normalizeRefreshModes(List<String> modes) {
         Map<String, String> scheduledModes = formulaCatalog.scheduledQueries();
         Set<String> selectedModes = new LinkedHashSet<>();
         if (modes == null) {
@@ -477,22 +546,21 @@ public class PrecomputeScheduler {
                 selectedModes.add(normalized);
             }
         }
-        Map<String, String> results = new LinkedHashMap<>();
-        log.info("[Scheduler] 검색식 새로고침 시작: {}", selectedModes);
+        return List.copyOf(selectedModes);
+    }
 
-        Set<String> seenCodes = new HashSet<>();  // ★ cross-mode dedup
-        for (String mode : selectedModes) {
-            try {
-                execute(mode, scheduledModes.get(mode), seenCodes, ConditionRunTrigger.ADMIN_REFRESH);
-                results.put(mode, "success");
-            } catch (Exception e) {
-                log.error("[Scheduler] {} 새로고침 실패: {}", mode, e.getMessage());
-                results.put(mode, "error: " + e.getMessage());
-            }
+    private void recordDelivery(java.util.UUID runId, TelegramNotifier.DeliveryReport report, int picks) {
+        if (report == null || report.status() == TelegramNotifier.DeliveryStatus.SKIPPED) {
+            conditionRunService.recordEvent(runId, ConditionRunEventType.NOTIFICATION_SKIPPED,
+                "notification disabled or not acknowledged", Map.of("pickCount", picks));
+            return;
         }
-
-        log.info("[Scheduler] 전체 새로고침 완료: {} — 누적 추천 {}종목", results, seenCodes.size());
-        return results;
+        Map<String, Object> metrics = Map.of("pickCount", picks, "sentCount", report.sentCount(),
+            "failedCount", report.failedCount(), "deliveryStatus", report.status().name());
+        if (report.sentCount() > 0) conditionRunService.recordEvent(runId, ConditionRunEventType.NOTIFIED,
+            "notification delivery confirmed", metrics);
+        if (report.failedCount() > 0) conditionRunService.recordEvent(runId, ConditionRunEventType.NOTIFICATION_FAILED,
+            "notification delivery failed", metrics);
     }
 
     public Map<String, String> getLastRunTimes() {

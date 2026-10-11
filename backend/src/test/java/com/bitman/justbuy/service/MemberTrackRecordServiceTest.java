@@ -142,7 +142,8 @@ class MemberTrackRecordServiceTest {
         r.setHitTarget(hitTarget);
         r.setHitStop(hitStop);
         // 도달률 분모는 "레벨이 설정된 건"이므로 테스트 레코드에도 설정해 둔다
-        r.setTargetPrice(1000L);
+        r.setPriceAtAnalysis(1000L);
+        r.setTargetPrice(1100L);
         r.setStopLoss(900L);
         return r;
     }

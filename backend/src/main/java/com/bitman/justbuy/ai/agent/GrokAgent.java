@@ -115,6 +115,9 @@ public class GrokAgent implements AiAgent {
             return AgentResult.skipped(name(), "API key not configured");
         }
 
+        var lease = ProviderCallLimiter.tryAcquire(name());
+        if (lease == null) return AgentResult.error(name(), model, "Provider request capacity is busy", System.currentTimeMillis() - start);
+
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -160,7 +163,9 @@ public class GrokAgent implements AiAgent {
             return parseResponsesApiResult(response.getBody(), model, start);
 
         } catch (Exception e) {
-            return AgentResult.error(name(), model, e.getMessage(), System.currentTimeMillis() - start);
+            return AgentResult.error(name(), model, "Provider request failed", System.currentTimeMillis() - start);
+        } finally {
+            lease.close();
         }
     }
 
@@ -171,61 +176,44 @@ public class GrokAgent implements AiAgent {
      */
     private AgentResult parseResponsesApiResult(String responseBody, String model, long start) throws Exception {
         JsonNode root = mapper.readTree(responseBody);
-
-        // output 배열에서 텍스트 추출
-        String content = "";
-        JsonNode output = root.path("output");
-        if (output.isArray()) {
-            for (JsonNode item : output) {
-                if ("message".equals(item.path("type").asText())) {
-                    JsonNode contentArr = item.path("content");
-                    if (contentArr.isArray()) {
-                        for (JsonNode c : contentArr) {
-                            if ("output_text".equals(c.path("type").asText())) {
-                                content = c.path("text").asText("");
-                                break;
-                            }
-                        }
-                    }
-                    if (!content.isEmpty()) break;
-                }
-            }
-        }
-
-        // 폴백: choices 구조도 허용 (API 호환성)
-        if (content.isEmpty()) {
-            content = root.path("choices").path(0).path("message").path("content").asText("");
-        }
-
-        // 인용 추출 (web_search/x_search 결과)
-        List<String> citations = new ArrayList<>();
-        JsonNode citationsNode = root.path("citations");
-        if (citationsNode.isArray()) {
-            for (JsonNode c : citationsNode) {
-                String url = c.path("url").asText("");
-                if (!url.isEmpty()) citations.add(url);
-            }
-        }
-
-        // 인용이 있으면 콘텐츠 끝에 append
-        if (!citations.isEmpty()) {
-            StringBuilder sb = new StringBuilder(content);
-            sb.append("\n\n**📎 검색 출처 (").append(citations.size()).append("건)**\n");
-            for (int i = 0; i < Math.min(citations.size(), 10); i++) {
-                sb.append("- ").append(citations.get(i)).append("\n");
-            }
-            content = sb.toString();
-        }
-
         String actualModel = root.path("model").asText(model);
-        int inputTokens = root.path("usage").path("input_tokens").asInt(
-            root.path("usage").path("prompt_tokens").asInt(0)
-        );
-        int outputTokens = root.path("usage").path("output_tokens").asInt(
-            root.path("usage").path("completion_tokens").asInt(0)
-        );
-
-        return new AgentResult(name(), content, actualModel, inputTokens, outputTokens,
+        int inputTokens = root.path("usage").path("input_tokens").asInt(root.path("usage").path("prompt_tokens").asInt(0));
+        int outputTokens = root.path("usage").path("output_tokens").asInt(root.path("usage").path("completion_tokens").asInt(0));
+        boolean responsesFormat = root.has("output");
+        boolean complete = responsesFormat ? "completed".equals(root.path("status").asText())
+            : "stop".equals(root.path("choices").path(0).path("finish_reason").asText())
+                && (!root.has("status") || "completed".equals(root.path("status").asText()));
+        StringBuilder content = new StringBuilder();
+        var citations = new java.util.LinkedHashSet<String>();
+        for (JsonNode item : root.path("output")) {
+            if (!"message".equals(item.path("type").asText())) continue;
+            if (item.has("status") && !"completed".equals(item.path("status").asText())) complete = false;
+            for (JsonNode part : item.path("content")) {
+                if (!"output_text".equals(part.path("type").asText())) continue;
+                String text = part.path("text").asText("");
+                if (!text.isBlank()) {
+                    if (!content.isEmpty()) content.append("\n");
+                    content.append(text);
+                }
+                for (JsonNode annotation : part.path("annotations")) addCitation(citations, annotation);
+            }
+        }
+        if (content.isEmpty() && !responsesFormat) content.append(root.path("choices").path(0).path("message").path("content").asText(""));
+        if (!complete || !ProviderEndpointPolicy.hasMeaningfulContent(content.toString())) {
+            return AgentResult.error(name(), actualModel, "Incomplete Grok analysis: " + root.path("status").asText("missing completion or answer"),
+                System.currentTimeMillis() - start, inputTokens, outputTokens);
+        }
+        for (JsonNode citation : root.path("citations")) addCitation(citations, citation);
+        if (!citations.isEmpty()) {
+            content.append("\n\n**📎 검색 출처 (" + citations.size() + "건)**\n");
+            citations.stream().limit(10).forEach(url -> content.append("- ").append(url).append("\n"));
+        }
+        return new AgentResult(name(), content.toString(), actualModel, inputTokens, outputTokens,
             "success", null, System.currentTimeMillis() - start);
+    }
+
+    private static void addCitation(java.util.Set<String> citations, JsonNode node) {
+        String url = node.isTextual() ? node.asText() : node.path("url").asText("");
+        if (url.startsWith("https://") || url.startsWith("http://")) citations.add(url);
     }
 }

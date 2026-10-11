@@ -38,6 +38,35 @@ export interface SystemCacheStatus {
   elapsed?: string | null
 }
 
+export interface SystemDataSourceStatus {
+  id: string
+  name: string
+  enabled: boolean
+  credentialsConfigured: boolean
+  state: 'DISABLED' | 'CREDENTIALS_MISSING' | 'RIGHTS_CHECK_REQUIRED' | 'CONFIGURED'
+  message: string
+}
+
+export type AnalysisPublicationOutcome = 'COMPLETE' | 'PARTIAL' | 'EMPTY' | 'FAILED'
+
+export interface SystemAnalysisLog {
+  mode: string
+  timestamp: string
+  success: boolean
+  outcome?: AnalysisPublicationOutcome
+  durationMs?: number
+  agentsUsed?: number
+  agentsSucceeded?: number
+  stocksFound?: number
+  error?: string
+}
+
+export interface SystemAnalysisStats {
+  totalAnalyses: number
+  completionRate: number
+  outcomeCounts: Record<AnalysisPublicationOutcome, number>
+}
+
 export interface ConditionRunSummary {
   runId: string
   traceId: string
@@ -64,6 +93,9 @@ export interface SystemStatusResponse {
   availableAgents?: number
   cache?: SystemCacheStatus[]
   kisAvailable?: boolean
+  dataSources?: SystemDataSourceStatus[]
+  analysisStats?: SystemAnalysisStats
+  recentAnalyses?: SystemAnalysisLog[]
   schedulerEnabled?: boolean
   conditionRuns?: ConditionRunSummary[]
   responseTime?: number

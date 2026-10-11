@@ -1,12 +1,15 @@
 package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.config.KisProperties;
+import com.bitman.justbuy.config.KisExtendedEvidenceConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.web.client.RestTemplate;
 
 import org.springframework.scheduling.annotation.Scheduled;
@@ -20,6 +23,8 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * KIS (한국투자증권) OpenAPI 서비스.
@@ -81,6 +86,8 @@ public class KisApiService {
     private final KisProperties kisProperties;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private RestTemplate extendedRestTemplate = KisExtendedEvidenceConfig.newClient();
+    private final ReentrantLock tokenRefreshLock = new ReentrantLock();
 
     // 토큰 캐시
     private volatile String accessToken;
@@ -128,6 +135,76 @@ public class KisApiService {
         String reason
     ) {}
 
+    public record ExtendedSnapshot(String status, String stockCode, Instant fetchedAt, JsonNode rows) {}
+
+    @Autowired
+    void configureExtendedClient(@Qualifier("kisExtendedEvidence") RestTemplate client) {
+        this.extendedRestTemplate = client;
+    }
+
+    public ExtendedSnapshot fetchMinuteEvidence(String stockCode, Instant asOf, long deadlineNanos) {
+        if (asOf == null) return emptyExtended("INVALID_INPUT", stockCode);
+        String hour = asOf.atZone(KST).format(DateTimeFormatter.ofPattern("HHmmss"));
+        return requestExtended(stockCode, "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
+            "FHKST03010200", "&FID_INPUT_HOUR_1=" + hour + "&FID_PW_DATA_INCU_YN=Y&FID_ETC_CLS_CODE=",
+            "output2", deadlineNanos);
+    }
+
+    public ExtendedSnapshot fetchProgramEvidence(String stockCode, Instant asOf, long deadlineNanos) {
+        if (asOf == null) return emptyExtended("INVALID_INPUT", stockCode);
+        return requestExtended(stockCode, "/uapi/domestic-stock/v1/quotations/program-trade-by-stock",
+            "FHPPG04650101", "", "output", deadlineNanos);
+    }
+
+    private ExtendedSnapshot emptyExtended(String status, String stockCode) {
+        return new ExtendedSnapshot(status, stockCode, Instant.now(), objectMapper.createArrayNode());
+    }
+
+    private ExtendedSnapshot requestExtended(String stockCode, String path, String trId, String parameters,
+                                             String outputField, long deadline) {
+        if (stockCode == null || !stockCode.matches("[0-9]{6}")) return emptyExtended("INVALID_INPUT", stockCode);
+        if (Thread.currentThread().isInterrupted()) return emptyExtended("CANCELLED", stockCode);
+        if (KisRestThrottle.remaining(deadline) <= 0) return emptyExtended("BUDGET_EXCEEDED", stockCode);
+        if (!isAvailable()) return emptyExtended("NOT_CONFIGURED", stockCode);
+        try {
+            String token = getAccessToken(extendedRestTemplate, deadline);
+            if (token == null) return emptyExtended(Thread.currentThread().isInterrupted() ? "CANCELLED"
+                : KisRestThrottle.remaining(deadline) <= 0 ? "BUDGET_EXCEEDED" : "TOKEN_UNAVAILABLE", stockCode);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setBearerAuth(token);
+            headers.set("appkey", kisProperties.appKey());
+            headers.set("appsecret", kisProperties.appSecret());
+            headers.set("tr_id", trId);
+            String url = KIS_BASE + path + "?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" + stockCode + parameters;
+            ResponseEntity<String> response = exchange(extendedRestTemplate, url, HttpMethod.GET, new HttpEntity<>(headers), deadline);
+            KisRestThrottle.check(deadline);
+            if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null || response.getBody().length() > 262_144)
+                return emptyExtended("PROVIDER_ERROR", stockCode);
+            JsonNode root = objectMapper.readTree(response.getBody());
+            if (!root.path("rt_cd").isTextual() || !"0".equals(root.path("rt_cd").asText()))
+                return emptyExtended("PROVIDER_ERROR", stockCode);
+            JsonNode rows = root.path(outputField);
+            if (!rows.isArray()) return emptyExtended("INVALID_RESPONSE", stockCode);
+            var bounded = objectMapper.createArrayNode();
+            for (int i = 0; i < Math.min(30, rows.size()); i++) bounded.add(rows.get(i).deepCopy());
+            return new ExtendedSnapshot("AVAILABLE", stockCode, Instant.now(), bounded);
+        } catch (Exception e) {
+            // Request URLs, headers, bodies and exception messages can contain credentials.
+            return emptyExtended(Thread.currentThread().isInterrupted() ? "CANCELLED"
+                : KisRestThrottle.remaining(deadline) <= 0 ? "BUDGET_EXCEEDED" : "PROVIDER_ERROR", stockCode);
+        }
+    }
+
+    private ResponseEntity<String> exchange(RestTemplate client, String url, HttpMethod method, HttpEntity<?> entity) {
+        return exchange(client, url, method, entity, Long.MAX_VALUE);
+    }
+
+    private ResponseEntity<String> exchange(RestTemplate client, String url, HttpMethod method, HttpEntity<?> entity, long deadline) {
+        KisRestThrottle.await(deadline);
+        return client.exchange(url, method, entity, String.class);
+    }
+
     public KisApiService(KisProperties kisProperties, RestTemplate restTemplate, ObjectMapper objectMapper) {
         this.kisProperties = kisProperties;
         this.restTemplate = restTemplate;
@@ -157,16 +234,35 @@ public class KisApiService {
     // ══════════════════════════════════════════════════
 
     private String getAccessToken() {
+        return getAccessToken(restTemplate, Long.MAX_VALUE);
+    }
+
+    private String getAccessToken(RestTemplate client, long deadline) {
         // 빠른 경로 — 토큰 유효하면 바로 반환 (락 미획득)
         String tok = this.accessToken;
         Instant exp = this.tokenExpiry;
         if (tok != null && Instant.now().isBefore(exp)) {
             return tok;
         }
-        return refreshAccessToken();
+        return refreshAccessToken(client, deadline);
     }
 
-    private synchronized String refreshAccessToken() {
+    private String refreshAccessToken(RestTemplate client, long deadline) {
+        boolean acquired = false;
+        try {
+            KisRestThrottle.check(deadline);
+            acquired = tokenRefreshLock.tryLock(KisRestThrottle.remaining(deadline), TimeUnit.NANOSECONDS);
+            if (!acquired) return null;
+            return refreshAccessTokenLocked(client, deadline);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } finally {
+            if (acquired) tokenRefreshLock.unlock();
+        }
+    }
+
+    private String refreshAccessTokenLocked(RestTemplate client, long deadline) {
         // 더블체크: 다른 스레드가 이미 갱신했을 수 있음
         if (accessToken != null && Instant.now().isBefore(tokenExpiry)) {
             return accessToken;
@@ -187,14 +283,15 @@ public class KisApiService {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
 
-            ResponseEntity<String> response = restTemplate.exchange(
-                url, HttpMethod.POST, new HttpEntity<>(objectMapper.writeValueAsString(body), headers), String.class);
+            ResponseEntity<String> response = exchange(client,
+                url, HttpMethod.POST, new HttpEntity<>(objectMapper.writeValueAsString(body), headers), deadline);
+            KisRestThrottle.check(deadline);
 
             JsonNode root = objectMapper.readTree(response.getBody());
             String newToken = root.path("access_token").asText(null);
 
             if (newToken == null || newToken.isBlank()) {
-                log.error("[KIS] 토큰 발급 실패: {}", response.getBody());
+                log.error("[KIS] 토큰 발급 실패");
                 return null;
             }
 
@@ -206,7 +303,7 @@ public class KisApiService {
             log.info("[KIS] 토큰 발급 성공 (만료: {})", tokenExpiry);
             return accessToken;
         } catch (Exception e) {
-            log.error("[KIS] 토큰 발급 오류 (2분 쿨다운): {}", e.getMessage());
+            log.error("[KIS] 토큰 발급 오류 (2분 쿨다운)");
             tokenErrorCooldown = Instant.now().plus(2, ChronoUnit.MINUTES);
             return null;
         }
@@ -230,7 +327,7 @@ public class KisApiService {
      * 종목 현재가 시세 조회 (FHKST01010100)
      */
     public Map<String, String> fetchCurrentPrice(String stockCode) {
-        if (!isAvailable()) return Map.of();
+        if (!isAvailable() || stockCode == null || !stockCode.matches("\\d{6}")) return Map.of();
 
         String cacheKey = "kis_price_" + stockCode;
         CachedEntry cached = cache.get(cacheKey);
@@ -253,8 +350,8 @@ public class KisApiService {
         String responseBody = null;
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
-                ResponseEntity<String> resp = restTemplate.exchange(
-                    url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+                ResponseEntity<String> resp = exchange(restTemplate,
+                    url, HttpMethod.GET, new HttpEntity<>(headers));
                 if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
                     log.warn("[KIS] 현재가 HTTP 에러: {} ({}) — attempt {}/{}",
                         resp.getStatusCode(), stockCode, attempt, MAX_RETRIES);
@@ -287,7 +384,10 @@ public class KisApiService {
         if (responseBody == null) return Map.of();
 
         try {
-            JsonNode output = objectMapper.readTree(responseBody).path("output");
+            JsonNode root = objectMapper.readTree(responseBody);
+            if (!"0".equals(root.path("rt_cd").asText(""))) return Map.of();
+            JsonNode output = root.path("output");
+            if (!isPositivePrice(output.path("stck_prpr").asText(""))) return Map.of();
             Map<String, String> result = new LinkedHashMap<>();
             // ★ v2.8.10 (2026-04-29): 종목명(hts_kor_isnm) 노출 — AI가 LS네트웍스를 "LS"로 축약하는 문제 해결
             result.put("종목명", output.path("hts_kor_isnm").asText(""));
@@ -309,9 +409,13 @@ public class KisApiService {
             result.put("currentPrice", output.path("stck_prpr").asText(""));
             result.put("changeRate", output.path("prdy_ctrt").asText("") + "%");
             result.put("volume", output.path("acml_vol").asText(""));
+            result.put("stockCode", stockCode);
+            result.put("source", "KIS OpenAPI");
+            result.put("exchange", "KRX");
+            result.put("fetchedAt", Instant.now().toString());
 
             cache.put(cacheKey, new CachedEntry(objectMapper.writeValueAsString(result),
-                Instant.now().plus(10, ChronoUnit.MINUTES)));
+                Instant.now().plus(1, ChronoUnit.MINUTES)));
             return result;
         } catch (Exception e) {
             log.warn("[KIS] 현재가 파싱 실패 ({}): {}", stockCode, e.getMessage());
@@ -375,8 +479,8 @@ public class KisApiService {
         String responseBody = null;
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
-                ResponseEntity<String> resp = restTemplate.exchange(
-                    url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+                ResponseEntity<String> resp = exchange(restTemplate,
+                    url, HttpMethod.GET, new HttpEntity<>(headers));
                 if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
                     if (attempt < MAX_RETRIES) { sleepBackoff(attempt); continue; }
                     return Map.of();
@@ -483,7 +587,7 @@ public class KisApiService {
                 + "&FID_INPUT_ISCD=" + stockCode;
 
             HttpHeaders headers = buildHeaders("FHKST01010900");
-            ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            ResponseEntity<String> resp = exchange(restTemplate, url, HttpMethod.GET, new HttpEntity<>(headers));
             if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return "";
             JsonNode outputArr = objectMapper.readTree(resp.getBody()).path("output");
 
@@ -588,7 +692,7 @@ public class KisApiService {
                 + "&FID_INPUT_ISCD=" + indexCode;
 
             HttpHeaders headers = buildHeaders("FHPUP02100000");
-            ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            ResponseEntity<String> resp = exchange(restTemplate, url, HttpMethod.GET, new HttpEntity<>(headers));
             if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return Map.of();
             JsonNode output = objectMapper.readTree(resp.getBody()).path("output");
 
@@ -723,83 +827,53 @@ public class KisApiService {
      * 거래량 순위 TOP 20 (FHPST01710000)
      */
     public String fetchVolumeRanking() {
-        return fetchRanking("kis_rank_volume", "FHPST01710000",
-            "/uapi/domestic-stock/v1/quotations/volume-rank",
-            "0", // 전체 (코스피+코스닥)
-            "📊 거래량 순위 TOP 20", false);
+        List<RankedStock> stocks = fetchVolumeRankingStocks(20);
+        if (stocks.isEmpty()) return "";
+        StringBuilder text = new StringBuilder("\n📊 거래량 순위 TOP 20\n출처: KIS OpenAPI (KRX)\n");
+        int rank = 1;
+        for (RankedStock stock : stocks) {
+            text.append(String.format("  %2d. %s(%s) %s원 (%s%%) 거래량: %s\n", rank++,
+                stock.name(), stock.code(), formatPrice(stock.currentPrice()), stock.changeRate(), formatVolume(stock.volume())));
+        }
+        return text.toString();
     }
 
     /**
-     * 등락률 순위 TOP 20 (FHPST01710000 — 상승률 기준)
+     * 등락률 순위 TOP 20 (FHPST01700000), 거래량 순위와 독립된 후보 풀.
      */
     public String fetchGainersRanking() {
-        return fetchRanking("kis_rank_gainers", "FHPST01710000",
-            "/uapi/domestic-stock/v1/quotations/volume-rank",
-            "0",
-            "🚀 등락률 상위 TOP 20", true);
+        List<RankedStock> stocks = fetchGainersRankingStocks(20);
+        if (stocks.isEmpty()) return "";
+        StringBuilder text = new StringBuilder("\n🚀 등락률 상위 TOP 20\n출처: KIS OpenAPI (KRX 등락률 순위)\n");
+        int rank = 1;
+        for (RankedStock stock : stocks) {
+            text.append(String.format("  %2d. %s(%s) %s원 (%s%%) 거래량: %s\n", rank++,
+                stock.name(), stock.code(), formatPrice(stock.currentPrice()), stock.changeRate(), formatVolume(stock.volume())));
+        }
+        return text.toString();
     }
 
     /**
      * 외국인 순매수 상위 (기간별 매매동향 — 당일)
      */
     public String fetchForeignNetBuyRanking() {
-        if (!isAvailable()) return "";
-
-        String cacheKey = "kis_rank_foreign";
-        CachedEntry cached = cache.get(cacheKey);
-        if (cached != null && cached.isValid()) return cached.data();
-
-        try {
-            String today = LocalDate.now(KST).format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-            String url = KIS_BASE + "/uapi/domestic-stock/v1/quotations/foreign-institution-total"
-                + "?FID_COND_MRKT_DIV_CODE=V"
-                + "&FID_COND_SCR_DIV_CODE=16449"
-                + "&FID_INPUT_ISCD=0000"
-                + "&FID_DIV_CLS_CODE=0"
-                + "&FID_RANK_SORT_CLS_CODE=0"
-                + "&FID_ETC_CLS_CODE=0";
-
-            HttpHeaders headers = buildHeaders("FHPTJ04400000");
-            ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
-            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return "";
-
-            JsonNode root = objectMapper.readTree(resp.getBody());
-            JsonNode output = root.path("output");
-            if (!output.isArray()) return "";
-
-            StringBuilder sb = new StringBuilder();
-            sb.append("\n🌍 외국인 순매수 상위 (").append(today).append(" KST 기준)\n");
-            sb.append("⚠️ 출처: 한국투자증권 OpenAPI (거래소 공식 데이터)\n");
-
-            int count = 0;
-            for (JsonNode item : output) {
-                if (count >= 15) break;
-                String name = item.path("hts_kor_isnm").asText("");
-                String code = item.path("mksc_shrn_iscd").asText("");
-                String price = item.path("stck_prpr").asText("");
-                String change = item.path("prdy_ctrt").asText("");
-                long netBuy = parseLong(item.path("frgn_ntby_qty").asText("0"));
-
-                if (name.isEmpty() || netBuy == 0) continue;
-                sb.append(String.format("  %2d. %s(%s) %s원 (%s%%) 외국인 %+,d주\n",
-                    count + 1, name, code, formatPrice(price), change, netBuy));
-                count++;
-            }
-
-            String result = sb.toString();
-            cache.put(cacheKey, new CachedEntry(result, Instant.now().plus(10, ChronoUnit.MINUTES)));
-            return result;
-        } catch (Exception e) {
-            log.warn("[KIS] 외국인 순매수 순위 조회 실패: {}", e.getMessage());
-            return "";
+        List<RankedStock> stocks = fetchForeignNetBuyRankingStocks(15);
+        if (stocks.isEmpty()) return "";
+        StringBuilder text = new StringBuilder("\n🌍 외국인 순매수 상위\n출처: KIS OpenAPI (KRX), 포착 시세는 별도 현재가 확인 필요\n");
+        int rank = 1;
+        for (RankedStock stock : stocks) {
+            text.append(String.format("  %2d. %s(%s) %s원 (%s%%) 외국인 %+,d주\n", rank++,
+                stock.name(), stock.code(), formatPrice(stock.currentPrice()), stock.changeRate(), stock.foreignNetBuy()));
         }
+        return text.toString();
     }
 
     /**
      * 공통 순위 조회 (거래량/등락률 — volume-rank API 사용)
      */
     public List<RankedStock> fetchForeignNetBuyRankingStocks(int limit) {
-        if (!isAvailable()) return List.of();
+        if (!isAvailable() || limit <= 0) return List.of();
+        int resultLimit = Math.min(limit, 100);
 
         String cacheKey = "kis_rank_foreign_structured_" + limit;
         CachedEntry cached = cache.get(cacheKey);
@@ -820,19 +894,21 @@ public class KisApiService {
                 + "&FID_ETC_CLS_CODE=0";
 
             HttpHeaders headers = buildHeaders("FHPTJ04400000");
-            ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            ResponseEntity<String> resp = exchange(restTemplate, url, HttpMethod.GET, new HttpEntity<>(headers));
             if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return List.of();
 
-            JsonNode output = objectMapper.readTree(resp.getBody()).path("output");
+            JsonNode root = objectMapper.readTree(resp.getBody());
+            if (!"0".equals(root.path("rt_cd").asText(""))) return List.of();
+            JsonNode output = root.path("output");
             if (!output.isArray()) return List.of();
 
             List<RankedStock> stocks = new ArrayList<>();
             for (JsonNode item : output) {
-                if (stocks.size() >= limit) break;
                 String name = item.path("hts_kor_isnm").asText("");
                 String code = item.path("mksc_shrn_iscd").asText("");
                 long netBuy = parseLong(item.path("frgn_ntby_qty").asText("0"));
-                if (name.isBlank() || code.isBlank() || netBuy <= 0) continue;
+                if (name.isBlank() || !code.matches("\\d{6}") || netBuy <= 0
+                    || !isPositivePrice(item.path("stck_prpr").asText(""))) continue;
                 stocks.add(new RankedStock(
                     name,
                     code,
@@ -843,9 +919,11 @@ public class KisApiService {
                 ));
             }
 
+            stocks.sort(Comparator.comparingLong(RankedStock::foreignNetBuy).reversed().thenComparing(RankedStock::code));
+            stocks = List.copyOf(stocks.subList(0, Math.min(resultLimit, stocks.size())));
             if (!stocks.isEmpty()) {
                 cache.put(cacheKey, new CachedEntry(objectMapper.writeValueAsString(stocks),
-                    Instant.now().plus(10, ChronoUnit.MINUTES)));
+                    Instant.now().plus(1, ChronoUnit.MINUTES)));
             }
             return stocks;
         } catch (Exception e) {
@@ -860,8 +938,8 @@ public class KisApiService {
     }
 
     public List<RankedStock> fetchGainersRankingStocks(int limit) {
-        return fetchRankingStocks("kis_rank_gainers_structured_" + limit, "FHPST01710000",
-            "/uapi/domestic-stock/v1/quotations/volume-rank", "J", limit, true, Duration.ofMinutes(10));
+        return fetchRankingStocks("kis_rank_gainers_structured_" + limit, "FHPST01700000",
+            "/uapi/domestic-stock/v1/ranking/fluctuation", "J", limit, true, Duration.ofMinutes(10));
     }
 
     public List<RankedStock> fetchRealtimeVolumeRankingStocks(int limit) {
@@ -870,8 +948,8 @@ public class KisApiService {
     }
 
     public List<RankedStock> fetchRealtimeGainersRankingStocks(int limit) {
-        return fetchRankingStocks("kis_rt_rank_gainers_structured_" + limit, "FHPST01710000",
-            "/uapi/domestic-stock/v1/quotations/volume-rank", "J", limit, true, Duration.ofSeconds(50));
+        return fetchRankingStocks("kis_rt_rank_gainers_structured_" + limit, "FHPST01700000",
+            "/uapi/domestic-stock/v1/ranking/fluctuation", "J", limit, true, Duration.ofSeconds(50));
     }
 
     public InvestorFlowSnapshot fetchInvestorFlowSnapshot(String stockCode, int days) {
@@ -897,7 +975,7 @@ public class KisApiService {
             String responseBody = null;
             for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                 try {
-                    ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+                    ResponseEntity<String> resp = exchange(restTemplate, url, HttpMethod.GET, new HttpEntity<>(headers));
                     if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
                         if (attempt < MAX_RETRIES) { sleepBackoff(attempt); continue; }
                         return null;
@@ -952,7 +1030,7 @@ public class KisApiService {
     }
 
     public List<ConditionCandidate> fetchDoubleNetBuyCandidates(int limit, int days) {
-        if (!isAvailable()) return List.of();
+        if (!isAvailable() || limit <= 0 || days <= 0) return List.of();
 
         LinkedHashMap<String, RankedStock> seedMap = new LinkedHashMap<>();
         for (RankedStock stock : fetchForeignNetBuyRankingStocks(Math.max(limit * 3, 15))) {
@@ -978,14 +1056,17 @@ public class KisApiService {
         }
 
         List<ConditionCandidate> candidates = new ArrayList<>();
+        int inspected = 0;
         for (RankedStock stock : seedMap.values()) {
-            if (candidates.size() >= limit) break;
+            // 수급 합계로 정렬하기 전에 limit에서 중단하지 않는다. 외부 호출은 최대 60종목으로 제한한다.
+            if (inspected++ >= 60) break;
             InvestorFlowSnapshot flow = fetchInvestorFlowSnapshot(stock.code(), days);
             sleepQuietly(120L);
             if (flow == null || !flow.doubleBuy()) continue;
 
             Map<String, String> price = fetchCurrentPrice(stock.code());
-            String currentPrice = firstNonBlank(price.get("currentPrice"), firstNonBlank(price.get("\uD604\uC7AC\uAC00"), stock.currentPrice()));
+            String currentPrice = firstNonBlank(price.get("currentPrice"), price.get("\uD604\uC7AC\uAC00"));
+            if (!isPositivePrice(currentPrice)) continue;
             String changeRate = firstNonBlank(price.get("changeRate"), firstNonBlank(price.get("\uB4F1\uB77D\uB960"), stock.changeRate()));
             String name = firstNonBlank(
                 price.get("name"),
@@ -1020,7 +1101,8 @@ public class KisApiService {
 
     private List<RankedStock> fetchRankingStocks(String cacheKey, String trId, String path, String marketDiv,
                                                 int limit, boolean sortByChange, Duration ttl) {
-        if (!isAvailable()) return List.of();
+        if (!isAvailable() || limit <= 0) return List.of();
+        int resultLimit = Math.min(limit, 100);
 
         CachedEntry cached = cache.get(cacheKey);
         if (cached != null && cached.isValid()) {
@@ -1032,7 +1114,16 @@ public class KisApiService {
 
         try {
             String domesticMarketDiv = "0".equals(marketDiv) ? "J" : marketDiv;
-            String url = KIS_BASE + path
+            boolean fluctuation = path.endsWith("/fluctuation");
+            String url = fluctuation ? KIS_BASE + path
+                + "?FID_COND_MRKT_DIV_CODE=" + domesticMarketDiv
+                + "&FID_COND_SCR_DIV_CODE=20170"
+                + "&FID_INPUT_ISCD=0000&FID_RANK_SORT_CLS_CODE=0"
+                + "&FID_INPUT_CNT_1=" + resultLimit
+                + "&FID_PRC_CLS_CODE=0&FID_INPUT_PRICE_1=&FID_INPUT_PRICE_2="
+                + "&FID_VOL_CNT=&FID_TRGT_CLS_CODE=0&FID_TRGT_EXLS_CLS_CODE=0"
+                + "&FID_DIV_CLS_CODE=0&FID_RSFL_RATE1=&FID_RSFL_RATE2="
+                : KIS_BASE + path
                 + "?FID_COND_MRKT_DIV_CODE=" + domesticMarketDiv
                 + "&FID_COND_SCR_DIV_CODE=20171"
                 + "&FID_INPUT_ISCD=0000"
@@ -1046,18 +1137,19 @@ public class KisApiService {
                 + "&FID_INPUT_DATE_1=";
 
             HttpHeaders headers = buildHeaders(trId);
-            ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            ResponseEntity<String> resp = exchange(restTemplate, url, HttpMethod.GET, new HttpEntity<>(headers));
             if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return List.of();
 
-            JsonNode output = objectMapper.readTree(resp.getBody()).path("output");
+            JsonNode root = objectMapper.readTree(resp.getBody());
+            if (!"0".equals(root.path("rt_cd").asText(""))) return List.of();
+            JsonNode output = root.path("output");
             if (!output.isArray()) return List.of();
 
             List<RankedStock> stocks = new ArrayList<>();
             for (JsonNode item : output) {
-                if (stocks.size() >= limit) break;
                 String name = item.path("hts_kor_isnm").asText("");
-                String code = item.path("mksc_shrn_iscd").asText("");
-                if (name.isBlank() || code.isBlank()) continue;
+                String code = item.path(fluctuation ? "stck_shrn_iscd" : "mksc_shrn_iscd").asText("");
+                if (name.isBlank() || !code.matches("\\d{6}") || !isPositivePrice(item.path("stck_prpr").asText(""))) continue;
                 stocks.add(new RankedStock(
                     name,
                     code,
@@ -1071,6 +1163,7 @@ public class KisApiService {
             if (sortByChange) {
                 stocks.sort(Comparator.comparingDouble((RankedStock stock) -> parseRate(stock.changeRate())).reversed());
             }
+            if (stocks.size() > resultLimit) stocks = new ArrayList<>(stocks.subList(0, resultLimit));
 
             if (!stocks.isEmpty()) {
                 cache.put(cacheKey, new CachedEntry(objectMapper.writeValueAsString(stocks),
@@ -1105,7 +1198,7 @@ public class KisApiService {
                 + "&FID_INPUT_DATE_1=";
 
             HttpHeaders headers = buildHeaders(trId);
-            ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            ResponseEntity<String> resp = exchange(restTemplate, url, HttpMethod.GET, new HttpEntity<>(headers));
             if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return "";
 
             JsonNode root = objectMapper.readTree(resp.getBody());
@@ -1187,6 +1280,12 @@ public class KisApiService {
     private long parseLong(String s) {
         try { return Long.parseLong(s.replace(",", "").trim()); }
         catch (Exception e) { return 0; }
+    }
+
+    private static boolean isPositivePrice(String raw) {
+        if (raw == null || !raw.trim().matches("(?:\\d+|\\d{1,3}(?:,\\d{3})+)")) return false;
+        try { return Long.parseLong(raw.replace(",", "").trim()) > 0; }
+        catch (NumberFormatException e) { return false; }
     }
 
     private double parseRate(String s) {

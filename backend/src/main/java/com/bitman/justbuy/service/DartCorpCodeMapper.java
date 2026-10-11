@@ -40,6 +40,7 @@ public class DartCorpCodeMapper {
 
     private final Map<String, String> stockToCorpCode = new ConcurrentHashMap<>();
     private volatile Instant lastLoaded = Instant.EPOCH;
+    private final Object boundedCacheLock = new Object();
 
     public DartCorpCodeMapper(DartProperties dartProperties, ObjectMapper objectMapper,
                                @Value("${bitman.storage.data-dir:./data}") String dataDir) {
@@ -55,6 +56,47 @@ public class DartCorpCodeMapper {
     public String getCorpCode(String stockCode) {
         ensureLoaded();
         return stockToCorpCode.get(stockCode);
+    }
+
+    /** Lookup for bounded event evidence; must never download public mapping data. */
+    public String getCachedCorpCode(String stockCode) {
+        if (stockCode == null || !stockCode.matches("[0-9]{6}") || Thread.currentThread().isInterrupted()) return null;
+        Instant now = Instant.now();
+        String memory = stockToCorpCode.get(stockCode);
+        if (validCachedMapping(memory, now)) return memory;
+        // Never acquire the legacy download lock: its network operation has no bounded timeout.
+        synchronized (boundedCacheLock) {
+            memory = stockToCorpCode.get(stockCode);
+            if (validCachedMapping(memory, now)) return memory;
+            try {
+                if (!Files.isRegularFile(cacheFilePath) || Files.size(cacheFilePath) > 4 * 1_048_576L) return null;
+                Instant modified = Files.getLastModifiedTime(cacheFilePath).toInstant();
+                if (modified.isAfter(now) || !modified.isAfter(now.minus(7, ChronoUnit.DAYS))) return null;
+                byte[] bytes;
+                try (InputStream input = Files.newInputStream(cacheFilePath)) {
+                    bytes = input.readNBytes(4 * 1_048_576 + 1);
+                }
+                if (bytes.length > 4 * 1_048_576 || Thread.currentThread().isInterrupted()) return null;
+                Map<String, String> loaded = objectMapper.readValue(bytes, new TypeReference<Map<String, String>>() {});
+                if (loaded == null || loaded.isEmpty() || loaded.entrySet().stream().anyMatch(entry ->
+                    entry.getKey() == null || !entry.getKey().matches("[0-9]{6}")
+                        || entry.getValue() == null || !entry.getValue().matches("[0-9]{8}"))) return null;
+                // Replace the snapshot so removed, expired codes cannot inherit the new file's freshness.
+                lastLoaded = Instant.EPOCH;
+                stockToCorpCode.clear();
+                stockToCorpCode.putAll(loaded);
+                lastLoaded = modified;
+                return loaded.get(stockCode);
+            } catch (Exception error) {
+                log.debug("[DartCorpCode] 제한된 캐시 조회 실패: {}", error.getClass().getSimpleName());
+                return null;
+            }
+        }
+    }
+
+    private boolean validCachedMapping(String corpCode, Instant now) {
+        return corpCode != null && corpCode.matches("[0-9]{8}") && !lastLoaded.isAfter(now)
+            && lastLoaded.isAfter(now.minus(7, ChronoUnit.DAYS));
     }
 
     public boolean isReady() {
@@ -99,7 +141,7 @@ public class DartCorpCodeMapper {
             log.info("[DartCorpCode] 디스크 캐시 로드 완료: {}개 종목", loaded.size());
             return true;
         } catch (Exception e) {
-            log.warn("[DartCorpCode] 디스크 캐시 로드 실패: {}", e.getMessage());
+            log.warn("[DartCorpCode] 디스크 캐시 로드 실패: {}", e.getClass().getSimpleName());
             return false;
         }
     }
@@ -142,7 +184,7 @@ public class DartCorpCodeMapper {
 
             log.info("[DartCorpCode] DART corp_code 매핑 완료: {}개 종목", mapping.size());
         } catch (Exception e) {
-            log.error("[DartCorpCode] DART 다운로드 실패: {}", e.getMessage());
+            log.error("[DartCorpCode] DART 다운로드 실패: {}", e.getClass().getSimpleName());
         }
     }
 
@@ -203,7 +245,7 @@ public class DartCorpCodeMapper {
             }
             reader.close();
         } catch (Exception e) {
-            log.error("[DartCorpCode] ZIP/XML 파싱 실패: {}", e.getMessage());
+            log.error("[DartCorpCode] ZIP/XML 파싱 실패: {}", e.getClass().getSimpleName());
         }
         return mapping;
     }
@@ -214,7 +256,7 @@ public class DartCorpCodeMapper {
             objectMapper.writeValue(cacheFilePath.toFile(), mapping);
             log.info("[DartCorpCode] 디스크 캐시 저장: {}", cacheFilePath);
         } catch (Exception e) {
-            log.warn("[DartCorpCode] 디스크 캐시 저장 실패: {}", e.getMessage());
+            log.warn("[DartCorpCode] 디스크 캐시 저장 실패: {}", e.getClass().getSimpleName());
         }
     }
 }

@@ -123,7 +123,8 @@ class GrokAgentTest {
             .thenThrow(new RuntimeException("timeout"));
         AgentResult result = agent.analyze("sys", "usr");
         assertThat(result.status()).isEqualTo("error");
-        assertThat(result.error()).contains("timeout");
+        assertThat(result.error()).isEqualTo("Provider request failed");
+        assertThat(result.error()).doesNotContain("timeout", "https://", "Authorization");
     }
 
     // ── critique — chat completions fallback ─────────────────
@@ -154,6 +155,7 @@ class GrokAgentTest {
     @Test
     void analyze_parsesResponsesApiFormat_outputArray() throws Exception {
         String json = mapper.writeValueAsString(Map.of(
+            "status", "completed",
             "model", "grok-4.20-multi-agent-0309",
             "output", List.of(Map.of(
                 "type", "message",
@@ -175,8 +177,10 @@ class GrokAgentTest {
     void analyze_fallbackToChoicesFormat_whenOutputEmpty() throws Exception {
         // OpenAI-compatible 폴백
         String json = mapper.writeValueAsString(Map.of(
+            "status", "completed",
             "model", "grok-4",
             "choices", List.of(Map.of(
+                "finish_reason", "stop",
                 "message", Map.of("role", "assistant", "content", "폴백 결과")
             )),
             "usage", Map.of("prompt_tokens", 10, "completion_tokens", 20)
@@ -192,6 +196,7 @@ class GrokAgentTest {
     @Test
     void analyze_appendsCitations_whenPresent() throws Exception {
         String json = mapper.writeValueAsString(Map.of(
+            "status", "completed",
             "model", "grok-4",
             "output", List.of(Map.of(
                 "type", "message",
@@ -227,6 +232,7 @@ class GrokAgentTest {
     private void stubResponsApiOk(String model, String text, int inputTokens, int outputTokens)
             throws Exception {
         String json = mapper.writeValueAsString(Map.of(
+            "status", "completed",
             "model", model,
             "output", List.of(Map.of(
                 "type", "message",

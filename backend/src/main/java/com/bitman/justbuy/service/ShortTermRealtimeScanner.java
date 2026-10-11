@@ -47,7 +47,8 @@ public class ShortTermRealtimeScanner {
     private final KisApiService kisApiService;
     private final TrackRecordService trackRecordService;
     private final DeepSeekConditionVerifier verifier;
-    private final Map<String, String> firstSeenByCode = new ConcurrentHashMap<>();
+    private record Capture(String capturedAt, String price) {}
+    private final Map<String, Capture> firstSeenByCode = new ConcurrentHashMap<>();
     private volatile LocalDate firstSeenDate = LocalDate.MIN;
     private volatile ScanSnapshot latest = ScanSnapshot.empty();
 
@@ -199,6 +200,7 @@ public class ShortTermRealtimeScanner {
         List<Candidate> sorted = candidates.values().stream()
             .filter(Candidate::hasUsableCode)
             .filter(candidate -> StockUniverseFilters.isKoreanSpotEquity(candidate.name, candidate.code))
+            .filter(candidate -> parsePrice(candidate.currentPrice) > 0)
             .filter(candidate -> candidate.changeRate > 0)
             .peek(Candidate::calculateScore)
             .filter(candidate -> candidate.score >= 58)
@@ -209,8 +211,9 @@ public class ShortTermRealtimeScanner {
         List<ConditionSignalDto> signals = new ArrayList<>();
         int signalRank = 1;
         for (Candidate candidate : sorted) {
-            String capturedAt = firstSeenByCode.computeIfAbsent(candidate.code, ignored -> nowKst(now));
-            signals.add(candidate.toSignal(signalRank++, capturedAt));
+            Capture capture = firstSeenByCode.computeIfAbsent(candidate.code,
+                ignored -> new Capture(nowKst(now), formatPrice(candidate.currentPrice)));
+            signals.add(candidate.toSignal(signalRank++, capture));
         }
         return signals;
     }
@@ -419,9 +422,19 @@ public class ShortTermRealtimeScanner {
     }
 
     private static String formatPrice(String value) {
-        long price = parseLong(value);
-        if (price <= 0) return firstNonBlank(value, "-");
+        long price = parsePrice(value);
+        if (price <= 0) return "-";
         return NumberFormat.getInstance(Locale.KOREA).format(price);
+    }
+
+    private static long parsePrice(String value) {
+        if (value == null || !value.trim().matches("(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)\\s*원?")) return 0;
+        try {
+            long price = Long.parseLong(value.trim().replace(",", "").replace("원", "").trim());
+            return Math.max(0, price);
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
     }
 
     private static String formatPercent(double value) {
@@ -463,7 +476,7 @@ public class ShortTermRealtimeScanner {
             score = scoreBreakdown.finalScore();
         }
 
-        ConditionSignalDto toSignal(int rank, String capturedAt) {
+        ConditionSignalDto toSignal(int rank, Capture capture) {
             String price = formatPrice(currentPrice);
             String pct = changeRateText == null || changeRateText.isBlank()
                 ? formatPercent(changeRate)
@@ -495,7 +508,7 @@ public class ShortTermRealtimeScanner {
                 riskFlags.addAll(scoreBreakdown.riskFlags());
             }
             int ruleScore = scoreBreakdown != null ? scoreBreakdown.ruleScore() : score;
-            int aiScore = scoreBreakdown != null ? scoreBreakdown.aiScore() : 0;
+            int aiScore = 0; // AI verification has not run on this measured rule signal.
             int finalScore = scoreBreakdown != null ? scoreBreakdown.finalScore() : score;
 
             return new ConditionSignalDto(
@@ -504,9 +517,9 @@ public class ShortTermRealtimeScanner {
                 rank,
                 name,
                 code,
+                capture.price(),
                 price,
-                price,
-                pct,
+                "-",
                 "",
                 pct,
                 "실시간 포착",
@@ -517,7 +530,7 @@ public class ShortTermRealtimeScanner {
                 List.copyOf(evidence),
                 List.copyOf(riskFlags),
                 "상승률 둔화, 거래량 순위 이탈, 고점 대비 급락",
-                capturedAt
+                capture.capturedAt()
             );
         }
 

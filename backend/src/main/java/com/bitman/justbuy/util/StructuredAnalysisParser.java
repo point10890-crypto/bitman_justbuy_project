@@ -116,26 +116,30 @@ public final class StructuredAnalysisParser {
     private static StructuredStock parseStock(JsonNode node) {
         String name = node.path("name").asText("").trim();
         String code = node.path("code").asText("").trim();
-        if (name.isEmpty() || code.length() != 6) return null;
+        if (name.isEmpty() || !code.matches("[0-9]{6}")) return null;
 
         String action = normalizeAction(node.path("action").asText("주목"));
-        double confidence = clamp(node.path("confidence").asDouble(0.5), 0, 1);
+        JsonNode confidenceNode = node.path("confidence");
+        if (!confidenceNode.isNumber()) return null;
+        double confidence = confidenceNode.asDouble();
+        if (!Double.isFinite(confidence) || confidence < 0 || confidence > 1) return null;
 
         ScenarioSet scenario = null;
-        if (node.has("scenario") && node.get("scenario").isObject()) {
+        if (node.has("scenario") && !node.get("scenario").isNull()) {
+            if (!node.get("scenario").isObject()) return null;
             JsonNode sc = node.get("scenario");
             Scenario bull = parseScenario(sc.get("bull"));
             Scenario base = parseScenario(sc.get("base"));
             Scenario bear = parseScenario(sc.get("bear"));
             if (bull != null && base != null && bear != null) {
                 double total = bull.probability() + base.probability() + bear.probability();
-                if (total > 0) {
+                if (Double.isFinite(total) && total > 0) {
                     bull = new Scenario(bull.probability() / total, bull.target());
                     base = new Scenario(base.probability() / total, base.target());
                     bear = new Scenario(bear.probability() / total, bear.target());
-                }
+                } else return null;
                 scenario = new ScenarioSet(bull, base, bear);
-            }
+            } else return null;
         }
 
         List<String> reasons = new ArrayList<>();
@@ -144,6 +148,8 @@ public final class StructuredAnalysisParser {
                 if (r.isTextual() && !r.asText().isBlank()) reasons.add(r.asText());
             }
         }
+
+        if (reasons.isEmpty()) return null;
 
         int finScore = 0;
         if (node.has("financialScore") && !node.get("financialScore").isNull()) {
@@ -168,9 +174,10 @@ public final class StructuredAnalysisParser {
 
     private static Scenario parseScenario(JsonNode node) {
         if (node == null || !node.isObject()) return null;
-        double prob = node.path("probability").asDouble(0);
-        if (Double.isNaN(prob)) return null;
-        return new Scenario(clamp(prob, 0, 1), toLongOrNull(node, "target"));
+        if (!node.path("probability").isNumber()) return null;
+        double prob = node.path("probability").asDouble();
+        if (!Double.isFinite(prob) || prob < 0 || prob > 1) return null;
+        return new Scenario(prob, toLongOrNull(node, "target"));
     }
 
     private static String normalizeAction(String action) {

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { fetchPrecomputed, fetchLiveAnalysis, type AnalysisResponse } from '../api/analysisApi'
 import { addHistory } from '../lib/analysisHistory'
 import { getCached, setCache } from '../lib/analysisCache'
@@ -12,9 +12,14 @@ export function useAnalysis() {
   const [result, setResult] = useState<AnalysisResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const generation = useRef(0)
+
+  useEffect(() => () => { generation.current++ }, [])
 
   const analyze = useCallback(async (query: string, mode?: string): Promise<AnalysisResult | null> => {
     if (!query.trim()) return null
+    const request = ++generation.current
+    const isCurrent = () => request === generation.current
     try {
       setLoading(true)
       setError(null)
@@ -30,14 +35,15 @@ export function useAnalysis() {
         // 컨셉 모드 — 프리컴퓨트 우선, 없으면 라이브 폴백
         try {
           const precomputed = await fetchPrecomputed(mode, token)
+          if (!isCurrent()) return null
           if (precomputed && precomputed.metadata.agentsSucceeded > 0) {
             const cached = getCached(query, effectiveMode)
             const serverTime = new Date(precomputed.updatedAt).getTime()
             const cachedTime = cached ? new Date(cached.updatedAt).getTime() : 0
-            if (serverTime > cachedTime || !cached) {
+            if (serverTime >= cachedTime || !cached || !cached.isFresh) {
               const nextResult = { ...precomputed, isPrecomputed: true }
               setResult(nextResult)
-              setCache(query, effectiveMode, precomputed)
+              setCache(query, effectiveMode, precomputed, 'precomputed')
               addHistory(query, mode, precomputed.content)
               return nextResult
             } else {
@@ -52,7 +58,7 @@ export function useAnalysis() {
       } else {
         // 라이브 모드 (분석해줘, 수급분석): 클라이언트 캐시 우선
         const cached = getCached(query, effectiveMode)
-        if (cached && cached.metadata.agentsSucceeded > 0) {
+        if (cached?.isFresh && cached.metadata.agentsSucceeded > 0) {
           const nextResult = { ...cached, isPrecomputed: false }
           setResult(nextResult)
           return nextResult
@@ -60,13 +66,16 @@ export function useAnalysis() {
       }
 
       // 라이브 멀티에이전트 분석
+      if (!isCurrent()) return null
       const res = await fetchLiveAnalysis(query, effectiveMode, token)
+      if (!isCurrent()) return null
       const nextResult = { ...res, isPrecomputed: false }
       setResult(nextResult)
       setCache(query, effectiveMode, res)
       addHistory(query, mode, res.content)
       return nextResult
     } catch (err) {
+      if (!isCurrent()) return null
       const msg = (err instanceof Error ? err.message : '분석 중 오류 발생') || '분석 중 오류 발생'
       if (msg.includes('403') || msg.includes('PRO') || msg.includes('구독자만')) {
         setError('PRO 구독자만 사용 가능한 기능입니다.')
@@ -83,13 +92,15 @@ export function useAnalysis() {
       }
       return null
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
   }, [])
 
   const clear = useCallback(() => {
+    generation.current++
     setResult(null)
     setError(null)
+    setLoading(false)
   }, [])
 
   return { result, loading, error, analyze, clear }

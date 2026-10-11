@@ -8,6 +8,7 @@ import com.bitman.justbuy.condition.run.ConditionRunService;
 import com.bitman.justbuy.condition.run.ConditionRunTrigger;
 import com.bitman.justbuy.repository.UserRepository;
 import com.bitman.justbuy.service.AsyncJobManager;
+import com.bitman.justbuy.service.AnalysisOutcome;
 import com.bitman.justbuy.service.ConditionSearchPipeline;
 import com.bitman.justbuy.service.LiveAnalysisQuotaService;
 import com.bitman.justbuy.service.SubscriptionService;
@@ -117,7 +118,7 @@ public class AnalysisController {
 
         log.info("[API] Live analysis started: mode={}, query={}, quotaLeft={}",
             request.mode(), request.query(), liveAnalysisQuotaService.remaining(userId));
-        String jobId = jobManager.createJob();
+        String jobId = jobManager.createJob(userId);
         conditionRunService.recordEvent(run.runId(), ConditionRunEventType.JOB_CREATED,
             "async analysis job created", Map.of("jobId", jobId));
 
@@ -129,11 +130,12 @@ public class AnalysisController {
                     "condition-search pipeline run started", Map.of("jobId", jobId));
                 jobManager.markRunning(jobId);
                 AnalysisResponse result = conditionSearchPipeline.runLiveAnalysis(request.query(), request.mode());
+                AnalysisOutcome.requireSuccessfulAgents(result);
                 conditionRunService.recordEvent(run.runId(), ConditionRunEventType.PICKS_PARSED,
                     "live analysis result parsed",
                     Map.of("pickCount", result.stockPicks() != null ? result.stockPicks().size() : 0));
-                jobManager.markComplete(jobId, result);
                 conditionRunService.markComplete(run.runId(), result);
+                jobManager.markComplete(jobId, result);
             } catch (Exception e) {
                 String errMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                 log.error("[API] Live analysis failed for job {}: {}", jobId, errMsg, e);
@@ -157,13 +159,13 @@ public class AnalysisController {
                                            @PathVariable String jobId) {
         requireProSubscription(userId);
 
-        JobEntry job = jobManager.getJob(jobId);
+        JobEntry job = jobManager.getJob(jobId, userId);
         if (job == null) {
             throw new ApiException(HttpStatus.NOT_FOUND, "Job not found: " + jobId);
         }
 
         return switch (job.status()) {
-            case COMPLETE -> {
+            case COMPLETE, PARTIAL -> {
                 // AnalysisResponse를 직접 반환 — finalContent 필드로 프론트엔드가 완료 감지
                 var result = job.result();
                 if (result != null) {
@@ -183,7 +185,7 @@ public class AnalysisController {
     public ResponseEntity<?> getTradingResearch(@AuthenticationPrincipal UUID userId,
                                                  @PathVariable String jobId) {
         requireProSubscription(userId);
-        JobEntry job = jobManager.getJob(jobId);
+        JobEntry job = jobManager.getJob(jobId, userId);
         if (job == null) {
             throw new ApiException(HttpStatus.NOT_FOUND, "Job not found: " + jobId);
         }
@@ -191,7 +193,7 @@ public class AnalysisController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("status", "error", "errorCode", "ANALYSIS_FAILED"));
         }
-        if (job.status() != JobStatus.COMPLETE || job.result() == null) {
+        if ((job.status() != JobStatus.COMPLETE && job.status() != JobStatus.PARTIAL) || job.result() == null) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(Map.of("status", job.status().name().toLowerCase(), "message", "Research result is not ready"));
         }

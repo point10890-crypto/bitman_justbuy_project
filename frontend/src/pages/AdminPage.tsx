@@ -173,8 +173,15 @@ function formatRunDuration(startedAt?: string | null, finishedAt?: string | null
 
 function runStatusTone(status?: string | null) {
   if (status === 'COMPLETE') return 'ok'
+  if (status === 'PARTIAL' || status === 'EMPTY') return 'warn'
   if (status === 'FAILED' || status === 'CANCELLED' || status === 'EXPIRED') return 'warn'
   return 'pending'
+}
+
+function publicationOutcomeLabel(outcome?: string, success?: boolean) {
+  const value = outcome ?? (success ? 'COMPLETE' : 'FAILED')
+  const labels: Record<string, string> = { COMPLETE: '완료', PARTIAL: '부분 완료', EMPTY: '추천 없음', FAILED: '실패' }
+  return labels[value] ?? value
 }
 
 function runStatusLabel(status?: string | null) {
@@ -578,7 +585,7 @@ export default function AdminPage() {
   const cacheList = systemStatus?.cache ?? []
   const conditionRuns = systemStatus?.conditionRuns ?? []
   const latestRun = conditionRuns[0]
-  const runningRunCount = conditionRuns.filter(run => !['COMPLETE', 'FAILED', 'CANCELLED', 'EXPIRED'].includes(run.status)).length
+  const runningRunCount = conditionRuns.filter(run => !['COMPLETE', 'PARTIAL', 'EMPTY', 'FAILED', 'CANCELLED', 'EXPIRED'].includes(run.status)).length
   const staleCacheCount = cacheList.filter(item => item.status !== 'valid').length
   const cacheSummary = cacheList.length
     ? `${cacheList.length - staleCacheCount}/${cacheList.length} valid`
@@ -935,6 +942,42 @@ export default function AdminPage() {
                 </div>
               ))}
             </div>
+            <section aria-label="신규 데이터 소스 준비 상태">
+              <div className="admin-run-summary">
+                <strong>신규 데이터 소스 준비 상태</strong>
+                <span>실제 연결 미검증</span>
+              </div>
+              <AdminTable columns={['데이터 소스', '기능 설정', '자격 정보', '준비 상태', '확인 사항']} emptyText="데이터 소스 준비 상태 대기">
+                {(systemStatus?.dataSources ?? []).map(source => <tr key={source.id}>
+                  <td>{source.name}</td>
+                  <td>{source.enabled ? '활성' : '비활성'}</td>
+                  <td>{source.credentialsConfigured ? '설정됨' : '필요'}</td>
+                  <td>{{ DISABLED: '사용 안 함', CREDENTIALS_MISSING: '자격 정보 필요', RIGHTS_CHECK_REQUIRED: '이용 권한 확인 필요', CONFIGURED: '설정 확인' }[source.state] || source.state}</td>
+                  <td>{source.message}</td>
+                </tr>)}
+              </AdminTable>
+            </section>
+            <section aria-label="분석 실행 결과">
+              <div className="admin-run-summary">
+                <strong>분석 실행 결과</strong>
+                <span>{systemStatus?.analysisStats && systemStatus.analysisStats.totalAnalyses > 0
+                  ? `전체 완료율 ${systemStatus.analysisStats.completionRate}%` : '실행 결과 대기'}</span>
+              </div>
+              {systemStatus?.analysisStats && <p>
+                완료 {systemStatus.analysisStats.outcomeCounts.COMPLETE} · 부분 완료 {systemStatus.analysisStats.outcomeCounts.PARTIAL}
+                {' · '}추천 없음 {systemStatus.analysisStats.outcomeCounts.EMPTY} · 실패 {systemStatus.analysisStats.outcomeCounts.FAILED}
+              </p>}
+              <AdminTable columns={['모드', '결과', '추천', '에이전트', '시각', '오류 분류']} emptyText="분석 실행 결과 없음">
+                {(systemStatus?.recentAnalyses ?? []).map((analysis, index) => <tr key={`${analysis.timestamp}-${index}`}>
+                  <td>{analysis.mode}</td>
+                  <td>{publicationOutcomeLabel(analysis.outcome, analysis.success)}</td>
+                  <td>{analysis.stocksFound ?? '-'}</td>
+                  <td>{analysis.agentsUsed != null ? `${analysis.agentsSucceeded ?? 0}/${analysis.agentsUsed}` : '-'}</td>
+                  <td>{formatDateTime(analysis.timestamp)}</td>
+                  <td>{analysis.error || '-'}</td>
+                </tr>)}
+              </AdminTable>
+            </section>
             <div className="admin-run-summary">
               <strong>ConditionRun timeline</strong>
               <span>{runningRunCount > 0 ? `${runningRunCount} active` : 'No active run'}</span>

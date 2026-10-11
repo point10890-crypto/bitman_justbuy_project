@@ -14,6 +14,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.stream.Collectors;
 
 /**
  * 1차 AI 검증 에이전트 (하이브리드 스택의 FAST_VERIFY 단계).
@@ -110,12 +113,15 @@ public class DeepSeekConditionVerifier {
     Map<String, EvidenceVerdict> parse(String content, List<EvidencePacket> packets) {
         Map<String, EvidenceVerdict> verdicts = new LinkedHashMap<>();
         try {
+            Set<String> candidateCodes = packets.stream().map(EvidencePacket::stockCode).collect(Collectors.toSet());
+            Set<String> duplicateCodes = new HashSet<>();
+            Set<String> seenCodes = new HashSet<>();
             JsonNode root = mapper.readTree(stripToJson(content));
             JsonNode array = root.isArray() ? root : root.path("signals");
             if (!array.isArray()) array = root.path("results");
             if (!array.isArray() && root.has("stockCode")) {
                 EvidenceVerdict single = toVerdict(root);
-                if (single != null) verdicts.put(single.stockCode(), single);
+                if (single != null && candidateCodes.contains(single.stockCode())) verdicts.put(single.stockCode(), single);
                 return verdicts;
             }
             if (!array.isArray()) {
@@ -124,7 +130,14 @@ public class DeepSeekConditionVerifier {
             }
             for (JsonNode node : array) {
                 EvidenceVerdict verdict = toVerdict(node);
-                if (verdict != null && verdict.stockCode() != null && !verdict.stockCode().isBlank()) {
+                String code = node.path("stockCode").asText("");
+                if (duplicateCodes.contains(code)) continue;
+                if (!seenCodes.add(code)) {
+                    verdicts.remove(code);
+                    duplicateCodes.add(code);
+                    continue;
+                }
+                if (verdict != null && candidateCodes.contains(verdict.stockCode())) {
                     verdicts.put(verdict.stockCode(), verdict);
                 }
             }
@@ -138,19 +151,25 @@ public class DeepSeekConditionVerifier {
     private EvidenceVerdict toVerdict(JsonNode node) {
         if (node == null || node.isMissingNode()) return null;
         String code = node.path("stockCode").asText("");
-        if (code.isBlank()) return null;
-        int aiScore = clamp(node.path("aiScore").asInt(0), 0, 99);
-        String verdict = node.path("verdict").asText("WATCH");
+        if (!code.matches("[0-9]{6}")) return null;
+        if (!node.path("aiScore").isIntegralNumber() || !node.path("aiScore").canConvertToInt()) return null;
+        int aiScore = node.path("aiScore").asInt();
+        if (aiScore < 0 || aiScore > 99) return null;
+        String verdict = node.path("verdict").asText("");
+        if (!Set.of("VALID", "WATCH", "OVERHEATED", "REJECT").contains(verdict)) return null;
         String summary = node.path("summary").asText("");
         String invalidation = node.path("invalidation").asText("");
         String displayStatus = node.path("displayStatus").asText("");
+        List<String> evidence = stringList(node.path("evidence"));
+        List<String> risks = stringList(node.path("riskFlags"));
+        if (summary.isBlank() || evidence.isEmpty() || risks.isEmpty() || invalidation.isBlank()) return null;
         return new EvidenceVerdict(
             code,
             aiScore,
             verdict,
             summary,
-            stringList(node.path("evidence")),
-            stringList(node.path("riskFlags")),
+            evidence,
+            risks,
             invalidation,
             displayStatus
         );
@@ -160,6 +179,7 @@ public class DeepSeekConditionVerifier {
         List<String> values = new ArrayList<>();
         if (node != null && node.isArray()) {
             for (JsonNode item : node) {
+                if (!item.isTextual()) continue;
                 String value = item.asText("");
                 if (!value.isBlank()) values.add(value);
             }

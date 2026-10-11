@@ -86,11 +86,15 @@ public class MonitorController {
         entry.put("mode", mode);
         entry.put("timestamp", Instant.now().toString());
         entry.put("success", success);
+        String outcome = "EMPTY".equals(error) ? "EMPTY" : "PARTIAL".equals(error) ? "PARTIAL"
+            : success ? "COMPLETE" : "FAILED";
+        entry.put("outcome", outcome);
         entry.put("durationMs", durationMs);
         entry.put("agentsUsed", agentsUsed);
         entry.put("agentsSucceeded", agentsSucceeded);
         entry.put("stocksFound", stocksFound);
-        if (error != null) entry.put("error", error);
+        if ("FAILED".equals(outcome)) entry.put("error",
+            error != null && error.startsWith("ANALYSIS_TIMEOUT") ? "ANALYSIS_TIMEOUT" : "EXECUTION_FAILED");
 
         analysisLogs.addFirst(entry);
         // bounded ring: 50건 초과분은 가장 오래된 항목부터 제거.
@@ -98,6 +102,34 @@ public class MonitorController {
         while (analysisLogs.size() > MAX_LOGS) {
             analysisLogs.pollLast();
         }
+    }
+
+    public static List<Map<String, Object>> analysisLogSnapshot() {
+        return new ArrayList<>(analysisLogs);
+    }
+
+    /** Full completion rate keeps the original denominator; partial/empty remain distinct counts. */
+    public static Map<String, Object> analysisStatistics() {
+        List<Map<String, Object>> snapshot = analysisLogSnapshot();
+        Map<String, Long> counts = new LinkedHashMap<>();
+        for (String outcome : List.of("COMPLETE", "PARTIAL", "EMPTY", "FAILED")) counts.put(outcome, 0L);
+        for (var entry : snapshot) {
+            String outcome = entry.get("outcome") instanceof String value ? value
+                : Boolean.TRUE.equals(entry.get("success")) ? "COMPLETE" : "FAILED";
+            counts.computeIfPresent(outcome, (key, count) -> count + 1);
+        }
+        long total = snapshot.size();
+        long completionRate = total > 0 ? Math.round((double) counts.get("COMPLETE") / total * 100) : 100;
+        double avgMs = snapshot.stream()
+            .filter(entry -> "COMPLETE".equals(entry.get("outcome")) && entry.get("durationMs") instanceof Number)
+            .mapToLong(entry -> ((Number) entry.get("durationMs")).longValue()).average().orElse(0);
+        Map<String, Object> stats = new LinkedHashMap<>();
+        stats.put("totalAnalyses", total);
+        stats.put("successRate", completionRate);
+        stats.put("completionRate", completionRate);
+        stats.put("outcomeCounts", counts);
+        stats.put("avgDurationMs", Math.round(avgMs));
+        return stats;
     }
 
     /** GET /api/monitor/ping — 단순 연결 테스트 */
@@ -168,7 +200,7 @@ public class MonitorController {
 
         // 4. 최근 분석 로그
         try {
-            List<Map<String, Object>> snapshot = new ArrayList<>(analysisLogs);
+            List<Map<String, Object>> snapshot = analysisLogSnapshot();
             result.put("recentAnalyses", snapshot.size() > 10 ? snapshot.subList(0, 10) : snapshot);
         } catch (Exception e) {
             result.put("recentAnalyses", List.of());
@@ -176,23 +208,13 @@ public class MonitorController {
 
         // 5. 통계
         try {
-            List<Map<String, Object>> snapshot = new ArrayList<>(analysisLogs);
-            long total = snapshot.size();
-            long successCount = snapshot.stream().filter(l -> Boolean.TRUE.equals(l.get("success"))).count();
-            double avgMs = snapshot.stream()
-                .filter(l -> Boolean.TRUE.equals(l.get("success")) && l.get("durationMs") instanceof Number)
-                .mapToLong(l -> ((Number) l.get("durationMs")).longValue())
-                .average().orElse(0);
-
-            Map<String, Object> stats = new LinkedHashMap<>();
-            stats.put("totalAnalyses", total);
-            stats.put("successRate", total > 0 ? Math.round((double) successCount / total * 100) : 100);
-            stats.put("avgDurationMs", Math.round(avgMs));
-            result.put("stats", stats);
+            result.put("stats", analysisStatistics());
         } catch (Exception e) {
             Map<String, Object> stats = new LinkedHashMap<>();
             stats.put("totalAnalyses", 0);
             stats.put("successRate", 100);
+            stats.put("completionRate", 100);
+            stats.put("outcomeCounts", Map.of("COMPLETE", 0L, "PARTIAL", 0L, "EMPTY", 0L, "FAILED", 0L));
             stats.put("avgDurationMs", 0);
             result.put("stats", stats);
         }
@@ -211,9 +233,9 @@ public class MonitorController {
             result.put("status", "unknown");
         }
 
-        // 5분 캐시 적용
+        // 서버 health 캐시와 같은 짧은 갱신 주기.
         return ResponseEntity.ok()
-                .cacheControl(CacheControl.maxAge(Duration.ofMinutes(5)))
+                .cacheControl(CacheControl.maxAge(Duration.ofSeconds(30)))
                 .body(result);
     }
 
@@ -221,7 +243,7 @@ public class MonitorController {
     @GetMapping("/logs")
     public List<Map<String, Object>> getLogs() {
         // ConcurrentLinkedDeque 의 iterator 는 weakly consistent (snapshot 아님) — copy 로 안전하게 노출.
-        return new ArrayList<>(analysisLogs);
+        return analysisLogSnapshot();
     }
 
     /** GET /api/monitor/track-record — 분석 성과 추적 통계 */

@@ -47,6 +47,8 @@ public class ChatGptAgent implements AiAgent {
     public AgentResult analyze(String systemPrompt, String userMessage) {
         long start = System.currentTimeMillis();
         if (!isAvailable()) return AgentResult.skipped(name(), "API key not configured");
+        var lease = ProviderCallLimiter.tryAcquire(name());
+        if (lease == null) return AgentResult.error(name(), ANALYSIS_MODEL, "Provider request capacity is busy", System.currentTimeMillis() - start);
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -66,11 +68,14 @@ public class ChatGptAgent implements AiAgent {
             var response = restTemplate.exchange(BASE_URL + "/responses", HttpMethod.POST,
                 new HttpEntity<>(mapper.writeValueAsString(body), headers), String.class);
             JsonNode root = mapper.readTree(response.getBody());
+            String actualModel = root.path("model").asText(ANALYSIS_MODEL);
+            int inputTokens = root.path("usage").path("input_tokens").asInt(0);
+            int outputTokens = root.path("usage").path("output_tokens").asInt(0);
             if (!"completed".equals(root.path("status").asText())) {
-                return AgentResult.error(name(), ANALYSIS_MODEL,
+                return AgentResult.error(name(), actualModel,
                     "OpenAI response " + root.path("status").asText("missing status") + ": "
                         + root.path("incomplete_details").path("reason").asText("not completed"),
-                    System.currentTimeMillis() - start);
+                    System.currentTimeMillis() - start, inputTokens, outputTokens);
             }
             StringBuilder content = new StringBuilder();
             var citations = new java.util.LinkedHashSet<String>();
@@ -89,9 +94,9 @@ public class ChatGptAgent implements AiAgent {
                     }
                 }
             }
-            if (content.toString().isBlank()) {
-                return AgentResult.error(name(), ANALYSIS_MODEL, "Empty OpenAI analysis response",
-                    System.currentTimeMillis() - start);
+            if (!ProviderEndpointPolicy.hasMeaningfulContent(content.toString())) {
+                return AgentResult.error(name(), actualModel, "Empty OpenAI analysis response",
+                    System.currentTimeMillis() - start, inputTokens, outputTokens);
             }
             if (!citations.isEmpty()) {
                 content.append("\n\n**검색 출처**\n");
@@ -102,7 +107,9 @@ public class ChatGptAgent implements AiAgent {
                 root.path("usage").path("output_tokens").asInt(0), "success", null,
                 System.currentTimeMillis() - start);
         } catch (Exception e) {
-            return AgentResult.error(name(), ANALYSIS_MODEL, e.getMessage(), System.currentTimeMillis() - start);
+            return AgentResult.error(name(), ANALYSIS_MODEL, "Provider request failed", System.currentTimeMillis() - start);
+        } finally {
+            lease.close();
         }
     }
 
@@ -116,6 +123,9 @@ public class ChatGptAgent implements AiAgent {
         if (!isAvailable()) {
             return AgentResult.skipped(name(), "API key not configured");
         }
+
+        var lease = ProviderCallLimiter.tryAcquire(name());
+        if (lease == null) return AgentResult.error(name(), model, "Provider request capacity is busy", System.currentTimeMillis() - start);
 
         try {
             HttpHeaders headers = new HttpHeaders();
@@ -151,11 +161,19 @@ public class ChatGptAgent implements AiAgent {
             int inputTokens = root.path("usage").path("prompt_tokens").asInt(0);
             int outputTokens = root.path("usage").path("completion_tokens").asInt(0);
 
+            if (!"stop".equals(root.path("choices").path(0).path("finish_reason").asText())
+                    || !ProviderEndpointPolicy.hasMeaningfulContent(content)) {
+                return AgentResult.error(name(), actualModel, "Incomplete OpenAI synthesis response",
+                    System.currentTimeMillis() - start, inputTokens, outputTokens);
+            }
+
             return new AgentResult(name(), content, actualModel, inputTokens, outputTokens,
                 "success", null, System.currentTimeMillis() - start);
 
         } catch (Exception e) {
-            return AgentResult.error(name(), model, e.getMessage(), System.currentTimeMillis() - start);
+            return AgentResult.error(name(), model, "Provider request failed", System.currentTimeMillis() - start);
+        } finally {
+            lease.close();
         }
     }
 }

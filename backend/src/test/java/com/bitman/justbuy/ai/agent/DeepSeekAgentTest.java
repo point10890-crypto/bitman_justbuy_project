@@ -99,7 +99,8 @@ class DeepSeekAgentTest {
         AgentResult result = agent.analyze("system", "user");
 
         assertThat(result.status()).isEqualTo("error");
-        assertThat(result.error()).contains("timeout");
+        assertThat(result.error()).isEqualTo("Provider request failed");
+        assertThat(result.error()).doesNotContain("timeout", "https://", "Authorization");
     }
 
     @Test
@@ -128,6 +129,7 @@ class DeepSeekAgentTest {
         String json = mapper.writeValueAsString(Map.of(
             "model", model,
             "choices", List.of(Map.of(
+                "finish_reason", "stop",
                 "message", Map.of("role", "assistant", "content", content)
             )),
             "usage", Map.of(

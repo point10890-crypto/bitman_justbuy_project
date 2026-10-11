@@ -7,11 +7,31 @@ interface CacheEntry {
   timestamp: number
   query: string
   mode?: string
+  source?: 'live' | 'precomputed'
 }
 
 const CACHE_KEY = 'bitman_analysis_cache_v2'
 const DEFAULT_TTL = 24 * 60 * 60 * 1000 // 24시간
 const MAX_ENTRIES = 50
+const PRECOMPUTED_MODES = new Set(['BREAKOUT', 'FLOW_LEADER', 'CATALYST_BURST', 'REVERSAL_EDGE'])
+
+/** Mirror the server's observation freshness policy; storage TTL is only retention. */
+function isFresh(data: AnalysisResponse, mode?: string, source?: CacheEntry['source']): boolean {
+  const observedAt = Date.parse(data.updatedAt)
+  const now = Date.now()
+  if (!data.isFresh || !Number.isFinite(observedAt) || observedAt > now) return false
+  // Entries from the older cache format have no source; conservatively use live TTL.
+  const precomputed = source === 'precomputed' && PRECOMPUTED_MODES.has(mode || data.mode)
+  const ttl = (precomputed ? 175 : 30) * 60 * 1000
+  if (now - observedAt > ttl) return false
+  if (precomputed) {
+    const kstNow = new Date(now + 9 * 60 * 60 * 1000)
+    const kstObserved = new Date(observedAt + 9 * 60 * 60 * 1000)
+    const sameDay = kstNow.toISOString().slice(0, 10) === kstObserved.toISOString().slice(0, 10)
+    if (sameDay && (kstNow.getUTCHours() * 60 + kstNow.getUTCMinutes()) >= 15 * 60 + 30) return false
+  }
+  return true
+}
 
 /** 쿼리 + 모드 → 캐시 키 생성 (정규화) */
 function generateKey(query: string, mode?: string): string {
@@ -59,15 +79,15 @@ export function getCached(query: string, mode?: string, ttl = DEFAULT_TTL): Anal
     return null
   }
 
-  return entry.data
+  return { ...entry.data, isFresh: isFresh(entry.data, mode, entry.source) }
 }
 
 /** 캐시에 저장 */
-export function setCache(query: string, mode: string | undefined, data: AnalysisResponse) {
+export function setCache(query: string, mode: string | undefined, data: AnalysisResponse, source: CacheEntry['source'] = 'live') {
   const cache = loadCache()
   const key = generateKey(query, mode)
 
-  cache[key] = { data, timestamp: Date.now(), query, mode }
+  cache[key] = { data, timestamp: Date.now(), query, mode, source }
 
   // MAX_ENTRIES 초과 시 가장 오래된 항목 제거
   const keys = Object.keys(cache)

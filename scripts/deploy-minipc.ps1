@@ -1,9 +1,10 @@
 param(
-    [string]$MiniPcHost = "192.168.55.103",
+    [string]$MiniPcHost = "minipc-nqylp",
     [string]$MiniPcUser = "dynas",
     [string]$ProjectRoot = "C:\bitman_justbuy_project",
     [string]$RemoteRoot = "C:\bitman_justbuy",
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [string]$MiniPcHostKeyAlias = "192.168.55.103"
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +17,11 @@ $JarPath = Join-Path $BackendDir "build\libs\justbuy-api-1.0.0.jar"
 $Stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $Remote = "$MiniPcUser@$MiniPcHost"
 $RemoteUpload = "C:/Windows/Temp/justbuy-api-$Stamp.jar"
+$SshArgs = @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10')
+if ($MiniPcHostKeyAlias) {
+    if ($MiniPcHostKeyAlias -notmatch '^[a-zA-Z0-9.:-]+$') { throw 'Invalid MiniPC host key alias.' }
+    $SshArgs += @('-o', "HostKeyAlias=$MiniPcHostKeyAlias")
+}
 
 function Run-Step {
     param([string]$Name, [scriptblock]$Body)
@@ -37,16 +43,16 @@ function Invoke-RemotePowerShell {
     $localScript = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetFileName($remoteScript))
     Set-Content -LiteralPath $localScript -Value $Script -Encoding UTF8
     try {
-        scp $localScript "${Remote}:$remoteScript"
+        scp @SshArgs $localScript "${Remote}:$remoteScript"
         Assert-LastExitCode "scp remote script"
-        ssh $Remote "powershell -NoProfile -ExecutionPolicy Bypass -File $remoteScript"
+        ssh @SshArgs $Remote "powershell -NoProfile -ExecutionPolicy Bypass -File $remoteScript"
         Assert-LastExitCode "remote powershell"
     } finally {
         Remove-Item -LiteralPath $localScript -Force -ErrorAction SilentlyContinue
         $oldPreference = $ErrorActionPreference
         try {
             $ErrorActionPreference = "SilentlyContinue"
-            ssh $Remote "powershell -NoProfile -Command `"Remove-Item -LiteralPath '$remoteScript' -Force -ErrorAction SilentlyContinue`"" 2>$null | Out-Null
+            ssh @SshArgs $Remote "powershell -NoProfile -Command `"Remove-Item -LiteralPath '$remoteScript' -Force -ErrorAction SilentlyContinue`"" 2>$null | Out-Null
             $global:LASTEXITCODE = 0
         } finally {
             $ErrorActionPreference = $oldPreference
@@ -74,7 +80,8 @@ Run-Step "Copy frontend dist into Spring static resources" {
     if (-not (Test-Path $StaticDir)) {
         New-Item -ItemType Directory -Path $StaticDir -Force | Out-Null
     }
-    Get-ChildItem -LiteralPath $StaticDir -Force | Remove-Item -Recurse -Force
+    # Preserve old immutable hashed assets for clients still using a cached index.
+    # Copying the new index and service worker switches fresh clients to this build.
     Copy-Item -Path (Join-Path $DistDir "*") -Destination $StaticDir -Recurse -Force
 }
 
@@ -119,7 +126,7 @@ Write-Host "MiniPC preflight OK"
 }
 
 Run-Step "Upload JAR to MiniPC temp" {
-    scp $JarPath "${Remote}:$RemoteUpload"
+    scp @SshArgs $JarPath "${Remote}:$RemoteUpload"
     Assert-LastExitCode "scp JAR"
 }
 
