@@ -12,6 +12,8 @@ import com.bitman.justbuy.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import jakarta.annotation.PostConstruct;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -49,6 +51,9 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final org.springframework.beans.factory.ObjectProvider<TelegramNotifier> telegramNotifierProvider;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     @Value("${bitman.admin.email:}")
     private String adminEmail;
@@ -227,7 +232,19 @@ public class AuthService {
                 return new ApiException(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다.");
             });
 
-        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+        String verifiedPasswordHash = user.getPasswordHash();
+        if (!passwordEncoder.matches(request.password(), verifiedPasswordHash)) {
+            recordLoginFailure(email);
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다.");
+        }
+
+        // A password reset can commit while BCrypt checks the original snapshot.
+        // Lock and refresh before minting a token; unchanged hashes need no second BCrypt check.
+        user = userRepository.findByIdForUpdate(user.getId())
+            .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."));
+        entityManager.refresh(user);
+        if (!java.util.Objects.equals(verifiedPasswordHash, user.getPasswordHash())
+                && !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             recordLoginFailure(email);
             throw new ApiException(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다.");
         }
@@ -284,6 +301,18 @@ public class AuthService {
 
     /** 관리자 이메일이면 ADMIN 승격 + ADMIN은 항상 무기한 PRO 보장 */
     private void ensureAdminPro(User user) {
+        boolean needsPromotion = adminEmail != null && !adminEmail.isBlank()
+            && user.getEmail().equalsIgnoreCase(normalizeEmail(adminEmail)) && user.getRole() != Role.ADMIN;
+        boolean needsProRepair = user.getRole() == Role.ADMIN
+            && (user.getSubscription() != SubscriptionStatus.PRO || user.getSubscriptionEndDate() != null);
+        if (!needsPromotion && !needsProRepair) return;
+
+        // Ordinary /me reads remain unlocked. Actual admin repairs re-read under the member write lock.
+        user = userRepository.findByIdForUpdate(user.getId())
+            .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "회원정보를 찾을 수 없습니다. 다시 로그인해 주세요."));
+        // The initial read is already managed: refresh it after acquiring the lock before saving any field.
+        entityManager.refresh(user);
+
         // 관리자 이메일인데 아직 ADMIN이 아니면 승격
         if (adminEmail != null && !adminEmail.isBlank()
                 && user.getEmail().equalsIgnoreCase(normalizeEmail(adminEmail))
@@ -302,7 +331,7 @@ public class AuthService {
 
     @Transactional
     public UserDto updateProfile(UUID userId, String name) {
-        var user = userRepository.findById(userId)
+        var user = userRepository.findByIdForUpdate(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
         user.setName(name.trim());
@@ -312,7 +341,7 @@ public class AuthService {
 
     @Transactional
     public void changePassword(UUID userId, String currentPassword, String newPassword) {
-        var user = userRepository.findById(userId)
+        var user = userRepository.findByIdForUpdate(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
         if (!passwordEncoder.matches(currentPassword, user.getPasswordHash())) {

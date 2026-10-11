@@ -292,8 +292,10 @@ public class AdminController {
         }
     }
 
+    public record RefreshAllRequest(List<String> modes) {}
+
     @PostMapping("/system/refresh-all")
-    public ResponseEntity<Map<String, Object>> refreshAll() {
+    public ResponseEntity<Map<String, Object>> refreshAll(@RequestBody(required = false) RefreshAllRequest request) {
         Map<String, Object> result = new LinkedHashMap<>();
 
         if (precomputeScheduler == null) {
@@ -302,9 +304,17 @@ public class AdminController {
             return ResponseEntity.badRequest().body(result);
         }
 
-        result.put("status", "ok");
         result.put("startedAt", Instant.now().toString());
-        Map<String, String> refreshResults = precomputeScheduler.refreshAll();
+        Map<String, String> refreshResults;
+        try {
+            refreshResults = precomputeScheduler.refreshModes(request != null ? request.modes() : null);
+        } catch (IllegalArgumentException e) {
+            result.put("status", "error");
+            result.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(result);
+        }
+        long failures = refreshResults.values().stream().filter(value -> !"success".equals(value)).count();
+        result.put("status", failures == 0 ? "ok" : failures == refreshResults.size() ? "error" : "partial");
         result.put("results", refreshResults);
         result.put("completedAt", Instant.now().toString());
 

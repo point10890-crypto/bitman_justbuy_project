@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import {
-  approveSubscription, fetchAllUsers, fetchPendingSubscriptions,
-  fetchSystemStatus, rejectSubscription, type UserDto,
+  adminUpdateUser, approveSubscription, fetchAllUsers, fetchPendingSubscriptions,
+  fetchSystemStatus, refreshAllAnalysis, rejectSubscription, type UserDto,
 } from '../api/authApi'
 import AdminPage from './AdminPage'
 
@@ -93,5 +93,102 @@ describe('admin approval details for monthly to six-month upgrades', () => {
     expect(row.getByText('6개월 · 150,000원')).toBeTruthy()
     expect(row.queryByText('1개월 → 6개월 업그레이드')).toBeNull()
     expect(row.queryByText(/이용 유지/)).toBeNull()
+  })
+})
+
+describe('admin analysis refresh recovery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(fetchAllUsers).mockResolvedValue([])
+    vi.mocked(fetchPendingSubscriptions).mockResolvedValue([])
+    vi.mocked(fetchSystemStatus).mockResolvedValue({ conditionRuns: [{
+      runId: 'failed-run', traceId: 'failed-trace', trigger: 'ADMIN_REFRESH', mode: 'CATALYST_BURST', query: null,
+      status: 'FAILED', attempt: 1, startedAt: '2026-10-11T12:00:00Z', updatedAt: '2026-10-11T12:01:00Z', finishedAt: '2026-10-11T12:01:00Z',
+      errorCode: 'EXECUTION_FAILED', errorMessage: 'Analysis provider timed out', pickCount: null, agentsUsed: null, agentsSucceeded: null,
+    }] })
+  })
+  afterEach(cleanup)
+
+  async function openSystem() {
+    render(<MemoryRouter initialEntries={['/admin?view=system']}><AdminPage /></MemoryRouter>)
+    return screen.findByRole('button', { name: '조건검색식 / 분석 캐시 새로고침' })
+  }
+
+  it('shows the failed mode and retries it without recomputing successful modes', async () => {
+    vi.mocked(refreshAllAnalysis).mockResolvedValueOnce({ status: 'partial', results: { BREAKOUT: 'success', CATALYST_BURST: 'error: Analysis provider timed out' } })
+      .mockResolvedValueOnce({ status: 'ok', results: { CATALYST_BURST: 'success' } })
+    fireEvent.click(await openSystem())
+
+    const results = await screen.findByRole('region', { name: '분석 캐시 갱신 결과' })
+    expect(within(results).getByText('BREAKOUT')).toBeTruthy()
+    expect(within(results).getByText('CATALYST_BURST')).toBeTruthy()
+    expect(within(results).getByText('error: Analysis provider timed out')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '실패한 모드만 재시도' }))
+
+    await waitFor(() => expect(refreshAllAnalysis).toHaveBeenLastCalledWith('admin-upgrade-fixture-token', ['CATALYST_BURST']))
+    await waitFor(() => expect(screen.queryByRole('button', { name: '실패한 모드만 재시도' })).toBeNull())
+    expect(within(results).getAllByText('성공')).toHaveLength(2)
+  })
+
+  it('does not report completion when all attempted modes failed', async () => {
+    vi.mocked(refreshAllAnalysis).mockResolvedValue({ status: 'error', results: { BREAKOUT: 'error: market unavailable', CATALYST_BURST: 'error: provider unavailable' } })
+    fireEvent.click(await openSystem())
+
+    expect(await screen.findByText(/갱신 실패.*2개/)).toBeTruthy()
+    const results = await screen.findByRole('region', { name: '분석 캐시 갱신 결과' })
+    expect(within(results).queryByText('성공')).toBeNull()
+    expect(screen.getByRole('button', { name: '실패한 모드만 재시도' })).toBeTruthy()
+  })
+
+  it('shows the recorded failure cause before any refresh is requested', async () => {
+    await openSystem()
+    expect(await screen.findByText('Analysis provider timed out')).toBeTruthy()
+    expect(screen.getByText('EXECUTION_FAILED')).toBeTruthy()
+    expect(refreshAllAnalysis).not.toHaveBeenCalled()
+  })
+})
+
+describe('admin member editor preserves concurrent subscription requests', () => {
+  const activeMember = pendingMember({ subscription: 'PRO', requestedSubscriptionPlan: null, subscriptionEndDate: '2050-10-31' })
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(fetchAllUsers).mockResolvedValue([activeMember])
+    vi.mocked(fetchPendingSubscriptions).mockResolvedValue([])
+    vi.mocked(fetchSystemStatus).mockResolvedValue({})
+  })
+  afterEach(cleanup)
+
+  async function openEditor() {
+    render(<MemoryRouter initialEntries={['/admin?view=members']}><AdminPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', { name: '수정' }))
+    return screen.getByLabelText('회원명').closest('form')!
+  }
+
+  it('omits an unchanged subscription when a newer six-month request arrives during profile editing', async () => {
+    const form = await openEditor()
+    const requestedMember = pendingMember({ name: 'Updated member', subscriptionEndDate: '2050-10-31' })
+    vi.mocked(fetchAllUsers).mockResolvedValue([requestedMember])
+    vi.mocked(fetchPendingSubscriptions).mockResolvedValue([requestedMember])
+    vi.mocked(adminUpdateUser).mockResolvedValue(requestedMember)
+    fireEvent.change(screen.getByLabelText('회원명'), { target: { value: 'Updated member' } })
+    fireEvent.submit(form)
+
+    await waitFor(() => expect(adminUpdateUser).toHaveBeenCalledWith('admin-upgrade-fixture-token', activeMember.id, {
+      name: 'Updated member', email: 'upgrade@example.invalid',
+    }))
+    const row = (await screen.findByText('Updated member')).closest('tr')!
+    expect(within(row).getByText('PENDING')).toBeTruthy()
+    expect(approveSubscription).not.toHaveBeenCalled()
+  })
+
+  it('sends the subscription only when the administrator explicitly changes the selected status', async () => {
+    const form = await openEditor()
+    vi.mocked(adminUpdateUser).mockResolvedValue({ ...activeMember, subscription: 'FREE' })
+    fireEvent.change(screen.getByLabelText('등급'), { target: { value: 'FREE' } })
+    fireEvent.submit(form)
+
+    await waitFor(() => expect(adminUpdateUser).toHaveBeenCalledWith('admin-upgrade-fixture-token', activeMember.id, {
+      name: activeMember.name, email: activeMember.email, subscription: 'FREE',
+    }))
   })
 })

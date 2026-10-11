@@ -61,7 +61,7 @@ class SubscriptionPlanWorkflowTest {
     void setUp() {
         user = new User("subscriber@example.com", "subscriber", "hash");
         ReflectionTestUtils.setField(user, "id", userId);
-        lenient().when(repository.findById(userId)).thenReturn(Optional.of(user));
+        lenient().when(repository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         service = new SubscriptionService(repository, encoder, notifierProvider);
         mvc = MockMvcBuilders.standaloneSetup(new SubscriptionController(service))
             .setControllerAdvice(new GlobalExceptionHandler())
@@ -312,6 +312,41 @@ class SubscriptionPlanWorkflowTest {
         assertThat(dtoJson(edited).path("requestedSubscriptionPlan").asText()).isEqualTo("SIX_MONTHS");
         assertThat(edited.name()).isEqualTo("Updated member");
         assertThat(edited.email()).isEqualTo("updated@example.com");
+    }
+
+    @Test
+    void adminProfileEditWithUnchangedUnlimitedProPreservesUnlimitedAccess() {
+        user.setSubscription(SubscriptionStatus.PRO);
+        user.setSubscriptionPlan(SubscriptionPlan.SIX_MONTHS);
+        LocalDateTime originalApproval = LocalDateTime.of(2026, 6, 1, 12, 0);
+        user.setSubscriptionApprovedAt(originalApproval);
+
+        var edited = service.adminUpdateUser(userId, "Updated member", "updated@example.com", "PRO");
+
+        assertThat(edited.subscriptionEndDate()).isNull();
+        assertThat(edited.subscriptionApprovedAt()).isEqualTo(originalApproval);
+        assertThat(edited.subscriptionPlan()).isEqualTo("SIX_MONTHS");
+        assertThat(edited.name()).isEqualTo("Updated member");
+        assertThat(service.isActivePro(user)).isTrue();
+    }
+
+    @Test
+    void adminProfileEditWithUnchangedExpiredProDoesNotReactivateAccess() {
+        user.setSubscription(SubscriptionStatus.PRO);
+        user.setSubscriptionPlan(SubscriptionPlan.SIX_MONTHS);
+        LocalDate originalEnd = LocalDate.now(KST).minusDays(1);
+        LocalDateTime originalApproval = originalEnd.minusMonths(6).atTime(12, 0);
+        user.setSubscriptionEndDate(originalEnd);
+        user.setSubscriptionApprovedAt(originalApproval);
+
+        var edited = service.adminUpdateUser(userId, "Updated member", "updated@example.com", "PRO");
+
+        assertThat(edited.subscriptionEndDate()).isEqualTo(originalEnd);
+        assertThat(edited.subscriptionApprovedAt()).isEqualTo(originalApproval);
+        assertThat(edited.subscriptionPlan()).isEqualTo("SIX_MONTHS");
+        assertThat(edited.email()).isEqualTo("updated@example.com");
+        assertThat(service.isActivePro(user)).isFalse();
+        assertThat(service.tierOf(user)).isEqualTo(MemberTier.EXPIRED);
     }
 
     private void approveMonthly() {

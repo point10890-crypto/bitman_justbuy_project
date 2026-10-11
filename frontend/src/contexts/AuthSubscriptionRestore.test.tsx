@@ -103,7 +103,7 @@ describe('cached subscription upgrade restoration', () => {
     expect(screen.getByText('샘플 업그레이드 승인 대기')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '6개월 이용권으로 업그레이드' })).toBeNull()
     expect(screen.queryByText('샘플 유료 수급 화면')).toBeNull()
-    expect(screen.getByText('샘플 승인 대기 화면')).toBeTruthy()
+    expect(await screen.findByText('샘플 승인 대기 화면')).toBeTruthy()
     expect(networkMock).not.toHaveBeenCalled()
   })
 

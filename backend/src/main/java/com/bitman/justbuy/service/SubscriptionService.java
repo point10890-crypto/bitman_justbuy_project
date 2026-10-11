@@ -48,7 +48,7 @@ public class SubscriptionService {
     @Transactional
     public UserDto applyForSubscription(UUID userId, String depositorName, SubscriptionPlan plan) {
         SubscriptionPlan requestedPlan = plan == null ? SubscriptionPlan.MONTHLY : plan;
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
         if (user.getRole() == Role.ADMIN) {
             throw new IllegalStateException("관리자 계정은 항상 PRO이므로 입금 및 연장 신청이 필요하지 않습니다.");
@@ -138,7 +138,7 @@ public class SubscriptionService {
      */
     @Transactional
     public UserDto linkTelegram(UUID userId, String chatId) {
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
         String normalized = chatId == null ? "" : chatId.trim();
@@ -168,7 +168,7 @@ public class SubscriptionService {
     /** 회원 텔레그램 연결 해제. 이후 알림 대상에서 빠진다. */
     @Transactional
     public UserDto unlinkTelegram(UUID userId) {
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
         user.setTelegramChatId(null);
         user.setExpiryNoticeFor(null);
@@ -200,7 +200,7 @@ public class SubscriptionService {
 
     @Transactional
     public UserDto approveSubscription(UUID userId) {
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
         if (user.getRole() == Role.ADMIN) {
@@ -237,7 +237,7 @@ public class SubscriptionService {
 
     @Transactional
     public UserDto rejectSubscription(UUID userId) {
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
         // approve/revoke 와 동일한 보호 — 관리자 계정만 이 가드가 빠져 있었다.
@@ -275,7 +275,7 @@ public class SubscriptionService {
 
     @Transactional
     public UserDto revokeSubscription(UUID userId) {
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
         if (user.getRole() == Role.ADMIN) {
@@ -303,7 +303,7 @@ public class SubscriptionService {
     /** 관리자: 회원 정보 수정 (이름, 이메일, 구독상태) */
     @Transactional
     public UserDto adminUpdateUser(UUID userId, String name, String email, String subscription) {
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
         if (name != null && !name.isBlank()) {
@@ -342,12 +342,12 @@ public class SubscriptionService {
                 user.setSubscriptionRequestedAt(null);
                 if (user.getRole() == Role.ADMIN) {
                     user.setSubscriptionEndDate(null);
-                } else if (user.getSubscriptionEndDate() == null
-                    || user.getSubscriptionEndDate().isBefore(LocalDate.now(KST))) {
+                } else if (statusChanged && (user.getSubscriptionEndDate() == null
+                    || user.getSubscriptionEndDate().isBefore(LocalDate.now(KST)))) {
                     user.setSubscriptionEndDate(LocalDate.now(KST).plusMonths(1));
                 }
             }
-            if (newStatus == SubscriptionStatus.PRO && user.getSubscriptionApprovedAt() == null) {
+            if (newStatus == SubscriptionStatus.PRO && statusChanged && user.getSubscriptionApprovedAt() == null) {
                 user.setSubscriptionApprovedAt(LocalDateTime.now(KST));
             }
             if (newStatus == SubscriptionStatus.PENDING && statusChanged) {
@@ -375,7 +375,7 @@ public class SubscriptionService {
 
     @Transactional
     public void adminResetPassword(UUID userId, String newPassword) {
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
         user.setPasswordHash(passwordEncoder.encode(newPassword));
@@ -472,7 +472,8 @@ public class SubscriptionService {
     }
 
     private Map<String, Object> expireExpiredProUsers(LocalDate today) {
-        List<User> expired = userRepository.findExpiredProUsers(today);
+        // Read ids so the persistence context does not retain a stale candidate entity.
+        List<UUID> expired = userRepository.findExpiredProUserIds(today);
         if (expired.isEmpty()) {
             Map<String, Object> result = new java.util.LinkedHashMap<>();
             result.put("status", "ok");
@@ -485,12 +486,17 @@ public class SubscriptionService {
 
         int ok = 0;
         int failed = 0;
-        for (User user : expired) {
+        for (UUID userId : expired) {
             try {
+                User user = userRepository.findByIdForUpdate(userId).orElse(null);
+                if (user == null) continue;
                 if (user.getRole() == Role.ADMIN) {
                     log.warn("[Subscription] 관리자 계정은 만료 처리에서 제외: userId={}, email={}", user.getId(), user.getEmail());
                     continue;
                 }
+                if (user.getSubscription() != SubscriptionStatus.PRO
+                        || user.getSubscriptionEndDate() == null
+                        || !user.getSubscriptionEndDate().isBefore(today)) continue;
                 user.setSubscription(SubscriptionStatus.FREE);
                 // 종료일/승인일은 남긴다. 지우면 "구독한 적 있는데 만료된 회원"과
                 // "구독한 적 없는 회원"을 구분할 수 없어 재구독 안내를 못 한다.
@@ -502,8 +508,7 @@ public class SubscriptionService {
             } catch (Exception e) {
                 // 단일 유저 실패가 전체 배치를 중단시키지 않도록 격리
                 failed++;
-                log.error("[Subscription] 만료 처리 실패 userId={}, email={}: {}",
-                    user.getId(), user.getEmail(), e.getMessage(), e);
+                log.error("[Subscription] 만료 처리 실패 userId={}: {}", userId, e.getMessage(), e);
             }
         }
         log.info("[Subscription] 구독 만료 일괄 처리 완료: 성공 {}명, 실패 {}명 (대상 {}명)",

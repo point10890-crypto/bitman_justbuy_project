@@ -63,7 +63,7 @@ class RenewalKeepsHistoryTest {
     void renewalApplicationKeepsTheProofThatTheyWereAMemberBefore() {
         UUID userId = UUID.randomUUID();
         User user = lapsedMember(userId);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
 
         service.applyForSubscription(userId, "홍길동");
@@ -81,7 +81,7 @@ class RenewalKeepsHistoryTest {
     void anAdminSeesARenewalApplicantAsAReturningMemberNotANewcomer() {
         UUID userId = UUID.randomUUID();
         User user = lapsedMember(userId);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
         when(userRepository.findAll()).thenReturn(List.of(user));
 
@@ -96,7 +96,7 @@ class RenewalKeepsHistoryTest {
     void rejectingARenewalLeavesTheMemberInTheRenewalFunnel() {
         UUID userId = UUID.randomUUID();
         User user = lapsedMember(userId);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
 
         service.applyForSubscription(userId, "홍길동");
@@ -111,7 +111,7 @@ class RenewalKeepsHistoryTest {
     void approvingARenewalStartsAFreshMonthFromToday() {
         UUID userId = UUID.randomUUID();
         User user = lapsedMember(userId);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
 
         service.applyForSubscription(userId, "홍길동");
@@ -128,7 +128,7 @@ class RenewalKeepsHistoryTest {
         UUID userId = UUID.randomUUID();
         User newcomer = new User("new@example.com", "new", "hash");
         ReflectionTestUtils.setField(newcomer, "id", userId);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(newcomer));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(newcomer));
         when(userRepository.save(newcomer)).thenReturn(newcomer);
 
         service.applyForSubscription(userId, "신규");

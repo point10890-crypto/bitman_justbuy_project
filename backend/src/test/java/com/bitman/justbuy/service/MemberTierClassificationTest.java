@@ -59,7 +59,7 @@ class MemberTierClassificationTest {
     void revokedMemberStaysClassifiedAsExpiredNotAsNewcomer() {
         UUID userId = UUID.randomUUID();
         User user = proMember(userId);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
 
         service.revokeSubscription(userId);
@@ -74,7 +74,7 @@ class MemberTierClassificationTest {
     void adminDowngradeToFreeAlsoKeepsTheSubscriptionHistory() {
         UUID userId = UUID.randomUUID();
         User user = proMember(userId);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
 
         service.adminUpdateUser(userId, null, null, "FREE");
@@ -88,7 +88,7 @@ class MemberTierClassificationTest {
     void revokedMemberAppearsInTheRenewalListAndNotInTheNewcomerList() {
         UUID userId = UUID.randomUUID();
         User user = proMember(userId);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
         service.revokeSubscription(userId);
 

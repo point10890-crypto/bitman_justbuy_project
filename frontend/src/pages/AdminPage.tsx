@@ -227,6 +227,7 @@ export default function AdminPage() {
   const [users, setUsers] = useState<UserDto[]>([])
   const [pendingUsers, setPendingUsers] = useState<UserDto[]>([])
   const [systemStatus, setSystemStatus] = useState<SystemStatusResponse | null>(null)
+  const [refreshResults, setRefreshResults] = useState<Record<string, string>>({})
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [actionId, setActionId] = useState<string | null>(null)
@@ -401,7 +402,8 @@ export default function AdminPage() {
       await adminUpdateUser(token, editingUser.id, {
         name: editForm.name.trim(),
         email: editForm.email.trim().toLowerCase(),
-        subscription: editForm.subscription,
+        ...(editingUser.role !== 'ADMIN' && editForm.subscription !== editingUser.subscription
+          ? { subscription: editForm.subscription } : {}),
       })
       setMessage(`${editForm.name} 회원 정보가 저장되었습니다.`)
       setEditingUser(null)
@@ -464,13 +466,24 @@ export default function AdminPage() {
     }
   }
 
-  const refreshSystem = async () => {
+  const refreshSystem = async (modes?: readonly string[]) => {
     const token = getStoredToken()
     if (!token) return
     setActionId('system-refresh')
+    setMessage('분석 캐시를 갱신하고 있습니다.')
     try {
-      await refreshAllAnalysis(token)
-      setMessage('검색식과 분석 캐시 갱신을 요청했습니다.')
+      const result = await refreshAllAnalysis(token, modes)
+      const results = result.results || {}
+      setRefreshResults(previous => modes ? { ...previous, ...results } : results)
+      const values = Object.values(results)
+      const succeeded = values.filter(value => value === 'success').length
+      const failed = values.length - succeeded
+      setMessage(result.status === 'running'
+        ? '분석이 계속 실행 중입니다. 시스템 상태를 다시 확인해 주세요.'
+        : values.length === 0 ? '분석 갱신 결과를 확인하지 못했습니다. 시스템 상태를 확인해 주세요.'
+        : failed === 0 ? `분석 캐시 ${succeeded}개 모드 갱신 완료.`
+        : succeeded === 0 ? `분석 캐시 갱신 실패: ${failed}개 모드. 실패 원인을 확인해 주세요.`
+        : `분석 캐시 일부 갱신: 성공 ${succeeded}개, 실패 ${failed}개. 실패한 모드만 재시도할 수 있습니다.`)
       await loadSystem()
       markRefreshed('시스템/검색식 캐시')
     } catch (error) {
@@ -748,7 +761,7 @@ export default function AdminPage() {
               <button type="button" onClick={() => openHomeSection(strategyViews[view as keyof typeof strategyViews].section)}>
                 사용자 화면에서 확인
               </button>
-              <button type="button" disabled={actionId === 'system-refresh'} onClick={refreshSystem}>
+              <button type="button" disabled={actionId === 'system-refresh'} onClick={() => refreshSystem()}>
                 분석 캐시 새로고침
               </button>
             </div>
@@ -927,7 +940,7 @@ export default function AdminPage() {
               <span>{runningRunCount > 0 ? `${runningRunCount} active` : 'No active run'}</span>
             </div>
             <AdminTable
-              columns={['Run', 'Mode', 'Trigger', 'Status', 'Picks', 'Agents', 'Duration', 'Updated']}
+              columns={['Run', 'Mode', 'Trigger', 'Status', 'Picks', 'Agents', 'Duration', 'Updated', '실패 원인']}
               emptyText="No condition runs observed yet."
             >
               {conditionRuns.map(run => (
@@ -940,10 +953,21 @@ export default function AdminPage() {
                   <td>{run.agentsUsed != null ? `${run.agentsSucceeded ?? 0}/${run.agentsUsed}` : '-'}</td>
                   <td>{formatRunDuration(run.startedAt, run.finishedAt)}</td>
                   <td>{formatDateTime(run.updatedAt)}</td>
+                  <td>{run.errorMessage || run.errorCode ? <><strong>{run.errorCode || '실행 실패'}</strong><br /><span>{run.errorMessage}</span></> : '-'}</td>
                 </tr>
               ))}
             </AdminTable>
-            <button className="admin-primary-action" type="button" disabled={actionId === 'system-refresh'} onClick={refreshSystem}>
+            {Object.keys(refreshResults).length > 0 && <section className="admin-refresh-results" aria-label="분석 캐시 갱신 결과">
+              <h3>분석 캐시 갱신 결과</h3>
+              <AdminTable columns={['모드', '결과']} emptyText="갱신 결과 없음">
+                {Object.entries(refreshResults).map(([mode, result]) => <tr key={mode}>
+                  <td>{mode}</td><td>{result === 'success' ? '성공' : result}</td>
+                </tr>)}
+              </AdminTable>
+              {Object.values(refreshResults).some(value => value !== 'success') && <button className="admin-secondary-action" type="button" disabled={actionId === 'system-refresh'}
+                onClick={() => refreshSystem(Object.keys(refreshResults).filter(mode => refreshResults[mode] !== 'success'))}>실패한 모드만 재시도</button>}
+            </section>}
+            <button className="admin-primary-action" type="button" disabled={actionId === 'system-refresh'} onClick={() => refreshSystem()}>
               조건검색식 / 분석 캐시 새로고침
             </button>
             <button className="admin-secondary-action" type="button" disabled={actionId === 'expire-now'} onClick={runExpiryNow}>

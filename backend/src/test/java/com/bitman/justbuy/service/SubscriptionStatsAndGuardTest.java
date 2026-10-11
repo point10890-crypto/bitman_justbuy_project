@@ -84,7 +84,7 @@ class SubscriptionStatsAndGuardTest {
         UUID adminId = UUID.randomUUID();
         User admin = member("admin@example.com", SubscriptionStatus.PENDING, null);
         admin.setRole(Role.ADMIN);
-        when(userRepository.findById(adminId)).thenReturn(Optional.of(admin));
+        when(userRepository.findByIdForUpdate(adminId)).thenReturn(Optional.of(admin));
 
         assertThatThrownBy(() -> service.rejectSubscription(adminId))
             .isInstanceOf(IllegalStateException.class)
@@ -96,7 +96,7 @@ class SubscriptionStatsAndGuardTest {
         UUID adminId = UUID.randomUUID();
         User admin = member("admin@example.com", SubscriptionStatus.PENDING, null);
         admin.setRole(Role.ADMIN);
-        when(userRepository.findById(adminId)).thenReturn(Optional.of(admin));
+        when(userRepository.findByIdForUpdate(adminId)).thenReturn(Optional.of(admin));
 
         assertThatThrownBy(() -> service.approveSubscription(adminId))
             .isInstanceOf(IllegalStateException.class)

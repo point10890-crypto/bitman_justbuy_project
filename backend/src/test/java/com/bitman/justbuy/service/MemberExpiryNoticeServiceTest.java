@@ -9,10 +9,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -46,7 +49,7 @@ class MemberExpiryNoticeServiceTest {
     void sendsBothStagesToTheRightMembers() {
         User d3 = member("111", TODAY.plusDays(3));
         User d1 = member("222", TODAY.plusDays(1));
-        when(repository.findExpiryNoticeTargets(any())).thenReturn(List.of(d3, d1));
+        candidates(d3, d1);
 
         Map<String, Integer> sent = service().run(TODAY);
 
@@ -58,7 +61,7 @@ class MemberExpiryNoticeServiceTest {
     @Test
     void doesNotSendTwiceForTheSameStage() {
         User user = member("111", TODAY.plusDays(3));
-        when(repository.findExpiryNoticeTargets(any())).thenReturn(List.of(user));
+        candidates(user);
 
         MemberExpiryNoticeService svc = service();
         svc.run(TODAY);
@@ -70,7 +73,7 @@ class MemberExpiryNoticeServiceTest {
     @Test
     void stillSendsTheMoreUrgentStageAfterTheEarlierOne() {
         User user = member("111", TODAY.plusDays(3));
-        when(repository.findExpiryNoticeTargets(any())).thenReturn(List.of(user));
+        candidates(user);
         MemberExpiryNoticeService svc = service();
 
         svc.run(TODAY);                       // D-3 발송
@@ -95,7 +98,7 @@ class MemberExpiryNoticeServiceTest {
     @Test
     void failedSendLeavesNoMarkerSoItRetriesNextRun() {
         User user = member("111", TODAY.plusDays(1));
-        when(repository.findExpiryNoticeTargets(any())).thenReturn(List.of(user));
+        candidates(user);
         when(notifier.sendToMember(anyString(), anyString())).thenReturn(false);
 
         Map<String, Integer> sent = new MemberExpiryNoticeService(repository, notifier).run(TODAY);
@@ -109,13 +112,13 @@ class MemberExpiryNoticeServiceTest {
     void skipsQuietlyWhenTelegramIsNotConfigured() {
         Map<String, Integer> sent = new MemberExpiryNoticeService(repository, (TelegramNotifier) null).run(TODAY);
         assertThat(sent.values()).allMatch(v -> v == 0);
-        verify(repository, never()).findExpiryNoticeTargets(any());
+        verify(repository, never()).findExpiryNoticeTargetIds(any());
     }
 
     @Test
     void ignoresMembersWhoseRemainingDaysAreNotAWarningStage() {
         User d2 = member("333", TODAY.plusDays(2));   // 쿼리가 넓게 잡아와도 단계가 아니면 무시
-        when(repository.findExpiryNoticeTargets(any())).thenReturn(List.of(d2));
+        candidates(d2);
 
         service().run(TODAY);
 
@@ -124,10 +127,17 @@ class MemberExpiryNoticeServiceTest {
 
     private static User member(String chatId, LocalDate endDate) {
         User u = new User("m@example.com", "회원", "hash");
+        ReflectionTestUtils.setField(u, "id", UUID.randomUUID());
         u.setSubscription(SubscriptionStatus.PRO);
         u.setSubscriptionEndDate(endDate);
         u.setTelegramChatId(chatId);
         return u;
+    }
+
+    private void candidates(User... users) {
+        when(repository.findExpiryNoticeTargetIds(any()))
+            .thenReturn(java.util.Arrays.stream(users).map(User::getId).toList());
+        for (User user : users) when(repository.findByIdForUpdate(user.getId())).thenReturn(Optional.of(user));
     }
 
     @Test
@@ -135,7 +145,7 @@ class MemberExpiryNoticeServiceTest {
         // 이름에 '<' 가 있으면 parse_mode=HTML 이 메시지를 거부해 그 회원만 알림을 못 받는다
         User user = member("111", TODAY.plusDays(1));
         user.setName("<b>김철수</b> & co");
-        when(repository.findExpiryNoticeTargets(any())).thenReturn(List.of(user));
+        candidates(user);
 
         service().run(TODAY);
 

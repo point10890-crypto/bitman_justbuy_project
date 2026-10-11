@@ -1,6 +1,8 @@
 package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.entity.User;
+import com.bitman.justbuy.entity.Role;
+import com.bitman.justbuy.entity.SubscriptionStatus;
 import com.bitman.justbuy.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,6 +15,7 @@ import java.time.ZoneId;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 구독 만료 D-3 / D-1 예고를 회원 텔레그램으로 보낸다.
@@ -51,6 +54,7 @@ public class MemberExpiryNoticeService {
 
     /** 매일 09:00 KST. 만료 배치(자정) 이후라 이미 끝난 구독은 대상에서 빠져 있다. */
     @Scheduled(cron = "0 0 9 * * *", zone = "Asia/Seoul")
+    @Transactional
     public void sendExpiryNotices() {
         try {
             run(LocalDate.now(KST));
@@ -74,10 +78,13 @@ public class MemberExpiryNoticeService {
         }
 
         List<LocalDate> targetDates = STAGES.stream().map(today::plusDays).toList();
-        List<User> candidates = userRepository.findExpiryNoticeTargets(targetDates);
+        List<UUID> candidates = userRepository.findExpiryNoticeTargetIds(targetDates);
         if (candidates.isEmpty()) return sentByStage;
 
-        for (User user : candidates) {
+        for (UUID userId : candidates) {
+            User user = userRepository.findByIdForUpdate(userId).orElse(null);
+            if (user == null || user.getRole() == Role.ADMIN || user.getSubscription() != SubscriptionStatus.PRO
+                    || user.getTelegramChatId() == null || user.getTelegramChatId().isBlank()) continue;
             LocalDate endDate = user.getSubscriptionEndDate();
             if (endDate == null) continue;
 

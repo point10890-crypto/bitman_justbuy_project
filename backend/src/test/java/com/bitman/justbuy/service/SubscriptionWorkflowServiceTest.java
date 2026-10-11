@@ -48,7 +48,7 @@ class SubscriptionWorkflowServiceTest {
         user.setSubscription(SubscriptionStatus.PRO);
         user.setSubscriptionEndDate(LocalDate.now().minusDays(1));
 
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
         var dto = service.applyForSubscription(userId, "  Hong Gil Dong  ");
 
@@ -92,7 +92,7 @@ class SubscriptionWorkflowServiceTest {
         LocalDate currentEndDate = LocalDate.now().plusDays(7);
         user.setSubscription(SubscriptionStatus.PRO);
         user.setSubscriptionEndDate(currentEndDate);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
 
         var dto = service.applyForSubscription(userId, "payer");
@@ -116,7 +116,7 @@ class SubscriptionWorkflowServiceTest {
         user.setSubscriptionEndDate(LocalDate.now().plusDays(7));
         user.setDepositorName("payer");
 
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
 
         var pending = service.adminUpdateUser(userId, null, null, "PENDING");
@@ -139,7 +139,7 @@ class SubscriptionWorkflowServiceTest {
         admin.setRole(Role.ADMIN);
         admin.setSubscription(SubscriptionStatus.PRO);
 
-        when(userRepository.findById(userId)).thenReturn(Optional.of(admin));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(admin));
 
         assertThatThrownBy(() -> service.revokeSubscription(userId))
             .isInstanceOf(IllegalStateException.class)
@@ -158,7 +158,7 @@ class SubscriptionWorkflowServiceTest {
         user.setSubscription(SubscriptionStatus.PENDING);
         user.setSubscriptionEndDate(currentEndDate);
 
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
 
         var dto = service.approveSubscription(userId);
@@ -179,7 +179,7 @@ class SubscriptionWorkflowServiceTest {
         user.setSubscriptionEndDate(currentEndDate);
         user.setDepositorName("payer");
 
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
 
         var dto = service.rejectSubscription(userId);
@@ -198,7 +198,7 @@ class SubscriptionWorkflowServiceTest {
         user.setSubscription(SubscriptionStatus.PRO);
         user.setSubscriptionEndDate(LocalDate.now().plusDays(10));
 
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
 
         var dto = service.revokeSubscription(userId);

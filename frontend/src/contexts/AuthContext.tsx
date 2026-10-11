@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import {
   loginUser, registerUser, fetchCurrentUser,
   applySubscription as apiApplySubscription,
@@ -9,6 +9,7 @@ import {
 } from '../api/authApi'
 import { memberTierOf } from '../lib/memberTier'
 import { authPath, subscriptionPlanFromSearch } from '../lib/subscriptionPlans'
+import { ApiError } from '../api/subscriptionGate'
 
 export interface User {
   id: string
@@ -135,11 +136,72 @@ function getStoredUser(): User | null {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => getStoredUser())
+  const [user, setUser] = useState<User | null>(() => getStoredToken() ? getStoredUser() : null)
   const [isLoading, setIsLoading] = useState(true)
+  const mounted = useRef(true)
+  const sessionVersion = useRef(0)
+  const userWriteVersion = useRef(0)
+  const currentUser = useRef(user)
+  const pendingRefresh = useRef<{
+    token: string, session: number, write: number, promise: Promise<void>
+  } | null>(null)
+
+  const saveUser = useCallback((nextUser: User) => {
+    currentUser.current = nextUser
+    setUser(nextUser)
+    setUserData(JSON.stringify(nextUser))
+  }, [])
+
+  const isCurrentSession = useCallback((session: number, token: string) => (
+    mounted.current && sessionVersion.current === session && getStoredToken() === token
+  ), [])
+
+  const logout = useCallback(() => {
+    sessionVersion.current += 1
+    userWriteVersion.current += 1
+    pendingRefresh.current = null
+    currentUser.current = null
+    setUser(null)
+    setIsLoading(false)
+    clearAuth()
+    localStorage.removeItem(REMEMBER_KEY)
+  }, [])
+
+  const refreshUser = useCallback((): Promise<void> => {
+    const token = getStoredToken()
+    if (!token) return Promise.resolve()
+    const session = sessionVersion.current
+    const write = userWriteVersion.current
+    const existing = pendingRefresh.current
+    if (existing?.token === token && existing.session === session && existing.write === write) {
+      return existing.promise
+    }
+
+    const request = { token, session, write, promise: Promise.resolve() }
+    pendingRefresh.current = request
+    request.promise = (async () => {
+      try {
+        const dto = await fetchCurrentUser(token)
+        // Account writes are newer than any user lookup that started before them.
+        if (isCurrentSession(session, token) && userWriteVersion.current === write) {
+          saveUser(dtoToUser(dto))
+        }
+      } catch (error) {
+        // Offline/5xx preserves cached authentication so a later refresh can retry.
+        if (error instanceof ApiError && error.status === 401 && isCurrentSession(session, token)) {
+          logout()
+        }
+      } finally {
+        if (pendingRefresh.current === request) pendingRefresh.current = null
+      }
+    })()
+    return request.promise
+  }, [isCurrentSession, logout, saveUser])
 
   // 앱 시작 시 저장된 토큰으로 사용자 정보 복원
   useEffect(() => {
+    mounted.current = true
+    let cancelled = false
     // ─── 레거시 키 마이그레이션 (justbuy_* → bitman_*) ───
     const legacyToken = localStorage.getItem('justbuy_token')
     if (legacyToken && !localStorage.getItem(TOKEN_KEY)) {
@@ -155,31 +217,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const token = getStoredToken()
     const cachedUser = getStoredUser()
-    if (cachedUser) setUser(cachedUser)
-    if (!token) {
-      setIsLoading(false)
-      return
+    if (token && cachedUser) {
+      currentUser.current = cachedUser
+      setUser(cachedUser)
     }
-
-    fetchCurrentUser(token)
-      .then(dto => {
-        const u = dtoToUser(dto)
-        setUser(u)
-        setUserData(JSON.stringify(u))
+    if (!token) {
+      logout()
+      setIsLoading(false)
+    } else {
+      void refreshUser().finally(() => {
+        if (!cancelled) setIsLoading(false)
       })
-      .catch(() => {
-        // 토큰 만료 또는 무효 → 정리
-        clearAuth()
-      })
-      .finally(() => setIsLoading(false))
-  }, [])
+    }
+    return () => {
+      cancelled = true
+      mounted.current = false
+      sessionVersion.current += 1
+      pendingRefresh.current = null
+    }
+  }, [logout, refreshUser])
 
   // authApi에서 401 수신 시 전역 로그아웃 처리
   useEffect(() => {
-    const onUnauthorized = () => {
-      setUser(null)
-      clearAuth()
-      localStorage.removeItem(REMEMBER_KEY)
+    const onUnauthorized = (event: Event) => {
+      const token = (event as CustomEvent<{ token?: string }>).detail?.token
+      if (!getStoredToken() || (token && token !== getStoredToken())) return
+      logout()
       // 현재 경로가 로그인/랜딩이 아닐 때만 이동 (무한 리다이렉트 방지)
       const path = window.location.pathname
       if (path !== '/login' && path !== '/landing' && path !== '/register') {
@@ -191,24 +254,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     window.addEventListener('auth:unauthorized', onUnauthorized)
     return () => window.removeEventListener('auth:unauthorized', onUnauthorized)
-  }, [])
+  }, [logout])
 
   // Keep long-running browser/PWA sessions aligned with server-side member
   // deletion and subscription expiry. Refresh as soon as the app is resumed.
   useEffect(() => {
     if (!user || !getStoredToken()) return
 
-    const reconcile = () => {
-      const token = getStoredToken()
-      if (!token) return
-      fetchCurrentUser(token)
-        .then(dto => {
-          const nextUser = dtoToUser(dto)
-          setUser(nextUser)
-          setUserData(JSON.stringify(nextUser))
-        })
-        .catch(() => { /* 401 is handled by auth:unauthorized */ })
-    }
+    const reconcile = () => { void refreshUser() }
     // 탭이 보일 때만, 그리고 최소 간격을 두고 확인한다. 이전 구현은 백그라운드
     // 탭에서도 60초마다 때려 PWA 를 켜둔 사용자 한 명당 하루 1,440회가 나갔다.
     const MIN_INTERVAL_MS = 10 * 60_000
@@ -232,69 +285,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.clearInterval(interval)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [user?.id])
+  }, [user?.id, refreshUser])
 
   const login = async (email: string, password: string, rememberMe?: boolean) => {
+    const session = ++sessionVersion.current
+    userWriteVersion.current += 1
+    pendingRefresh.current = null
     const res = await loginUser(email, password, rememberMe)
+    if (!mounted.current || sessionVersion.current !== session) {
+      throw new Error('로그인 상태가 변경되었습니다. 다시 시도해 주세요.')
+    }
     const u = dtoToUser(res.user)
     // Keep auth until the user explicitly logs out, and store the normalized
     // user shape used by route guards.
     localStorage.setItem(REMEMBER_KEY, rememberMe ? '1' : '0')
     setToken(res.token)
-    setUserData(JSON.stringify(u))
-    setUser(u)
+    saveUser(u)
+    setIsLoading(false)
     return u
   }
 
   const register = async (name: string, email: string, password: string) => {
+    const session = ++sessionVersion.current
+    userWriteVersion.current += 1
+    pendingRefresh.current = null
     const res = await registerUser(name, email, password)
+    if (!mounted.current || sessionVersion.current !== session) {
+      throw new Error('로그인 상태가 변경되었습니다. 다시 시도해 주세요.')
+    }
     // 가입 후 자동 로그인. REMEMBER_KEY 를 먼저 정해두지 않으면 직전 사용자가 남긴
     // 값에 따라 토큰이 sessionStorage 로 새어 브라우저를 닫는 순간 로그아웃된다.
     localStorage.setItem(REMEMBER_KEY, '1')
     setToken(res.token)
     const u = dtoToUser(res.user)
-    setUser(u)
-    setUserData(JSON.stringify(u))
-  }
-
-  const logout = () => {
-    setUser(null)
-    clearAuth()
-    localStorage.removeItem(REMEMBER_KEY)
+    saveUser(u)
+    setIsLoading(false)
   }
 
   const applySubscription = async (depositorName: string, plan: SubscriptionPlanId = 'MONTHLY') => {
     const token = getStoredToken()
-    if (!token || !user) throw new Error('로그인 후 구독을 신청해 주세요.')
+    if (!token || !currentUser.current) throw new Error('로그인 후 구독을 신청해 주세요.')
+    const session = sessionVersion.current
     const dto = await apiApplySubscription(token, depositorName, plan)
-    const u = dtoToUser(dto)
-    setUser(u)
-    setUserData(JSON.stringify(u))
-  }
-
-  const refreshUser = async () => {
-    const token = getStoredToken()
-    if (!token) return
-    try {
-      const dto = await fetchCurrentUser(token)
-      const u = dtoToUser(dto)
-      setUser(u)
-      setUserData(JSON.stringify(u))
-    } catch { /* ignore */ }
+    if (!isCurrentSession(session, token)) return
+    userWriteVersion.current += 1
+    saveUser(dtoToUser(dto))
   }
 
   const updateProfile = async (name: string) => {
     const token = getStoredToken()
-    if (!token || !user) return
+    if (!token || !currentUser.current) return
+    const session = sessionVersion.current
     const dto = await apiUpdateProfile(token, name)
-    const u = dtoToUser(dto)
-    setUser(u)
-    setUserData(JSON.stringify(u))
+    if (!isCurrentSession(session, token)) return
+    userWriteVersion.current += 1
+    saveUser(dtoToUser(dto))
   }
 
   const changePassword = async (currentPassword: string, newPassword: string) => {
     const token = getStoredToken()
-    if (!token || !user) return
+    if (!token || !currentUser.current) return
     await apiChangePassword(token, currentPassword, newPassword)
   }
 

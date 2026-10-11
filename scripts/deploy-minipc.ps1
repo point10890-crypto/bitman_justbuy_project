@@ -63,6 +63,11 @@ Run-Step "Frontend build" {
 }
 
 Run-Step "Copy frontend dist into Spring static resources" {
+    $resolvedStaticDir = [IO.Path]::GetFullPath($StaticDir)
+    $expectedStaticDir = [IO.Path]::GetFullPath((Join-Path $ProjectRoot 'backend\src\main\resources\static'))
+    if ($resolvedStaticDir -ne $expectedStaticDir -or $resolvedStaticDir -eq [IO.Path]::GetPathRoot($resolvedStaticDir)) {
+        throw "Unsafe static resource destination: $resolvedStaticDir"
+    }
     if (-not (Test-Path $DistDir)) {
         throw "Frontend dist directory not found: $DistDir"
     }
@@ -169,6 +174,13 @@ function Move-WithRetry {
     [string]`$Source,
     [string]`$Destination
   )
+  `$rootPrefix = [IO.Path]::GetFullPath(`$root).TrimEnd('\') + '\'
+  `$sourcePath = [IO.Path]::GetFullPath(`$Source)
+  `$destinationPath = [IO.Path]::GetFullPath(`$Destination)
+  if ((-not `$sourcePath.StartsWith(`$rootPrefix, [StringComparison]::OrdinalIgnoreCase) -and `$sourcePath -ne [IO.Path]::GetFullPath(`$upload)) -or
+      -not `$destinationPath.StartsWith(`$rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Unsafe MiniPC JAR move path.'
+  }
   `$lastError = `$null
   for (`$i = 0; `$i -lt 8; `$i++) {
     try {
@@ -186,42 +198,57 @@ function Start-JustBuy {
   `$taskName = 'BitMan-JustBuy-Api'
   `$taskCommand = 'C:\Windows\System32\cmd.exe /c C:\bitman_justbuy\scripts\start-springboot.bat'
   schtasks /Create /TN `$taskName /TR `$taskCommand /SC ONSTART /RU SYSTEM /RL HIGHEST /F | Out-Null
+  if (`$LASTEXITCODE -ne 0) { throw 'Unable to create MiniPC API scheduled task.' }
   Set-LongRunningTaskSettings `$taskName
   Set-LongRunningTaskSettings 'JustBuy-Watchdog'
   schtasks /Run /TN `$taskName | Out-Null
+  if (`$LASTEXITCODE -ne 0) { throw 'Unable to start MiniPC API scheduled task.' }
 }
-
-Stop-JustBuy
 
 `$db = "`$root\backend\data\justbuy-db.mv.db"
 `$dbBackup = "`$root\backups\predeploy-justbuy-db-`$stamp.mv.db"
-Copy-Item `$db `$dbBackup -Force
-
-if (Test-Path `$jar) {
-  Move-WithRetry `$jar `$backupJar
-}
-Move-WithRetry `$upload `$jar
-
-Start-JustBuy
-
-`$ok = `$false
-for (`$i = 0; `$i -lt 24; `$i++) {
-  Start-Sleep -Seconds 5
-  try {
-    `$res = Invoke-WebRequest -UseBasicParsing `$health -TimeoutSec 3
-    if (`$res.StatusCode -eq 200) { `$ok = `$true; break }
-  } catch {}
-}
-
-if (-not `$ok) {
+try {
   Stop-JustBuy
-  `$failedJar = "`$root\backend\justbuy-api-1.0.0.jar.failed-`$stamp"
-  if (Test-Path `$jar) { Move-WithRetry `$jar `$failedJar }
-  if (Test-Path `$backupJar) {
-    Move-WithRetry `$backupJar `$jar
-    Start-JustBuy
+  Copy-Item -LiteralPath `$db -Destination `$dbBackup -Force
+  if (Test-Path -LiteralPath `$jar) { Move-WithRetry `$jar `$backupJar }
+  Move-WithRetry `$upload `$jar
+  Start-JustBuy
+
+  `$ok = `$false
+  for (`$i = 0; `$i -lt 24; `$i++) {
+    Start-Sleep -Seconds 5
+    try {
+      `$res = Invoke-WebRequest -UseBasicParsing `$health -TimeoutSec 3
+      if (`$res.StatusCode -eq 200) { `$ok = `$true; break }
+    } catch {}
   }
-  throw "MiniPC deployment failed health check. Previous JAR restored."
+  if (-not `$ok) { throw 'New MiniPC build failed health check.' }
+} catch {
+  `$deployFailure = `$_
+  try {
+    Stop-JustBuy
+    `$failedJar = "`$root\backend\justbuy-api-1.0.0.jar.failed-`$stamp"
+    # A backup-copy failure leaves the original JAR in place. A failed upload
+    # can leave only the backup. Restore it when present, then restart either way.
+    if (Test-Path -LiteralPath `$backupJar) {
+      if (Test-Path -LiteralPath `$jar) { Move-WithRetry `$jar `$failedJar }
+      Move-WithRetry `$backupJar `$jar
+    }
+    if (-not (Test-Path -LiteralPath `$jar)) { throw 'No MiniPC JAR available for recovery.' }
+    Start-JustBuy
+    `$restored = `$false
+    for (`$i = 0; `$i -lt 24; `$i++) {
+      Start-Sleep -Seconds 5
+      try {
+        `$res = Invoke-WebRequest -UseBasicParsing `$health -TimeoutSec 3
+        if (`$res.StatusCode -eq 200) { `$restored = `$true; break }
+      } catch {}
+    }
+    if (-not `$restored) { throw 'Previous MiniPC build failed recovery health check.' }
+  } catch {
+    throw ("MiniPC deployment failed: " + `$deployFailure.Exception.Message + "; recovery failed: " + `$_.Exception.Message)
+  }
+  throw ("MiniPC deployment failed; previous service recovered: " + `$deployFailure.Exception.Message)
 }
 
 Write-Host "MiniPC deployment OK"

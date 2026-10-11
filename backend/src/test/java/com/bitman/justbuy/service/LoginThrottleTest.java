@@ -5,6 +5,7 @@ import com.bitman.justbuy.dto.AuthRequest;
 import com.bitman.justbuy.dto.RegisterRequest;
 import com.bitman.justbuy.entity.User;
 import com.bitman.justbuy.repository.UserRepository;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,6 +19,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -37,6 +39,7 @@ class LoginThrottleTest {
     @Mock UserRepository userRepository;
     @Mock PasswordEncoder passwordEncoder;
     @Mock JwtService jwtService;
+    @Mock EntityManager entityManager;
 
     AuthService service;
 
@@ -45,6 +48,7 @@ class LoginThrottleTest {
         ObjectProvider<TelegramNotifier> notifierProvider = mock(ObjectProvider.class);
         service = new AuthService(userRepository, passwordEncoder, jwtService, notifierProvider);
         ReflectionTestUtils.setField(service, "adminEmail", "");
+        ReflectionTestUtils.setField(service, "entityManager", entityManager);
     }
 
     private void givenMemberWithWrongPassword() {
@@ -73,8 +77,11 @@ class LoginThrottleTest {
     @Test
     void aSuccessfulLoginClearsTheFailureCounter() {
         User user = new User("member@example.com", "member", "hash");
+        UUID userId = UUID.randomUUID();
+        ReflectionTestUtils.setField(user, "id", userId);
         when(userRepository.findFirstByEmailIgnoreCaseOrderByCreatedAtAsc("member@example.com"))
             .thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("wrong", "hash")).thenReturn(false);
         when(passwordEncoder.matches("right", "hash")).thenReturn(true);
         when(jwtService.generateToken(any(), any(), any(), anyBoolean())).thenReturn("token");

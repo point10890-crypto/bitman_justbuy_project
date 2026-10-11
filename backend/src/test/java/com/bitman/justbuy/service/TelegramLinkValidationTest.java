@@ -36,7 +36,7 @@ class TelegramLinkValidationTest {
     private UUID stubUser() {
         UUID id = UUID.randomUUID();
         User u = new User("m@example.com", "회원", "hash");
-        when(repository.findById(id)).thenReturn(Optional.of(u));
+        when(repository.findByIdForUpdate(id)).thenReturn(Optional.of(u));
         when(repository.findByTelegramChatId(anyString())).thenReturn(List.of());
         when(repository.save(org.mockito.ArgumentMatchers.any(User.class))).thenAnswer(i -> i.getArgument(0));
         return id;
@@ -72,7 +72,7 @@ class TelegramLinkValidationTest {
         UUID id = UUID.randomUUID();
         User me = new User("me@example.com", "나", "hash");
         User other = new User("other@example.com", "남", "hash");
-        when(repository.findById(id)).thenReturn(Optional.of(me));
+        when(repository.findByIdForUpdate(id)).thenReturn(Optional.of(me));
         when(repository.findByTelegramChatId("123456789")).thenReturn(List.of(other));
 
         // 소유 증명이 없으므로, 최소한 타인 chat id 재사용은 막아야 한다
@@ -90,7 +90,7 @@ class TelegramLinkValidationTest {
         field.setAccessible(true);
         field.set(me, id);
 
-        when(repository.findById(id)).thenReturn(Optional.of(me));
+        when(repository.findByIdForUpdate(id)).thenReturn(Optional.of(me));
         when(repository.findByTelegramChatId("123456789")).thenReturn(List.of(me));
         when(repository.save(org.mockito.ArgumentMatchers.any(User.class))).thenAnswer(i -> i.getArgument(0));
 

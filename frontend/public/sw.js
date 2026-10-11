@@ -1,29 +1,43 @@
 /** BitMan Service Worker - freshness-first app shell */
 
-const CACHE_NAME = 'bitman-v20261011-subscription-upgrade-r4'
+const CACHE_NAME = 'bitman-v20261011-operations-recovery-r5'
 const SHELL_ASSETS = [
   '/manifest.json',
 ]
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS))
-  )
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME)
+    const shell = await fetch('/index.html', { cache: 'no-store' })
+    if (!shell.ok) throw new Error('App shell unavailable')
+    const html = await shell.clone().text()
+    const assets = [...html.matchAll(/(?:src|href)=["'](\/assets\/[^"']+)["']/g)].map(match => match[1])
+    await cache.addAll([...SHELL_ASSETS, ...new Set(assets)])
+    await cache.put('/index.html', shell)
+  })())
   self.skipWaiting()
 })
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+    caches.keys().then((keys) => Promise.all(keys.filter(key => key.startsWith('bitman-') && key !== CACHE_NAME).map(key => caches.delete(key))))
       .then(() => self.clients.claim())
-      .then(() => self.clients.matchAll({ type: 'window' }))
-      .then((clients) => {
-        clients.forEach((client) => {
-          if (client.url) client.navigate(client.url)
-        })
-      })
   )
 })
+
+async function networkFirst(request, fallbackKey = request) {
+  const cache = await caches.open(CACHE_NAME)
+  try {
+    const response = await fetch(request, { cache: 'no-store' })
+    if (response.ok) {
+      try { await cache.put(fallbackKey, response.clone()) } catch { /* Full/unavailable cache must not block an online response. */ }
+      return response
+    }
+    return (await cache.match(fallbackKey)) || response
+  } catch {
+    return (await cache.match(fallbackKey)) || Response.error()
+  }
+}
 
 self.addEventListener('fetch', (event) => {
   const { request } = event
@@ -34,26 +48,20 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/')) return
 
   if (request.destination === 'document' || request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request, { cache: 'no-store' })
-        .then((response) => {
-          if (response.ok) return response
-          return caches.match('/index.html').then((cached) => cached || response)
-        })
-        .catch(() => caches.match('/index.html'))
-    )
+    event.respondWith(networkFirst(request, '/index.html'))
     return
   }
 
   if (
-    url.pathname === '/sw.js' ||
     url.pathname === '/index.html' ||
     request.destination === 'script' ||
     request.destination === 'style'
   ) {
-    event.respondWith(fetch(request, { cache: 'no-store' }))
+    event.respondWith(networkFirst(request))
     return
   }
+
+  if (url.pathname === '/sw.js') return
 
   event.respondWith(
     caches.match(request).then((cached) => {

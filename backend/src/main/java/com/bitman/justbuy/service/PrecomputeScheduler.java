@@ -21,7 +21,9 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -98,7 +100,6 @@ public class PrecomputeScheduler {
                     try {
                         if (cached.updatedAt() != null) lastRunTimes.put(mode, cached.updatedAt());
                         log.info("[Scheduler] ✅ {} — 캐시 유효, 건너뜀", mode);
-                        success++;
                         // ★ v2.8.7 (2026-04-29): 캐시된 결과도 dedup + name disambiguation 적용
                         //   — 옛 캐시(중복 포함) 그대로 재발송 방지
                         cached = postProcessPicks(mode, cached, seenCodes);
@@ -127,6 +128,7 @@ public class PrecomputeScheduler {
                                 ));
                         }
                         conditionRunService.markComplete(run.runId(), cached);
+                        success++;
                     } catch (Exception e) {
                         conditionRunService.markFailed(run.runId(), e.getMessage());
                         throw e;
@@ -443,24 +445,49 @@ public class PrecomputeScheduler {
                 mode, false, System.currentTimeMillis() - startMs, 0, 0, 0, e.getMessage());
 
             if (telegramNotifier != null) {
-                telegramNotifier.sendAnalysisFailed(mode, e.getMessage());
+                try {
+                    telegramNotifier.sendAnalysisFailed(mode, e.getMessage());
+                } catch (Exception notificationError) {
+                    log.warn("[Scheduler] {} 실패 통지 오류: {}", mode, notificationError.getMessage());
+                }
             }
+            if (e instanceof RuntimeException runtimeError) throw runtimeError;
+            throw new IllegalStateException(e.getMessage(), e);
         }
     }
 
     /** 전체 모드 수동 새로고침 (관리자용) */
     public Map<String, String> refreshAll() {
+        return refreshModes(null);
+    }
+
+    /** 선택 모드만 다시 실행한다. 모든 모드는 실행 전에 검증한다. */
+    public Map<String, String> refreshModes(List<String> modes) {
+        Map<String, String> scheduledModes = formulaCatalog.scheduledQueries();
+        Set<String> selectedModes = new LinkedHashSet<>();
+        if (modes == null) {
+            selectedModes.addAll(scheduledModes.keySet());
+        } else {
+            if (modes.isEmpty()) throw new IllegalArgumentException("새로고침할 검색식 모드를 선택해 주세요.");
+            for (String mode : modes) {
+                String normalized = mode == null ? "" : mode.trim().toUpperCase(Locale.ROOT);
+                if (!scheduledModes.containsKey(normalized)) {
+                    throw new IllegalArgumentException("알 수 없는 검색식 모드: " + normalized);
+                }
+                selectedModes.add(normalized);
+            }
+        }
         Map<String, String> results = new LinkedHashMap<>();
-        log.info("[Scheduler] 전체 새로고침 시작");
+        log.info("[Scheduler] 검색식 새로고침 시작: {}", selectedModes);
 
         Set<String> seenCodes = new HashSet<>();  // ★ cross-mode dedup
-        for (var entry : formulaCatalog.scheduledQueries().entrySet()) {
+        for (String mode : selectedModes) {
             try {
-                execute(entry.getKey(), entry.getValue(), seenCodes, ConditionRunTrigger.ADMIN_REFRESH);
-                results.put(entry.getKey(), "success");
+                execute(mode, scheduledModes.get(mode), seenCodes, ConditionRunTrigger.ADMIN_REFRESH);
+                results.put(mode, "success");
             } catch (Exception e) {
-                log.error("[Scheduler] {} 새로고침 실패: {}", entry.getKey(), e.getMessage());
-                results.put(entry.getKey(), "error: " + e.getMessage());
+                log.error("[Scheduler] {} 새로고침 실패: {}", mode, e.getMessage());
+                results.put(mode, "error: " + e.getMessage());
             }
         }
 

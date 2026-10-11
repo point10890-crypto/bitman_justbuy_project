@@ -10,9 +10,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -50,6 +53,7 @@ class SubscriptionExpiryResilienceTest {
 
     private User proUser(String email) {
         User u = new User(email, email.split("@")[0], "hash");
+        ReflectionTestUtils.setField(u, "id", UUID.randomUUID());
         u.setSubscription(SubscriptionStatus.PRO);
         u.setSubscriptionEndDate(LocalDate.now().minusDays(1));
         return u;
@@ -60,8 +64,11 @@ class SubscriptionExpiryResilienceTest {
         User u1 = proUser("a@test.com");
         User u2 = proUser("b@test.com");
         User u3 = proUser("c@test.com");
-        when(userRepository.findExpiredProUsers(any(LocalDate.class)))
-            .thenReturn(List.of(u1, u2, u3));
+        when(userRepository.findExpiredProUserIds(any(LocalDate.class)))
+            .thenReturn(List.of(u1.getId(), u2.getId(), u3.getId()));
+        when(userRepository.findByIdForUpdate(u1.getId())).thenReturn(Optional.of(u1));
+        when(userRepository.findByIdForUpdate(u2.getId())).thenReturn(Optional.of(u2));
+        when(userRepository.findByIdForUpdate(u3.getId())).thenReturn(Optional.of(u3));
 
         // u2 저장 시 예외, u1·u3는 정상 저장되어야 함
         when(userRepository.save(u1)).thenReturn(u1);

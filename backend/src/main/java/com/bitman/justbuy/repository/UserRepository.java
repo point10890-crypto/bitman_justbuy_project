@@ -2,7 +2,9 @@ package com.bitman.justbuy.repository;
 
 import com.bitman.justbuy.entity.SubscriptionStatus;
 import com.bitman.justbuy.entity.User;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -12,6 +14,11 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface UserRepository extends JpaRepository<User, UUID> {
+
+    /** Serialize changes to an existing member within the caller's write transaction. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM User u WHERE u.id = :id")
+    Optional<User> findByIdForUpdate(@Param("id") UUID id);
 
     Optional<User> findByEmail(String email);
 
@@ -34,6 +41,10 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query("SELECT u FROM User u WHERE u.subscription = 'PRO' AND u.role <> 'ADMIN' AND u.subscriptionEndDate < :today")
     List<User> findExpiredProUsers(@Param("today") LocalDate today);
 
+    @Query("SELECT u.id FROM User u WHERE u.subscription = 'PRO' AND u.role <> 'ADMIN' "
+         + "AND u.subscriptionEndDate < :today ORDER BY u.id")
+    List<UUID> findExpiredProUserIds(@Param("today") LocalDate today);
+
     /** 특정 기간 내 만료 예정인 PRO 유저 수 */
     @Query("SELECT COUNT(u) FROM User u WHERE u.subscription = 'PRO' AND u.subscriptionEndDate BETWEEN :from AND :to")
     long countExpiringBetween(@Param("from") LocalDate from, @Param("to") LocalDate to);
@@ -45,6 +56,10 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query("SELECT u FROM User u WHERE u.subscription = 'PRO' AND u.role <> 'ADMIN' "
          + "AND u.telegramChatId IS NOT NULL AND u.subscriptionEndDate IN :dates")
     List<User> findExpiryNoticeTargets(@Param("dates") List<LocalDate> dates);
+
+    @Query("SELECT u.id FROM User u WHERE u.subscription = 'PRO' AND u.role <> 'ADMIN' "
+         + "AND u.telegramChatId IS NOT NULL AND u.subscriptionEndDate IN :dates ORDER BY u.id")
+    List<UUID> findExpiryNoticeTargetIds(@Param("dates") List<LocalDate> dates);
 
     /** 특정 날짜 이후 생성된 유저 수 */
     @Query("SELECT COUNT(u) FROM User u WHERE u.createdAt >= :since")

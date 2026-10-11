@@ -5,6 +5,7 @@ import com.bitman.justbuy.dto.AuthRequest;
 import com.bitman.justbuy.entity.SubscriptionStatus;
 import com.bitman.justbuy.entity.User;
 import com.bitman.justbuy.repository.UserRepository;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -32,6 +34,7 @@ class AuthServiceTest {
     @Mock UserRepository userRepository;
     @Mock PasswordEncoder passwordEncoder;
     @Mock JwtService jwtService;
+    @Mock EntityManager entityManager;
 
     AuthService service;
 
@@ -40,6 +43,7 @@ class AuthServiceTest {
         ObjectProvider<TelegramNotifier> notifierProvider = mock(ObjectProvider.class);
         service = new AuthService(userRepository, passwordEncoder, jwtService, notifierProvider);
         ReflectionTestUtils.setField(service, "adminEmail", "");
+        ReflectionTestUtils.setField(service, "entityManager", entityManager);
     }
 
     @Test
@@ -76,6 +80,7 @@ class AuthServiceTest {
 
         when(userRepository.findFirstByEmailIgnoreCaseOrderByCreatedAtAsc("pro@example.com"))
             .thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("correct-password", "hash")).thenReturn(true);
         when(jwtService.generateToken(eq(userId), eq("pro@example.com"), eq("USER"), eq(true)))
             .thenReturn("token");
@@ -86,6 +91,7 @@ class AuthServiceTest {
         assertThat(response.user().subscription()).isEqualTo("PRO");
         assertThat(response.user().subscriptionEndDate()).isEqualTo(endDate);
         verify(jwtService).generateToken(userId, "pro@example.com", "USER", true);
+        verify(passwordEncoder, times(1)).matches("correct-password", "hash");
     }
 
     @Test

@@ -5,12 +5,14 @@ import com.bitman.justbuy.dto.AnalysisResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
@@ -55,6 +57,7 @@ public class AnalysisService {
     private final KeywordConditionAnalysisService keywordConditionAnalysisService;
     private final ObjectMapper mapper;
     private final Path dataDir;
+    private final Clock clock;
     private final Set<String> runningAnalyses = ConcurrentHashMap.newKeySet();
     private final Map<String, CachedResult> liveCache = new ConcurrentHashMap<>();
 
@@ -62,16 +65,25 @@ public class AnalysisService {
         boolean isExpired() { return System.currentTimeMillis() - timestamp > LIVE_CACHE_TTL_MS; }
     }
 
+    @Autowired
     public AnalysisService(MultiAgentOrchestrator orchestrator,
                            ConditionSearchFormulaCatalog formulaCatalog,
                            KeywordConditionAnalysisService keywordConditionAnalysisService,
                            ObjectMapper mapper,
                            @Value("${bitman.storage.data-dir:./data}") String dataDir) {
+        this(orchestrator, formulaCatalog, keywordConditionAnalysisService, mapper, dataDir, Clock.systemUTC());
+    }
+
+    AnalysisService(MultiAgentOrchestrator orchestrator,
+                    ConditionSearchFormulaCatalog formulaCatalog,
+                    KeywordConditionAnalysisService keywordConditionAnalysisService,
+                    ObjectMapper mapper, String dataDir, Clock clock) {
         this.orchestrator = orchestrator;
         this.formulaCatalog = formulaCatalog;
         this.keywordConditionAnalysisService = keywordConditionAnalysisService;
         this.mapper = mapper;
         this.dataDir = Path.of(dataDir);
+        this.clock = clock;
         try {
             Files.createDirectories(this.dataDir);
         } catch (IOException e) {
@@ -96,7 +108,8 @@ public class AnalysisService {
             if (ttlMinutes != null && data.updatedAt() != null) {
                 try {
                     Instant updatedAt = Instant.parse(data.updatedAt());
-                    long elapsed = Duration.between(updatedAt, Instant.now()).toMinutes();
+                    Instant now = clock.instant();
+                    long elapsed = Duration.between(updatedAt, now).toMinutes();
                     if (elapsed > ttlMinutes) {
                         log.info("[Storage] {} 프리컴퓨트 만료 (경과 {}분 > TTL {}분)", mode, elapsed, ttlMinutes);
                         return null;
@@ -105,13 +118,9 @@ public class AnalysisService {
                     // ★ v2.8.3: 장마감(15:30 KST) 이후 당일자 캐시는 강제 만료.
                     //    14:50 분석 결과가 TTL(175분)으로 17:45까지 남는 것을 차단.
                     //    "오후 2시 50분에 분석해서 장마감 까지 캐시" 사용자 요구사항 준수.
-                    ZonedDateTime nowKst = ZonedDateTime.now(KST);
-                    if (nowKst.toLocalTime().isAfter(MARKET_CLOSE_KST)) {
-                        ZonedDateTime updatedKst = updatedAt.atZone(KST);
-                        if (updatedKst.toLocalDate().equals(nowKst.toLocalDate())) {
-                            log.info("[Storage] {} 당일 캐시 만료 (장마감 15:30 KST 경과)", mode);
-                            return null;
-                        }
+                    if (isMarketCloseExpired(updatedAt, now)) {
+                        log.info("[Storage] {} 당일 캐시 만료 (장마감 15:30 KST 경과)", mode);
+                        return null;
                     }
                 } catch (Exception e) {
                     log.debug("[Storage] updatedAt 파싱 실패, TTL 검사 건너뜀: {}", e.getMessage());
@@ -136,6 +145,12 @@ public class AnalysisService {
             log.error("Failed to load stored precomputed result for {}: {}", mode, e.getMessage());
             return null;
         }
+    }
+
+    private static boolean isMarketCloseExpired(Instant updatedAt, Instant now) {
+        ZonedDateTime nowKst = now.atZone(KST);
+        return nowKst.toLocalTime().isAfter(MARKET_CLOSE_KST)
+            && updatedAt.atZone(KST).toLocalDate().equals(nowKst.toLocalDate());
     }
 
     /** 캐시된 라이브 분석 결과 조회 (컨트롤러에서 호출) */
@@ -199,6 +214,7 @@ public class AnalysisService {
      */
     public Map<String, Map<String, Object>> getCacheStatus() {
         Map<String, Map<String, Object>> status = new LinkedHashMap<>();
+        Instant now = clock.instant();
 
         for (var entry : MODE_TTL_MINUTES.entrySet()) {
             String mode = entry.getKey();
@@ -217,8 +233,8 @@ public class AnalysisService {
 
                         if (data.updatedAt() != null) {
                             Instant updatedAt = Instant.parse(data.updatedAt());
-                            long elapsed = Duration.between(updatedAt, Instant.now()).toMinutes();
-                            boolean valid = elapsed <= ttlMinutes;
+                            long elapsed = Duration.between(updatedAt, now).toMinutes();
+                            boolean valid = elapsed <= ttlMinutes && !isMarketCloseExpired(updatedAt, now);
 
                             modeStatus.put("valid", valid);
                             modeStatus.put("updatedAt", data.updatedAt());

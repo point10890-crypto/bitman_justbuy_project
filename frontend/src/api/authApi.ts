@@ -83,12 +83,17 @@ function authHeaders(token: string): HeadersInit {
   }
 }
 
-import { notifySubscriptionGate, errorMessageOf } from './subscriptionGate'
+import { ApiError, notifySubscriptionGate, errorMessageOf } from './subscriptionGate'
+export { ApiError } from './subscriptionGate'
+
+// Keep a failed response associated with the session that made its request.
+// A late 401 from a previous account must not sign out the current account.
+const responseTokens = new WeakMap<Response, string>()
 
 /** 401 발생 시 AuthContext에 전역 신호 전송 (순환 import 회피) */
-function emitUnauthorized() {
+function emitUnauthorized(token: string) {
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('auth:unauthorized'))
+    window.dispatchEvent(new CustomEvent('auth:unauthorized', { detail: { token } }))
   }
 }
 
@@ -109,27 +114,32 @@ async function readErrorMessage(res: Response, fallback: string): Promise<string
  * - 401 → 전역 unauthorized 이벤트 발송 (AuthContext가 logout 처리)
  * - 5xx → "서버에 일시적으로 연결할 수 없습니다..."
  * - 그 외 → 서버 응답 메시지
- * @param silent401 - fetchCurrentUser처럼 무한 로그아웃 루프를 유발하는 경로에서 true
+ * @param silent401 - 인증 만료 이벤트를 보내지 않는 호출에서 true
  */
 async function handleError(res: Response, silent401 = false): Promise<never> {
   if (res.status === 401) {
-    if (!silent401) emitUnauthorized()
-    throw new Error('인증이 만료되었습니다. 다시 로그인해주세요.')
+    const token = responseTokens.get(res)
+    if (!silent401 && token) emitUnauthorized(token)
+    throw new ApiError(401, '인증이 만료되었습니다. 다시 로그인해주세요.')
   }
   if (res.status >= 500) {
-    throw new Error('서버에 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해주세요.')
+    throw new ApiError(res.status, '서버에 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해주세요.')
   }
   // 구독 만료/대기/미구독 403 은 재구독 흐름으로 넘긴다. 이게 없으면 만료 회원이
   // 오류 문구만 보고 그 화면에 머문다.
   const body = await res.text().catch(() => '')
-  notifySubscriptionGate(res.status, body)
-  throw new Error(errorMessageOf(body, `HTTP ${res.status}`))
+  const code = notifySubscriptionGate(res.status, body) ?? undefined
+  throw new ApiError(res.status, errorMessageOf(body, `HTTP ${res.status}`), code)
 }
 
 /** fetch 래퍼: 네트워크 에러(TypeError) → 사용자 친화 메시지로 변환 */
 async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+  const token = headers.get('Authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]
   try {
-    return await fetch(input, init)
+    const response = await fetch(input, init)
+    if (token) responseTokens.set(response, token)
+    return response
   } catch (err) {
     if (err instanceof TypeError) {
       throw new Error('네트워크 연결을 확인해주세요.')
@@ -301,10 +311,21 @@ export async function fetchSystemStatus(token: string): Promise<SystemStatusResp
   return res.json()
 }
 
-export async function refreshAllAnalysis(token: string) {
+export interface SystemRefreshResponse {
+  status: 'ok' | 'partial' | 'error' | 'complete' | 'running'
+  results?: Record<string, string>
+  startedAt?: string
+  completedAt?: string
+  jobId?: string
+  message?: string
+  error?: string
+}
+
+export async function refreshAllAnalysis(token: string, modes?: readonly string[]): Promise<SystemRefreshResponse> {
   const res = await apiFetch(`${API_BASE}/api/admin/system/refresh-all`, {
     method: 'POST',
     headers: authHeaders(token),
+    ...(modes ? { body: JSON.stringify({ modes }) } : {}),
   })
   if (!res.ok) await handleError(res)
   const started = await res.json()
@@ -318,7 +339,8 @@ export async function refreshAllAnalysis(token: string) {
     })
     if (!statusRes.ok) await handleError(statusRes)
     const status = await statusRes.json()
-    if (status.status === 'complete') return status
+    if (status.status === 'complete' || status.status === 'ok' || status.status === 'partial'
+      || (status.status === 'error' && status.results)) return status
     if (status.status === 'error') throw new Error(status.error || 'Refresh failed')
   }
 
@@ -326,7 +348,7 @@ export async function refreshAllAnalysis(token: string) {
     ...started,
     status: 'running',
     message: 'Refresh is still running. Check system status again shortly.',
-    results: [],
+    results: {},
   }
 }
 
