@@ -6,8 +6,9 @@ import { fetchConditionSection, type ConditionSectionResponse, type MainConditio
 import HomePage from './HomePage'
 
 let main: MainConditionResponse
+const { analyzeMock } = vi.hoisted(() => ({ analyzeMock: vi.fn() }))
 vi.mock('../hooks/useMainConditions', () => ({ useMainConditions: () => ({ data: main, loading: false, error: null }) }))
-vi.mock('../hooks/useAnalysis', () => ({ useAnalysis: () => ({ result: null, loading: false, error: null, analyze: vi.fn(), clear: vi.fn() }) }))
+vi.mock('../hooks/useAnalysis', () => ({ useAnalysis: () => ({ result: null, loading: false, error: null, analyze: analyzeMock, clear: vi.fn() }) }))
 vi.mock('../contexts/AuthContext', () => ({ getStoredToken: () => undefined, useAuth: () => ({ user: { role: 'ADMIN', subscription: 'pro' } }) }))
 vi.mock('../api/conditionApi', () => ({ fetchConditionSection: vi.fn() }))
 
@@ -31,7 +32,7 @@ function feed(name: string, asOf: string): MainConditionResponse {
 }
 const tree = () => <MemoryRouter><HomePage /></MemoryRouter>
 beforeEach(() => { vi.clearAllMocks(); main = feed('MAIN_0850', '2026-05-18T08:50:00+09:00') })
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 it('manual section rows use the same response timestamp and yield to a later feed response', async () => {
   vi.mocked(fetchConditionSection).mockResolvedValue(section('MANUAL_0900', '2026-05-18T09:00:00+09:00'))
@@ -97,4 +98,64 @@ it('expected target upside in precomputed cards is labeled separately from obser
   const theme = within(container.querySelector('#themes') as HTMLElement)
   expect(theme.getByText('종목명')).toBeTruthy()
   expect(theme.getByText('현재가')).toBeTruthy()
+})
+
+const keywordResponse = (query: string, name = '조건 검증 종목') => ({
+  query, outcome: 'COMPLETE', appliedConditions: ['현재가 50,000원 이하'], unsupportedTerms: [],
+  scope: { label: '조회한 국내 상장 종목', examinedCount: 20, eligibleCount: 19, matchedCount: 1, truncated: false },
+  fetchedAt: '2026-10-12T10:00:00+09:00', sourceStatus: 'VERIFIED_QUOTES', warnings: [],
+  matches: [{ code: '005930', name, market: 'KOSPI', currentPrice: 49000, changePct: null, volume: null, tradingValueKrw: null,
+    quoteSource: 'KIS', quoteCheckedAt: '2026-10-12T10:00:00+09:00', observedAt: null,
+    evidence: [{ condition: '현재가 50,000원 이하', observedValue: '49000', unit: '원', source: 'KIS', observedAt: null }] }],
+})
+const asJson = (data: unknown) => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })
+
+it('hero searches the original condition through the data API without asking an AI to originate stocks', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(asJson(keywordResponse('가격 5만원 이하')))
+  vi.stubGlobal('fetch', fetchMock)
+  render(tree())
+  fireEvent.change(screen.getByRole('textbox', { name: '분석할 종목명 또는 조건' }), { target: { value: '  가격 5만원 이하  ' } })
+  fireEvent.submit(screen.getByRole('search'))
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+  const [url, options] = fetchMock.mock.calls[0]
+  expect(url).toContain('/api/analysis/keyword-search')
+  expect(JSON.parse(options.body)).toEqual({ query: '가격 5만원 이하' })
+  expect(analyzeMock).not.toHaveBeenCalled()
+  const panel = await screen.findByRole('dialog', { name: '실데이터 조건검색' })
+  expect(within(panel).getByText('조건 검증 종목')).toBeTruthy()
+  expect(within(panel).getByText('현재가 49,000원')).toBeTruthy()
+})
+
+it('closing a keyword search aborts its request and rejects a late response after a newer search', async () => {
+  let completeOld!: (response: Response) => void
+  const fetchMock = vi.fn()
+    .mockReturnValueOnce(new Promise<Response>(resolve => { completeOld = resolve }))
+    .mockResolvedValueOnce(asJson(keywordResponse('가격 3만원 이하', '최신 검색 종목')))
+  vi.stubGlobal('fetch', fetchMock)
+  render(tree())
+  const input = screen.getByRole('textbox', { name: '분석할 종목명 또는 조건' })
+  fireEvent.change(input, { target: { value: '가격 5만원 이하' } })
+  fireEvent.submit(screen.getByRole('search'))
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+  fireEvent.click(within(screen.getByRole('dialog', { name: '실데이터 조건검색' })).getByRole('button', { name: '닫기' }))
+  expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true)
+  fireEvent.change(input, { target: { value: '가격 3만원 이하' } })
+  fireEvent.submit(screen.getByRole('search'))
+  await screen.findByText('최신 검색 종목')
+  await act(async () => { completeOld(asJson(keywordResponse('가격 5만원 이하', '이전 검색 종목'))) })
+  expect(screen.queryByText('이전 검색 종목')).toBeNull()
+  expect(screen.getByText('최신 검색 종목')).toBeTruthy()
+})
+
+it('each repeated keyword search makes a new data request instead of reusing the analysis cache', async () => {
+  const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(asJson(keywordResponse('가격 5만원 이하'))))
+  vi.stubGlobal('fetch', fetchMock)
+  render(tree())
+  fireEvent.change(screen.getByRole('textbox', { name: '분석할 종목명 또는 조건' }), { target: { value: '가격 5만원 이하' } })
+  fireEvent.submit(screen.getByRole('search'))
+  await screen.findByText('조건 검증 종목')
+  fireEvent.click(within(screen.getByRole('dialog', { name: '실데이터 조건검색' })).getByRole('button', { name: '닫기' }))
+  fireEvent.submit(screen.getByRole('search'))
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
 })

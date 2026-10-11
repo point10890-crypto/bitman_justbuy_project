@@ -5,6 +5,8 @@ import { getStoredToken, useAuth } from '../contexts/AuthContext'
 import { useMainConditions } from '../hooks/useMainConditions'
 import { fetchConditionSection, type ConditionSectionResponse } from '../api/conditionApi'
 import { AgentMascot } from '../components/app/AgentMascot'
+import { KeywordSearchPanel } from '../components/app/KeywordSearchPanel'
+import { searchKeywordStocks, type KeywordSearchResponse } from '../api/keywordSearchApi'
 import './HomePage.css'
 
 type Section = {
@@ -73,6 +75,8 @@ const sections: Section[] = [
     rows: [],
   },
 ]
+
+const keywordExamples = ['가격 5만원 이하', '거래대금 100억 이상', '상승률 3% 이상', '외국인 순매수', '기관 순매수']
 
 function CategoryIcon({ type }: { type: Section['icon'] }) {
   return <span className={`category-icon category-icon-${type}`} aria-hidden="true" />
@@ -210,6 +214,13 @@ export default function HomePage() {
   const [query, setQuery] = useState('')
   const [activeQuery, setActiveQuery] = useState('')
   const [panelOpen, setPanelOpen] = useState(false)
+  const [keywordPanelOpen, setKeywordPanelOpen] = useState(false)
+  const [keywordQuery, setKeywordQuery] = useState('')
+  const [keywordResult, setKeywordResult] = useState<KeywordSearchResponse | null>(null)
+  const [keywordLoading, setKeywordLoading] = useState(false)
+  const [keywordError, setKeywordError] = useState<string | null>(null)
+  const keywordGeneration = useRef(0)
+  const keywordController = useRef<AbortController | null>(null)
   const [endpointSections, setEndpointSections] = useState<Record<string, { data: ConditionSectionResponse; feed: typeof mainConditions }>>({})
   const [endpointStatus, setEndpointStatus] = useState<Record<string, string>>({})
   const [endpointLoading, setEndpointLoading] = useState<string | null>(null)
@@ -224,16 +235,53 @@ export default function HomePage() {
     queryRef.current = query
   }, [query])
 
+  useEffect(() => () => {
+    keywordGeneration.current++
+    keywordController.current?.abort()
+  }, [])
+
   const runAnalysis = (analysisQuery: string, mode?: string) => {
     setActiveQuery(analysisQuery)
     setPanelOpen(true)
     analyze(analysisQuery, mode)
   }
 
+  const runKeywordSearch = async (rawQuery: string) => {
+    const searchQuery = rawQuery.trim()
+    if (!searchQuery) return
+    const request = ++keywordGeneration.current
+    keywordController.current?.abort()
+    const controller = new AbortController()
+    keywordController.current = controller
+    setKeywordQuery(searchQuery)
+    setKeywordPanelOpen(true)
+    setKeywordLoading(true)
+    setKeywordResult(null)
+    setKeywordError(null)
+    try {
+      const data = await searchKeywordStocks(searchQuery, getStoredToken() || undefined, controller.signal)
+      if (request === keywordGeneration.current) setKeywordResult(data)
+    } catch (err) {
+      if (request === keywordGeneration.current && !controller.signal.aborted) {
+        setKeywordError(err instanceof Error ? err.message : '실데이터를 조회하지 못했습니다. 잠시 후 다시 검색해 주세요.')
+      }
+    } finally {
+      if (request === keywordGeneration.current) setKeywordLoading(false)
+    }
+  }
+
   const handleSearch = (event: FormEvent) => {
     event.preventDefault()
-    if (!query.trim()) return
-    runAnalysis(`${query.trim()} 종목 분석`, '분석해줘')
+    void runKeywordSearch(query)
+  }
+
+  const closeKeywordPanel = () => {
+    keywordGeneration.current++
+    keywordController.current?.abort()
+    setKeywordPanelOpen(false)
+    setKeywordLoading(false)
+    setKeywordResult(null)
+    setKeywordError(null)
   }
 
   const closePanel = () => {
@@ -359,8 +407,13 @@ export default function HomePage() {
               onChange={event => setQuery(event.target.value)}
               placeholder="종목·조건 검색"
             />
-            <button type="submit">분석하기</button>
+            <button type="submit">실데이터 조건검색</button>
           </form>
+          <div className="keyword-search-examples" aria-label="조건검색 예시">
+            {keywordExamples.map(example => (
+              <button key={example} type="button" onClick={() => setQuery(example)}>{example}</button>
+            ))}
+          </div>
         </div>
         <div className="agent-welcome-art">
           <div className="agent-orbit" aria-hidden="true" />
@@ -529,6 +582,9 @@ export default function HomePage() {
 
       {panelOpen && (
         <ResultPanel query={activeQuery} loading={loading} error={error} result={result} onClose={closePanel} />
+      )}
+      {keywordPanelOpen && (
+        <KeywordSearchPanel query={keywordQuery} loading={keywordLoading} error={keywordError} result={keywordResult} onClose={closeKeywordPanel} />
       )}
     </main>
   )

@@ -2,6 +2,7 @@ package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.config.KisProperties;
 import com.bitman.justbuy.config.KisExtendedEvidenceConfig;
+import com.bitman.justbuy.util.KoreanMarketCalendar;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -115,8 +116,14 @@ public class KisApiService {
         long institutionNet,
         long individualNet,
         int days,
-        String verdict
+        String verdict,
+        String fromDate,
+        String toDate,
+        Instant fetchedAt
     ) {
+        public InvestorFlowSnapshot(String code, long foreignNet, long institutionNet, long individualNet, int days, String verdict) {
+            this(code, foreignNet, institutionNet, individualNet, days, verdict, null, null, null);
+        }
         public boolean doubleBuy() {
             return foreignNet > 0 && institutionNet > 0;
         }
@@ -953,31 +960,55 @@ public class KisApiService {
     }
 
     public InvestorFlowSnapshot fetchInvestorFlowSnapshot(String stockCode, int days) {
-        if (!isAvailable() || stockCode == null || stockCode.isBlank()) return null;
+        return fetchInvestorFlowSnapshot(stockCode, days, restTemplate, Long.MAX_VALUE);
+    }
+
+    /** Existing investor endpoint through the short client, without enabling extended evidence. */
+    public InvestorFlowSnapshot fetchInvestorFlowSnapshot(String stockCode, int days, long deadlineNanos) {
+        return fetchInvestorFlowSnapshot(stockCode, days, extendedRestTemplate, deadlineNanos);
+    }
+
+    private InvestorFlowSnapshot fetchInvestorFlowSnapshot(String stockCode, int days, RestTemplate client, long deadline) {
+        if (!isAvailable() || stockCode == null || !stockCode.matches("[0-9]{6}") || days < 1 || days > 30
+            || Thread.currentThread().isInterrupted() || KisRestThrottle.remaining(deadline) <= 0) return null;
 
         String cacheKey = "kis_investor_structured_" + stockCode + "_" + days;
         CachedEntry cached = cache.get(cacheKey);
         if (cached != null && cached.isValid()) {
             try {
-                return objectMapper.readValue(cached.data(), InvestorFlowSnapshot.class);
+                InvestorFlowSnapshot stored = objectMapper.readValue(cached.data(), InvestorFlowSnapshot.class);
+                if (stockCode.equals(stored.code()) && stored.days() == days && stored.fetchedAt() != null
+                    && stored.fromDate() != null && stored.toDate() != null
+                    && !stored.fetchedAt().isAfter(Instant.now())
+                    && (deadline == Long.MAX_VALUE || Duration.between(stored.fetchedAt(), Instant.now()).compareTo(Duration.ofSeconds(180)) <= 0)) return stored;
             } catch (Exception ignored) {}
         }
 
         try {
-            String token = getAccessToken();
+            if (deadline != Long.MAX_VALUE && KisRestThrottle.remaining(deadline) <= TimeUnit.SECONDS.toNanos(4)) return null;
+            String token = getAccessToken(client, deadline);
             if (token == null) return null;
 
             String url = KIS_BASE + "/uapi/domestic-stock/v1/quotations/inquire-investor"
                 + "?FID_COND_MRKT_DIV_CODE=J"
                 + "&FID_INPUT_ISCD=" + stockCode;
 
-            HttpHeaders headers = buildHeaders("FHKST01010900");
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setBearerAuth(token);
+            headers.set("appkey", kisProperties.appKey());
+            headers.set("appsecret", kisProperties.appSecret());
+            headers.set("tr_id", "FHKST01010900");
             String responseBody = null;
-            for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            int attempts = deadline == Long.MAX_VALUE ? MAX_RETRIES : 1;
+            for (int attempt = 1; attempt <= attempts; attempt++) {
                 try {
-                    ResponseEntity<String> resp = exchange(restTemplate, url, HttpMethod.GET, new HttpEntity<>(headers));
+                    KisRestThrottle.check(deadline);
+                    if (deadline != Long.MAX_VALUE && KisRestThrottle.remaining(deadline) <= TimeUnit.SECONDS.toNanos(2)) return null;
+                    ResponseEntity<String> resp = exchange(client, url, HttpMethod.GET, new HttpEntity<>(headers), deadline);
+                    KisRestThrottle.check(deadline);
                     if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
-                        if (attempt < MAX_RETRIES) { sleepBackoff(attempt); continue; }
+                        if (attempt < attempts) { sleepBackoff(attempt); continue; }
                         return null;
                     }
                     responseBody = resp.getBody();
@@ -986,27 +1017,46 @@ public class KisApiService {
                     String body = hse.getResponseBodyAsString();
                     boolean isRateLimit = body != null
                         && (body.contains("EGW00201") || body.contains("\uCD08\uB2F9") || body.contains("rate"));
-                    if (isRateLimit && attempt < MAX_RETRIES) {
+                    if (isRateLimit && attempt < attempts) {
                         sleepBackoff(attempt);
                         continue;
                     }
                     throw hse;
                 }
             }
-            if (responseBody == null) return null;
+            if (responseBody == null || responseBody.length() > 1_048_576) return null;
 
-            JsonNode outputArr = objectMapper.readTree(responseBody).path("output");
-            if (!outputArr.isArray() || outputArr.isEmpty()) return null;
+            JsonNode root = objectMapper.readTree(responseBody);
+            if (!root.path("rt_cd").isTextual() || !"0".equals(root.path("rt_cd").asText())) return null;
+            JsonNode outputArr = root.path("output");
+            if (!outputArr.isArray() || outputArr.isEmpty() || outputArr.size() > 100) return null;
+            var datedRows = new TreeMap<LocalDate, long[]>();
+            LocalDate today = LocalDate.now(KST);
+            for (JsonNode row : outputArr) {
+                JsonNode dateNode = row.path("stck_bsop_date");
+                if (!dateNode.isTextual() || !dateNode.asText().matches("[0-9]{8}")) return null;
+                LocalDate date = LocalDate.parse(dateNode.asText(), DateTimeFormatter.BASIC_ISO_DATE);
+                if (date.isAfter(today) || !KoreanMarketCalendar.isTradingDay(date) || datedRows.containsKey(date)) return null;
+                Long foreign = strictInvestorQuantity(row.path("frgn_ntby_qty"));
+                Long institution = strictInvestorQuantity(row.path("orgn_ntby_qty"));
+                Long individual = strictInvestorQuantity(row.path("prsn_ntby_qty"));
+                if (foreign == null || institution == null || individual == null) return null;
+                datedRows.put(date, new long[]{foreign, institution, individual});
+            }
+            if (datedRows.size() < days) return null;
 
             long foreignTotal = 0;
             long institutionTotal = 0;
             long individualTotal = 0;
             int count = 0;
-            for (JsonNode day : outputArr) {
+            LocalDate from = null;
+            LocalDate to = datedRows.lastKey();
+            for (var entry : datedRows.descendingMap().entrySet()) {
                 if (count >= days) break;
-                foreignTotal += parseLong(day.path("frgn_ntby_qty").asText("0"));
-                institutionTotal += parseLong(day.path("orgn_ntby_qty").asText("0"));
-                individualTotal += parseLong(day.path("prsn_ntby_qty").asText("0"));
+                foreignTotal = Math.addExact(foreignTotal, entry.getValue()[0]);
+                institutionTotal = Math.addExact(institutionTotal, entry.getValue()[1]);
+                individualTotal = Math.addExact(individualTotal, entry.getValue()[2]);
+                from = entry.getKey();
                 count++;
             }
 
@@ -1019,14 +1069,24 @@ public class KisApiService {
             else verdict = "\uC911\uB9BD";
 
             InvestorFlowSnapshot snapshot = new InvestorFlowSnapshot(
-                stockCode, foreignTotal, institutionTotal, individualTotal, count, verdict);
+                stockCode, foreignTotal, institutionTotal, individualTotal, count, verdict,
+                from.toString(), to.toString(), Instant.now());
             cache.put(cacheKey, new CachedEntry(objectMapper.writeValueAsString(snapshot),
                 Instant.now().plus(10, ChronoUnit.MINUTES)));
             return snapshot;
         } catch (Exception e) {
-            log.warn("[KIS] structured investor flow failed ({}): {}", stockCode, e.getMessage());
+            // Exception URLs and response bodies may contain credentials; publish no raw message.
+            log.warn("[KIS] structured investor flow unavailable ({})", stockCode);
             return null;
         }
+    }
+
+    private static Long strictInvestorQuantity(JsonNode node) {
+        if (node == null || !node.isTextual() && !node.isIntegralNumber()) return null;
+        String value = node.asText().trim();
+        if (!value.matches("[+-]?(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)")) return null;
+        try { return Long.valueOf(value.replace(",", "")); }
+        catch (NumberFormatException ignored) { return null; }
     }
 
     public List<ConditionCandidate> fetchDoubleNetBuyCandidates(int limit, int days) {
@@ -1079,7 +1139,7 @@ public class KisApiService {
             long totalSmartNet = flow.foreignNet() + flow.institutionNet();
             String reason = "\uC678\uAD6D\uC778 " + formatSigned(flow.foreignNet())
                 + " / \uAE30\uAD00 " + formatSigned(flow.institutionNet())
-                + " " + days + "\uC77C \uD569\uC0B0 \uC30D\uB04C\uC774 \uB9E4\uC218";
+                + " " + flow.days() + "\uC77C \uD569\uC0B0 \uC30D\uB04C\uC774 \uB9E4\uC218";
 
             candidates.add(new ConditionCandidate(
                 name,
