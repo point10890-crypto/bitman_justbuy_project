@@ -406,8 +406,8 @@ public class KisApiService {
             result.put("시가", output.path("stck_oprc").asText(""));
             result.put("고가", output.path("stck_hgpr").asText(""));
             result.put("저가", output.path("stck_lwpr").asText(""));
-            result.put("52주최고", output.path("stck_mxpr").asText(""));
-            result.put("52주최저", output.path("stck_llam").asText(""));
+            result.put("52주최고", output.path("w52_hgpr").asText(""));
+            result.put("52주최저", output.path("w52_lwpr").asText(""));
             result.put("PER", output.path("per").asText(""));
             result.put("PBR", output.path("pbr").asText(""));
             result.put("시가총액", output.path("hts_avls").asText(""));

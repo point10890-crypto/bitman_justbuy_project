@@ -40,4 +40,14 @@
 - 로컬 브라우저에서 원문 조건 입력→실데이터 검색 패널→실측값·관측/조회 시각·범위 표시 확인.
 - 프론트 배포 번들: `index-CHnkhk29.js`, `index-XAytwKpc.css`. PWA 캐시: `bitman-v20261012-keyword-realdata-r7`.
 
-운영 배포·실제 홈페이지 검증 증거는 배포 후 추가 기록한다.
+## 운영 배포와 실제 홈페이지 검증
+
+구현 커밋 `c1df3518e32cf0e371a207b56a941898a5d1e2e8`을 main에 푸시하고 원격 main과 로컬 HEAD 일치를 확인했다. `scripts/deploy-minipc.ps1`의 테스트·DB 백업·JAR 교체·재시작·상태 점검과 Cloudflare Pages main·production 배포를 완료했다.
+
+- `https://bitman-justbuy.pages.dev/`, `https://production.bitman-justbuy.pages.dev/`, `https://api.bit-man.net/`의 HTML이 새 JS/CSS를 참조하고 동일한 JS SHA256 `1fdbdad29de541a725c732c0320047c198d53ac604d89f6e7727e9f60b804958` 및 새 PWA 캐시 버전을 제공했다.
+- MiniPC JAR SHA256과 로컬 빌드 일치 및 MiniPC·공개 API 상태 정상 확인.
+- 사용자의 실제 홈페이지 DOM에서 원문 조건 입력 후 395개 검사·28개 일치·10개 표시, 원 거래 관측 시각과 조회 시각 구분, 정상 0건 및 미지원 조건 화면을 확인했다.
+- 실제 브라우저 증거는 개발 PC 임시 파일 `C:/Users/dynas/AppData/Local/Temp/bitman-keyword-live-20261012.png`에 저장했다.
+- ECOS 설정 두 항목만 MiniPC에 반영하고 서버 재시작 후 원격에서 3개 공식 통계 응답을 검증했다. 기존 Java `EcosMarketContextService`를 배포 JAR의 클래스 로더로 별도 호출한 개발 PC 검증에서도 `AVAILABLE`, 3개 관측값, 누락 0개를 확인했다. 관측 기간은 `20261008`이며 이는 공표 통계 시점이다. 키는 출력·커밋하지 않았다.
+
+MiniPC 기존 회원 DB와 다른 환경설정을 보존했다. 신규 KIS 확장 및 DART 이벤트 플래그는 변경하지 않았다.

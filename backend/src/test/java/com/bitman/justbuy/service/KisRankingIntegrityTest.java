@@ -105,6 +105,34 @@ class KisRankingIntegrityTest {
     }
 
     @Test
+    void fiftyTwoWeekRangeUsesObservedAnnualHighAndLowInsteadOfDailyPriceLimits() {
+        when(http.exchange(contains("inquire-price"), eq(HttpMethod.GET), any(), eq(String.class)))
+            .thenReturn(ResponseEntity.ok("""
+                {"rt_cd":"0","output":{"stck_prpr":"70000","stck_mxpr":"91000",
+                "stck_llam":"49000","w52_hgpr":"98000","w52_lwpr":"42000"}}
+                """));
+
+        Map<String, String> quote = service.fetchCurrentPrice("005930");
+
+        assertThat(quote.get("52주최고")).isEqualTo("98000");
+        assertThat(quote.get("52주최저")).isEqualTo("42000");
+    }
+
+    @Test
+    void absentFiftyTwoWeekRangeStaysUnknownDespiteAvailableDailyPriceLimits() {
+        when(http.exchange(contains("inquire-price"), eq(HttpMethod.GET), any(), eq(String.class)))
+            .thenReturn(ResponseEntity.ok("""
+                {"rt_cd":"0","output":{"stck_prpr":"70000","stck_mxpr":"91000","stck_llam":"49000"}}
+                """));
+
+        Map<String, String> quote = service.fetchCurrentPrice("005930");
+
+        assertThat(quote).isNotEmpty();
+        assertThat(quote.get("52주최고")).isEmpty();
+        assertThat(quote.get("52주최저")).isEmpty();
+    }
+
+    @Test
     void missingSuccessMarkerDoesNotVerifyAQuoteOrRanking() {
         when(http.exchange(contains("inquire-price"), eq(HttpMethod.GET), any(), eq(String.class)))
             .thenReturn(ResponseEntity.ok("{\"output\":{\"stck_prpr\":\"10000\"}}"));
