@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { linkTelegram, unlinkTelegram } from '../api/conditionApi'
 import { getStoredToken } from '../contexts/AuthContext'
 import { getSubscriptionPlan, subscribePath } from '../lib/subscriptionPlans'
+import { SubscriptionPaymentDetails } from '../components/app/SubscriptionPaymentDetails'
 
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
 
@@ -16,8 +17,8 @@ function subscriptionLabel(subscription: string, expired?: boolean, renewalPendi
 }
 
 function subscriptionActionLabel(subscription: string, expired?: boolean, renewalPending?: boolean) {
-  if (renewalPending) return '승인 상태 확인'
-  if (subscription === 'pending') return '승인 상태 확인'
+  if (renewalPending) return '승인 상태 새로고침'
+  if (subscription === 'pending') return '승인 상태 새로고침'
   if (subscription === 'pro' && !expired) return '구독 연장 / 관리'
   return '구독 플랜 선택'
 }
@@ -35,14 +36,20 @@ export default function MyPage() {
   const [chatId, setChatId] = useState('')
   const [telegramMessage, setTelegramMessage] = useState('')
   const [savingTelegram, setSavingTelegram] = useState(false)
+  const pendingPlan = user?.subscription === 'pending' || !!user?.subscriptionRenewalPending
 
   useEffect(() => {
     setName(user?.name || '')
   }, [user?.name])
 
+  useEffect(() => {
+    if (!pendingPlan) return
+    const interval = setInterval(() => refreshUser(), 30_000)
+    return () => clearInterval(interval)
+  }, [pendingPlan, refreshUser])
+
   if (!user) return null
 
-  const pendingPlan = user.subscription === 'pending' || user.subscriptionRenewalPending
   const currentPlan = getSubscriptionPlan(pendingPlan ? user.requestedSubscriptionPlan : user.subscriptionPlan)
   const hasPlan = user.subscription !== 'free' || user.subscriptionApprovedAt || user.subscriptionEndDate
   const unlimited = user.role === 'ADMIN' || (user.subscription === 'pro' && !user.subscriptionEndDate)
@@ -126,17 +133,22 @@ export default function MyPage() {
           <h2>구독 관리</h2>
           <p>이용권 플랜, 승인 상태와 만료일을 확인합니다.</p>
         </div>
+        {pendingPlan && !unlimited && (
+          <SubscriptionPaymentDetails plan={user.requestedSubscriptionPlan} depositorName={user.depositorName} />
+        )}
         <div className="my-status-grid">
           <div><span>상태</span><strong>{subscriptionLabel(user.subscription, user.subscriptionExpired, user.subscriptionRenewalPending)}</strong></div>
           <div><span>만료일</span><strong>{unlimited ? '기간 제한 없음' : user.subscriptionEndDate || '-'}</strong></div>
           <div><span>입금자명</span><strong>{user.depositorName || '-'}</strong></div>
-          <div><span>{pendingPlan ? '신청 플랜' : '이용 플랜'}</span><strong>{user.role === 'ADMIN' ? '관리자 이용권' : unlimited ? '무기한 이용권' : hasPlan ? currentPlan.label : '미선택'}</strong></div>
-          <div><span>플랜 금액</span><strong>{hasPlan && !unlimited ? `${currentPlan.price.toLocaleString('ko-KR')}원` : '-'}</strong></div>
+          {!pendingPlan && <>
+            <div><span>이용 플랜</span><strong>{user.role === 'ADMIN' ? '관리자 이용권' : unlimited ? '무기한 이용권' : hasPlan ? currentPlan.label : '미선택'}</strong></div>
+            <div><span>플랜 금액</span><strong>{hasPlan && !unlimited ? `${currentPlan.price.toLocaleString('ko-KR')}원` : '-'}</strong></div>
+          </>}
         </div>
         <button
           className="my-primary-button"
           type="button"
-          onClick={() => unlimited ? navigate('/') : navigate(subscribePath(currentPlan.id, user.subscription === 'pro' && !user.subscriptionExpired && !user.subscriptionRenewalPending), {
+          onClick={() => pendingPlan ? refreshUser() : unlimited ? navigate('/') : navigate(subscribePath(currentPlan.id, user.subscription === 'pro' && !user.subscriptionExpired && !user.subscriptionRenewalPending), {
             state: {
               renewal: user.subscription === 'pro' && !user.subscriptionExpired && !user.subscriptionRenewalPending,
               renewalPending: user.subscriptionRenewalPending,

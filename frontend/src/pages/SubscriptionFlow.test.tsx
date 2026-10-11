@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createContext, useContext, useState, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import type { User } from '../contexts/AuthContext'
 import { fetchSubscriptionPlans, type SubscriptionPlanDto } from '../api/authApi'
@@ -10,6 +10,7 @@ import PublicOnlyRoute from '../components/guards/PublicOnlyRoute'
 import SubscribePage from './SubscribePage'
 import LoginPage from './LoginPage'
 import RegisterPage from './RegisterPage'
+import MyPage from './MyPage'
 
 type PlanId = 'MONTHLY' | 'SIX_MONTHS'
 type FixtureUser = User
@@ -21,6 +22,8 @@ type FixtureAuth = {
   register: (name: string, email: string, password: string) => Promise<void>
   applySubscription: (name: string, plan?: PlanId) => Promise<void>
   refreshUser: () => Promise<void>
+  updateProfile: (name: string) => Promise<void>
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>
   logout: () => void
 }
 const FixtureAuthContext = createContext<FixtureAuth | null>(null)
@@ -28,6 +31,8 @@ const loginMock = vi.fn<(email: string, password: string, rememberMe?: boolean) 
 const registerMock = vi.fn<(name: string, email: string, password: string) => Promise<void>>()
 const applyMock = vi.fn<(name: string, plan: PlanId) => Promise<void>>()
 const refreshMock = vi.fn<() => Promise<FixtureUser | void>>()
+const updateProfileMock = vi.fn<(name: string) => Promise<void>>()
+const changePasswordMock = vi.fn<(currentPassword: string, newPassword: string) => Promise<void>>()
 
 // Real pages and router run together; only their auth boundary and platform
 // install prompt are fixtures. No token, network, or real account is read.
@@ -76,7 +81,7 @@ function FixtureAuthProvider({ initialUser, children }: { initialUser: FixtureUs
     if (next) setUser(next)
   }
   return (
-    <FixtureAuthContext.Provider value={{ user, isGuest: !user, isLoading: false, login, register, applySubscription, refreshUser, logout: () => setUser(null) }}>
+    <FixtureAuthContext.Provider value={{ user, isGuest: !user, isLoading: false, login, register, applySubscription, refreshUser, updateProfile: updateProfileMock, changePassword: changePasswordMock, logout: () => setUser(null) }}>
       {children}
     </FixtureAuthContext.Provider>
   )
@@ -96,7 +101,7 @@ function renderFlow(path: string, user: FixtureUser | null = null, renewal = fal
           <Route path="/register" element={<PublicOnlyRoute><RegisterPage /></PublicOnlyRoute>} />
           <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
           <Route path="/" element={<div>샘플 앱 홈</div>} />
-          <Route path="/my" element={<div>샘플 계정 관리</div>} />
+          <Route path="/my" element={<MyPage />} />
         </Routes>
       </MemoryRouter>
     </FixtureAuthProvider>,
@@ -120,6 +125,14 @@ async function submitSubscription() {
   await waitFor(() => expect((screen.getByRole('button', { name: '구독 신청하기' }) as HTMLButtonElement).disabled).toBe(false))
   fireEvent.click(screen.getByRole('button', { name: '구독 신청하기' }))
 }
+function expectSixMonthPaymentDetails() {
+  const payment = screen.getByRole('region', { name: '신청 및 입금 정보' })
+  expect(within(payment).getByRole('heading', { name: '신청 및 입금 정보', level: 2 })).toBeTruthy()
+  for (const value of ['6개월', '150,000원', '국민은행', '2259-02-04-057670', '이종민', '샘플입금자']) {
+    expect(payment.textContent).toContain(value)
+  }
+  expect(within(payment).getByRole('button', { name: '계좌번호 복사' })).toBeTruthy()
+}
 
 describe('subscription selection through public auth and renewal pages', () => {
   beforeEach(() => {
@@ -128,6 +141,8 @@ describe('subscription selection through public auth and renewal pages', () => {
     registerMock.mockReset().mockResolvedValue(undefined)
     applyMock.mockReset().mockResolvedValue(undefined)
     refreshMock.mockReset().mockResolvedValue(undefined)
+    updateProfileMock.mockReset().mockResolvedValue(undefined)
+    changePasswordMock.mockReset().mockResolvedValue(undefined)
     localStorage.clear()
   })
   afterEach(cleanup)
@@ -172,10 +187,11 @@ describe('subscription selection through public auth and renewal pages', () => {
   })
 
   it('shows the actual pending six-month request even when the URL chooses monthly', () => {
-    renderFlow('/subscribe?plan=MONTHLY', freeUser({ subscription: 'pending', requestedSubscriptionPlan: 'SIX_MONTHS' }))
+    renderFlow('/subscribe?plan=MONTHLY', freeUser({ subscription: 'pending', requestedSubscriptionPlan: 'SIX_MONTHS', depositorName: '샘플입금자' }))
     const pending = screen.getByRole('heading', { name: /승인 대기/ }).closest('section')!
     expect(pending.textContent).toContain('6개월')
     expect(pending.textContent).toContain('150,000원')
+    expectSixMonthPaymentDetails()
     expect(screen.queryByRole('button', { name: '구독 신청하기' })).toBeNull()
     expect(applyMock).not.toHaveBeenCalled()
   })
@@ -243,6 +259,47 @@ describe('subscription selection through public auth and renewal pages', () => {
     expect(screen.queryByRole('button', { name: '구독 신청하기' })).toBeNull()
     await waitFor(() => expect(screen.getByTestId('flow-route').textContent).toBe('/'))
     expect(screen.getByText('샘플 앱 홈')).toBeTruthy()
+    expect(applyMock).not.toHaveBeenCalled()
+  })
+
+  it('shows a pending six-month member the payment details on the actual account page', () => {
+    renderFlow('/my', freeUser({ subscription: 'pending', requestedSubscriptionPlan: 'SIX_MONTHS', depositorName: '샘플입금자' }))
+
+    expectSixMonthPaymentDetails()
+    expect(applyMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps the current PRO expiry while showing the six-month renewal payment details', () => {
+    renderFlow('/my', freeUser({ subscription: 'pro', subscriptionRenewalPending: true, subscriptionPlan: 'MONTHLY', requestedSubscriptionPlan: 'SIX_MONTHS', depositorName: '샘플입금자', subscriptionEndDate: '2099-12-31', subscriptionApprovedAt: '2026-01-01' }))
+
+    expectSixMonthPaymentDetails()
+    expect(screen.getByText('2099-12-31')).toBeTruthy()
+    expect(screen.getAllByText('연장 승인대기').length).toBeGreaterThan(0)
+    expect(applyMock).not.toHaveBeenCalled()
+  })
+
+  it('does not show another payment request for a regular active PRO member', () => {
+    renderFlow('/my', freeUser({ subscription: 'pro', subscriptionPlan: 'SIX_MONTHS', subscriptionEndDate: '2099-12-31', subscriptionApprovedAt: '2026-01-01' }))
+
+    expect(screen.queryByRole('region', { name: '신청 및 입금 정보' })).toBeNull()
+    expect(screen.queryByText('2259-02-04-057670')).toBeNull()
+    expect(screen.queryByRole('button', { name: '계좌번호 복사' })).toBeNull()
+    expect(screen.getByText('2099-12-31')).toBeTruthy()
+  })
+
+  it('removes the pending payment details when account status refresh confirms approval', async () => {
+    renderFlow('/my', freeUser({ subscription: 'pending', requestedSubscriptionPlan: 'SIX_MONTHS', depositorName: '샘플입금자' }))
+    expectSixMonthPaymentDetails()
+    refreshMock.mockResolvedValue(freeUser({ subscription: 'pro', subscriptionPlan: 'SIX_MONTHS', requestedSubscriptionPlan: undefined, subscriptionEndDate: '2099-12-31', subscriptionApprovedAt: '2026-01-01' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '승인 상태 새로고침' }))
+
+    await waitFor(() => expect(screen.queryByRole('region', { name: '신청 및 입금 정보' })).toBeNull())
+    expect(screen.queryByText('2259-02-04-057670')).toBeNull()
+    expect(screen.queryByRole('button', { name: '계좌번호 복사' })).toBeNull()
+    expect(screen.getAllByText('구독중').length).toBeGreaterThan(0)
+    expect(screen.getByTestId('flow-route').textContent).toBe('/my')
+    expect(refreshMock).toHaveBeenCalledOnce()
     expect(applyMock).not.toHaveBeenCalled()
   })
 })

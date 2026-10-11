@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { PWAInstallPrompt } from '../components/app/PWAInstallPrompt'
+import { SubscriptionPaymentDetails } from '../components/app/SubscriptionPaymentDetails'
 import { useAuth } from '../contexts/AuthContext'
+import { SUBSCRIPTION_BANK_ACCOUNT } from '../lib/subscriptionPayment'
 import { fetchSubscriptionPlans, type SubscriptionPlanDto, type SubscriptionPlanId } from '../api/authApi'
 import {
   authPath, formatWon, getSubscriptionPlan, SUBSCRIPTION_PLANS,
@@ -9,9 +11,7 @@ import {
 } from '../lib/subscriptionPlans'
 import './SubscribePage.css'
 
-const BANK_ACCOUNT = '2259-02-04-057670'
-const BANK_NAME = '국민은행'
-const ACCOUNT_HOLDER = '이종민'
+const { accountNumber: BANK_ACCOUNT, bankName: BANK_NAME, accountHolder: ACCOUNT_HOLDER } = SUBSCRIPTION_BANK_ACCOUNT
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
 
 function PlanFeature({ children }: { children: React.ReactNode }) {
@@ -161,11 +161,8 @@ export default function SubscribePage() {
           <div className="subscription-state-icon" aria-hidden="true">⌛</div>
           <h1>{activePro ? '구독 연장 승인 대기 중' : '구독 승인 대기 중'}</h1>
           <p>입금 확인 후 {requested.label} 이용권이 활성화됩니다. {activePro ? '현재 이용권은 남은 기간 동안 계속 이용할 수 있습니다.' : '승인되면 자동으로 앱 홈으로 연결됩니다.'}</p>
-          <div className="subscription-price"><span>신청한 {requested.label} 이용권</span><strong>{formatWon(requested.price)}</strong></div>
-          {user.depositorName && <p className="subscription-note">입금자명: {user.depositorName}</p>}
+          <SubscriptionPaymentDetails plan={user.requestedSubscriptionPlan} depositorName={user.depositorName} />
           <SubscriptionSteps pending />
-          <BankAccountBox copied={copied} onCopy={copyAccount} />
-          {error && <div className="auth-error" role="alert">{error}</div>}
           <button className="auth-submit" type="button" onClick={() => refreshUser()}>승인 상태 새로고침</button>
           <a className="subscription-contact" href={KAKAO_URL} target="_blank" rel="noreferrer">입금 · 승인 문의</a>
           <SubscriptionActions onManage={() => navigate('/my')} onLogout={handleLogout} />

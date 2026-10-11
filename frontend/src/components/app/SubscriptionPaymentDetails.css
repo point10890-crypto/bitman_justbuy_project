@@ -1,0 +1,32 @@
+.subscription-payment-details {
+  margin: 20px 0;
+  padding: 20px;
+  border: 1px solid #5d5030;
+  border-radius: 12px;
+  background: #24231b;
+  color: #f4f1e8;
+}
+.subscription-payment-details h2 { margin: 0 0 16px; font-size: 18px; font-weight: 750; line-height: 1.4; }
+.subscription-payment-details dl { display: grid; gap: 12px; margin: 0; }
+.subscription-payment-details dl > div { display: grid; grid-template-columns: 90px minmax(0, 1fr); align-items: baseline; gap: 12px; }
+.subscription-payment-details dt { color: #b9c0cd; font-size: 13px; font-weight: 550; }
+.subscription-payment-details dd { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
+.subscription-payment-details .subscription-payment-total { padding-bottom: 14px; border-bottom: 1px solid #49422e; margin-bottom: 2px; }
+.subscription-payment-details .subscription-payment-total dd { color: #f3d571; font-size: 26px; font-weight: 800; letter-spacing: -.03em; }
+.subscription-payment-details .subscription-payment-account { font-variant-numeric: tabular-nums; }
+.subscription-payment-details .subscription-payment-copy {
+  display: grid; place-items: center; width: 100%; min-height: 44px; margin-top: 18px;
+  border: 1px solid #75663f; border-radius: 8px; background: #343023; color: #f2dc99;
+  font-size: 14px; font-weight: 700; cursor: pointer;
+}
+.subscription-payment-details .subscription-payment-copy:focus-visible { outline: 2px solid #e4c65a; outline-offset: 3px; }
+.subscription-payment-details .subscription-payment-copy-status { display: block; color: #e9d797; font-size: 12px; line-height: 1.6; }
+.subscription-payment-details .subscription-payment-copy-status:not(:empty) { margin-top: 8px; }
+.subscription-payment-details .subscription-payment-guidance { color: #bdc3ce; font-size: 12px; font-weight: 500; line-height: 1.75; margin: 14px 0 0; }
+.subscription-payment-details .subscription-payment-error { color: #f4bcb0; font-size: 12px; font-weight: 500; line-height: 1.65; margin: 10px 0 0; }
+@media (max-width: 480px) {
+  .subscription-payment-details { padding: 17px 14px; }
+  .subscription-payment-details dl > div { grid-template-columns: 72px minmax(0, 1fr); gap: 9px; }
+  .subscription-payment-details .subscription-payment-total dd { font-size: 24px; }
+  .subscription-payment-details dd { font-size: 14px; }
+}
