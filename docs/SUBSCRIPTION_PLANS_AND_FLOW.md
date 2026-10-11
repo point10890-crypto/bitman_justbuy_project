@@ -51,3 +51,7 @@
 - 프론트엔드 전체 테스트 57개 통과. 신규 대기·연장 대기·기존 플랜과 다른 신청 금액·승인 후 카드 제거를 포함한다.
 - TypeScript·Vite 빌드 통과. JS `index-BsE4ooyr.js`, CSS `index-BhueEXHq.css`, SW 캐시 `bitman-v20261011-subscription-pending-r2`.
 - 로컬 브라우저에서 실제 페이지·AuthProvider와 가상 응답을 사용해 320px/390px 화면, 계좌 복사, 기존 월간 대기 30,000원, 6개월 연장 대기 150,000원과 기존 만료일 유지, 새로고침 후 입금 안내 제거를 확인했다. 실제 API 호출·회원 정보 접근·입금은 하지 않았다.
+- MiniPC 배포에서 백엔드 259개 테스트 및 JAR 빌드 통과, DB·JAR 백업 후 재시작 완료. 로컬·공개 API 상태는 모두 `ok`다.
+- Cloudflare Pages main `4f58e34f`, production `a134e44b` 배포 완료. Pages 기본 주소·production 별칭·Spring static의 JS/CSS 해시와 새 SW 버전을 확인했다.
+- 실제 브라우저의 공개 구독 페이지와 사용자 홈페이지가 `index-BsE4ooyr.js`를 로드하며 6개월 150,000원과 구독 연결을 유지한다. 인증이 필요한 승인대기·연장대기 화면은 가상 응답으로 검증했으며 운영 회원의 신청·승인 상태는 조작하지 않았다.
+- 임시 로컬 미리보기 파일과 서버는 정리했고 배포 산출물에 포함하지 않았다.
