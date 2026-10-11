@@ -1,6 +1,7 @@
 import { Navigate, useNavigate } from 'react-router-dom'
 import { PWAInstallPrompt } from '../components/app/PWAInstallPrompt'
 import { useAuth } from '../contexts/AuthContext'
+import { AgentMascot } from '../components/app/AgentMascot'
 import './LandingPage.css'
 
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
@@ -57,7 +58,7 @@ export default function LandingPage() {
       <section className="bm-hero">
         <div className="bm-hero-media">
           <div className="agent-landing-mascot">
-            <img src="/images/bitman-agent-v1.png" width="1280" height="1280" fetchPriority="high" alt="BitMan 로고를 달고 인사하는 금색 AI 로봇" />
+            <AgentMascot />
             <span>나의 AI 분석 파트너, BitMan</span>
           </div>
         </div>

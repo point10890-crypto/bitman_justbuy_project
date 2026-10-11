@@ -30,3 +30,16 @@
 - Cloudflare Pages main/production과 MiniPC Spring 정적 리소스를 같은 빌드로 배포했다. JS `index-CyUOO5Sy.js`, CSS `index-CWOuGEdW.css`, SW `bitman-v20261011-agent-design-r1`.
 - 실서비스 브라우저에서 메인 화면의 실제 종목 행, 캐릭터 이미지, PC 두 열 카드, 공개 소개 화면과 회원가입 이동을 확인했다.
 - MiniPC 로컬 및 공개 API health: `status=ok`. 운영 DB는 배포 전 백업했다.
+
+## 캐릭터 모션 (2026-10-11)
+
+사용자 요청에 따라 승인된 PNG를 그대로 사용하는 `AgentMascot` 공통 컴포넌트를 메인·공개 소개 화면에 적용했다.
+
+- 5초 주기로 최대 6px 천천히 떠오르는 동작을 재생한다.
+- 첫 표시, 마우스 진입, 터치·클릭, Enter·Space 입력 시 950ms 동안 몸 전체가 가볍게 기울며 인사한다. 부유와 인사의 변환 레이어를 분리했다.
+- 캐릭터 오른쪽 위 버튼으로 두 애니메이션을 멈추거나 이어서 재생한다.
+- OS의 `prefers-reduced-motion` 설정을 처음부터 적용하고, 설정이 실행 중 바뀌어도 즉시 움직임을 제거한다. 미디어 쿼리 이벤트는 컴포넌트 해제 시 정리한다.
+- CSS transform만 사용하며 추가 이미지 생성·모델 호출·타이머·라이브러리 의존성은 없다. 가슴의 `BitMan` 로고와 기존 분석·구독 동작을 유지한다.
+- PWA 캐시 버전: `bitman-v20261011-agent-motion-r2`.
+- 로컬 브라우저 검증: Home 320·390·820·1440px, Landing 390·1440px에서 수평 넘침 없음. 실제 transform 변화, 정지 후 동일 transform 유지, Enter·Space·클릭 인사 및 종료, 모션 감소의 초기·동적 전환을 확인했다. 320px에서 모션 버튼이 잘리지 않도록 캐릭터 그리드 트랙과 버튼 위치를 조정했다.
+- 프론트엔드 테스트 30개 통과, TypeScript/Vite 빌드 성공. 최종 JS `index-dyVAPefE.js`, CSS `index-DhOeHq3L.css`.

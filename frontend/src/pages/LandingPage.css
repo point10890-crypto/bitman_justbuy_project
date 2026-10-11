@@ -15,7 +15,7 @@
 .agent-landing .bm-hero-actions button { font-size: 14px; font-weight: 750; }
 .agent-landing .agent-landing-mascot { position: relative; display: grid; place-items: center; width: 100%; }
 .agent-landing .agent-landing-mascot::before { content: ''; position: absolute; width: 82%; aspect-ratio: 1; border-radius: 50%; border: 1px solid #51472c; background: radial-gradient(circle, #3b321a 0, #151612 60%, transparent 75%); }
-.agent-landing .agent-landing-mascot img { position: relative; width: min(100%, 440px); height: auto; object-fit: contain; }
+.agent-landing .agent-landing-mascot .bitman-mascot { position: relative; width: min(100%, 440px); height: auto; }
 .agent-landing .agent-landing-mascot > span { position: relative; padding: 9px 16px; border: 1px solid #4a422b; border-radius: 10px; background: #24221a; color: #e2d1a1; font-size: 12px; }
 .agent-landing .bm-proof-row span { font-size: 12px; font-weight: 600; color: #b7c0ca; }
 .agent-landing :is(button, a):focus-visible { outline: 2px solid #f3cf45; outline-offset: 4px; }
@@ -29,7 +29,7 @@
   .bm-landing.agent-landing .bm-hero { grid-template-columns: 1fr; gap: 22px; padding: 20px 20px 36px; }
   .agent-landing .bm-hero-copy { order: 2; }
   .agent-landing .bm-hero-media { order: 1; }
-  .agent-landing .agent-landing-mascot img { width: 200px; }
+  .agent-landing .agent-landing-mascot .bitman-mascot { width: 200px; }
   .agent-landing .agent-landing-mascot::before { width: 188px; }
   .agent-landing .agent-landing-mascot > span { padding: 7px 13px; }
   .agent-landing .bm-hero h1 { font-size: clamp(28px, 7.5vw, 38px); }

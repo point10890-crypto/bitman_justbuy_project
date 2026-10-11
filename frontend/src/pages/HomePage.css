@@ -96,8 +96,8 @@
   font-weight: 800;
   white-space: nowrap;
 }
-.agent-home .agent-welcome-art { position: relative; display: grid; place-items: center; min-height: 260px; }
-.agent-home .agent-welcome-art img { position: relative; width: 280px; height: 280px; object-fit: contain; z-index: 1; }
+.agent-home .agent-welcome-art { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; min-height: 260px; }
+.agent-home .agent-welcome-art .bitman-mascot { position: relative; width: 280px; height: 280px; z-index: 1; }
 .agent-home .agent-orbit { position: absolute; width: 246px; height: 246px; border: 1px solid #63502d; border-radius: 50%; }
 .agent-home .agent-orbit::after { content: ''; position: absolute; inset: 22px; border: 1px solid #433b2a; border-radius: 50%; }
 .agent-home .agent-greeting {
@@ -219,7 +219,7 @@
 @media (max-width: 900px) {
   .search-home-page.agent-home { padding: 20px 18px 110px; }
   .agent-home .agent-welcome { grid-template-columns: minmax(0, 1fr) 230px; padding: 26px; }
-  .agent-home .agent-welcome-art img { width: 230px; height: 230px; }
+  .agent-home .agent-welcome-art .bitman-mascot { width: 230px; height: 230px; }
   .agent-home .agent-orbit { width: 204px; height: 204px; }
   .agent-home .agent-mode-nav a { gap: 5px; font-size: 12px; }
   .agent-home .agent-condition-grid { grid-template-columns: 1fr; }
@@ -234,7 +234,8 @@
   .agent-home .agent-welcome h1 { grid-column: 1; font-size: clamp(21px, 5.6vw, 30px); margin: 13px 0 10px; line-height: 1.35; letter-spacing: -.055em; }
   .agent-home .agent-welcome-copy > p { grid-column: 1 / -1; font-size: 11px; margin: 8px 0 16px; }
   .agent-home .agent-welcome-art { grid-column: 2; grid-row: 1 / 3; min-height: 130px; align-self: center; }
-  .agent-home .agent-welcome-art img { width: 146px; height: 146px; max-width: none; }
+  .agent-home .agent-welcome-art .bitman-mascot { width: 146px; height: 146px; max-width: none; }
+  .agent-home .agent-welcome-art .bitman-mascot-motion-toggle { right: 8px; }
   .agent-home .agent-orbit { width: 114px; height: 114px; }
   .agent-home .agent-greeting { display: none; }
   .agent-home .maker-search-box { grid-column: 1 / -1; gap: 8px; padding: 6px 6px 6px 11px; grid-template-columns: 14px minmax(0, 1fr) auto; width: 100%; }
@@ -269,7 +270,7 @@
 
 @media (max-width: 360px) {
   .agent-home .agent-welcome { padding: 18px 12px 14px; grid-template-columns: minmax(0, 1fr) 90px; }
-  .agent-home .agent-welcome-art img { width: 120px; height: 120px; }
+  .agent-home .agent-welcome-art .bitman-mascot { width: 120px; height: 120px; }
   .agent-home .agent-orbit { width: 94px; height: 94px; }
   .agent-home .agent-welcome h1 { font-size: 20px; }
   .agent-home .rank-table-row { font-size: 11px; }

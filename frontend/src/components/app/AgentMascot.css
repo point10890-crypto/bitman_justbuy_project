@@ -1,0 +1,119 @@
+.bitman-mascot {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  aspect-ratio: 1;
+}
+
+.bitman-mascot .bitman-mascot-float {
+  width: 100%;
+  height: 100%;
+  animation: bitman-mascot-floating 5s ease-in-out infinite;
+}
+
+.bitman-mascot .bitman-mascot-greet,
+.bitman-mascot .bitman-mascot-motion-toggle {
+  appearance: none;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  line-height: 1;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.bitman-mascot .bitman-mascot-greet {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 24%;
+  transform-origin: 50% 68%;
+}
+
+.bitman-mascot .bitman-mascot-greet[aria-disabled='true'] {
+  cursor: default;
+}
+
+.bitman-mascot .bitman-mascot-greet.is-greeting {
+  animation: bitman-mascot-greeting 950ms ease-in-out both;
+}
+
+.bitman-mascot .bitman-mascot-greet > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.bitman-mascot .bitman-mascot-motion-toggle {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #5a523a;
+  border-radius: 50%;
+  background: #1d211de6;
+  color: #e0cf9b;
+}
+
+.bitman-mascot .bitman-mascot-motion-toggle:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.bitman-mascot .bitman-mascot-greet:focus-visible,
+.bitman-mascot .bitman-mascot-motion-toggle:focus-visible {
+  outline: 2px solid #e0bf6b;
+  outline-offset: 4px;
+}
+
+.bitman-mascot[data-motion='paused'] .bitman-mascot-float,
+.bitman-mascot[data-motion='paused'] .bitman-mascot-greet {
+  animation-play-state: paused;
+}
+
+.bitman-mascot[data-motion='reduced'] .bitman-mascot-float,
+.bitman-mascot[data-motion='reduced'] .bitman-mascot-greet {
+  animation: none;
+  transform: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .bitman-mascot .bitman-mascot-motion-toggle:hover:not(:disabled) {
+    border-color: #b89b57;
+    background: #2b2d22;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bitman-mascot .bitman-mascot-float,
+  .bitman-mascot .bitman-mascot-greet,
+  .bitman-mascot .bitman-mascot-greet.is-greeting {
+    animation: none;
+    transform: none;
+  }
+}
+
+@keyframes bitman-mascot-floating {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes bitman-mascot-greeting {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  22% { transform: rotate(-3.5deg) scale(1.015); }
+  50% { transform: rotate(3deg) scale(1.015); }
+  75% { transform: rotate(-1.2deg) scale(1.007); }
+}

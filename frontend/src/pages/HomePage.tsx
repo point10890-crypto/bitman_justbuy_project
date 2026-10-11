@@ -4,6 +4,7 @@ import { useAnalysis, type AnalysisResult } from '../hooks/useAnalysis'
 import { getStoredToken, useAuth } from '../contexts/AuthContext'
 import { useMainConditions } from '../hooks/useMainConditions'
 import { fetchConditionSection, type ConditionSectionResponse } from '../api/conditionApi'
+import { AgentMascot } from '../components/app/AgentMascot'
 import './HomePage.css'
 
 type Section = {
@@ -344,8 +345,8 @@ export default function HomePage() {
         </div>
         <div className="agent-welcome-art">
           <div className="agent-orbit" aria-hidden="true" />
-          <img src="/images/bitman-agent-v1.png" width="1280" height="1280" fetchPriority="high" alt="BitMan 로고를 달고 인사하는 금색 AI 로봇" />
-          <span className="agent-greeting">안녕하세요, BitMan입니다.</span>
+          <AgentMascot />
+          <span className="agent-greeting">눌러서 BitMan과 인사해요.</span>
         </div>
       </section>
 
