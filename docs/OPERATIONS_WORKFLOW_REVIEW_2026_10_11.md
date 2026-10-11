@@ -28,4 +28,15 @@
 - 20:37 KST: 프론트엔드 전체 `npm run test` **144개 / 15개 파일 통과**. `npm run build` TypeScript/Vite 통과. JavaScript `index-ChzRNqf4.js`, CSS `index-CCQIA_Bg.css`.
 - 20:43 KST: 마지막 인증 수정 후 백엔드 전체 `gradlew test` **289개 통과**, 실패/오류 0. 실제 H2 동시성 테스트 9개 포함. 독립 교차 리뷰에서 추가 확실한 P1/P2 없음.
 - `scripts/test-deploy-minipc-rollback.ps1` **5개 모두 통과**. 원래 스크립트에서 3개 실패를 재현하고 수정 후 통과했다. `git diff --check` 통과.
-- 배포 결과, 런타임 해시와 공개 URL 확인은 배포 후 기록한다.
+- 소스 수정 커밋: `0e107ceb44ba26647b1e05d69765498fa492da37`.
+- 20:44–20:45 KST: `scripts/deploy-minipc.ps1 -MiniPcHost 192.168.219.100` 정상 종료. 배포 과정에서 프론트엔드 빌드 및 백엔드 전체 테스트를 다시 실행하고 통과했다. 운영 DB/비밀을 유지한 채 DB/JAR 백업, 교체 및 재시작을 완료했다.
+- 20:45 KST: MiniPC 내부 `http://localhost:8080/api/health`와 공개 `https://api.bit-man.net/api/health` 모두 `status=ok`. 로컬 빌드/실제 MiniPC 운영 JAR SHA256 모두 `5D834E6494C1443CEF0AC62BA6147CBFDD36C38CDF377910345A010C35BF1889`로 일치.
+- 공개 Spring `/`도 `index-ChzRNqf4.js`를 제공. `/api/subscription/plans`는 월간 30,000원/1개월 및 6개월 150,000원/6개월로 확인. 익명 `/api/auth/me`와 `/api/admin/system/status`는 각각 HTTP401로 접근을 거절했다.
+- `npm run deploy` 정상 종료. Pages main 배포 `b164ca5d`, production 배포 `816ee3e0`.
+- 20:46 KST: `https://bitman-justbuy.pages.dev` 및 `https://production.bitman-justbuy.pages.dev` 각각 `/`, `/landing`, `/login`, `/register`, `/subscribe?plan=SIX_MONTHS`, `/subscribe?plan=SIX_MONTHS&renewal=1`, `/my`, `/admin?view=system` 모두 HTTP200이며 새 JS/CSS를 참조했다. 이 확인은 SPA 문서 제공과 자산 일치만 증명하며 로그인 후 화면/동작을 증명하지 않는다.
+- 두 Pages 주소의 실제 응답 바이트와 로컬 빌드 SHA256 일치:
+  - `/assets/index-ChzRNqf4.js`: `C318FAAEA86BEFE96C489F7E9886873D2985818C8CC99D4D1E6911695A1A4885`
+  - `/assets/index-CCQIA_Bg.css`: `A8456A473F1F7955D27C3AD827E2DC6CF5E60FBC6B386DDCD34ED39047752281`
+  - `/sw.js`: `7AF0AD9C67FCB460D408D4EBC10D6FB5798B8AC60FFE80D512ABCDE438094100`, 버전 `bitman-v20261011-operations-recovery-r5` 확인.
+
+실제 회원/관리자 브라우저 UI 및 사용 중인 PWA의 클릭/복원 경로는 위 도구 중단으로 미확인이다. 운영 API/배포 자산/자동 회귀 검증과 이 미확인 범위를 구분해 보고한다.
