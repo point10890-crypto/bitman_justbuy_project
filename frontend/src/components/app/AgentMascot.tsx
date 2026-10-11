@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AnimationEvent } from 'react'
 import './AgentMascot.css'
 
@@ -15,17 +15,35 @@ function getReducedMotionPreference() {
 }
 
 export function AgentMascot({ className }: AgentMascotProps) {
+  const imageRef = useRef<HTMLImageElement>(null)
+  const imageReadyRef = useRef(false)
+  const [imageLoaded, setImageLoaded] = useState(false)
   const [reducedMotion, setReducedMotion] = useState(getReducedMotionPreference)
+  const [manualOverride, setManualOverride] = useState(false)
   const [paused, setPaused] = useState(false)
-  const [greeting, setGreeting] = useState(!reducedMotion)
-  const motionDisabled = paused || reducedMotion
+  const [greeting, setGreeting] = useState(false)
+  const motionAllowed = !paused && (!reducedMotion || manualOverride)
+  const motionDisabled = !imageLoaded || !motionAllowed
+  const motionState = !imageLoaded ? 'loading'
+    : paused ? 'paused' : reducedMotion && !manualOverride ? 'reduced' : 'running'
+
+  const markImageReady = useCallback(() => {
+    if (imageReadyRef.current) return
+    imageReadyRef.current = true
+    setImageLoaded(true)
+    if (motionAllowed) setGreeting(true)
+  }, [motionAllowed])
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
 
     const mediaQuery = window.matchMedia(motionQuery)
-    const updatePreference = () => setReducedMotion(mediaQuery.matches)
-    updatePreference()
+    const updatePreference = () => {
+      setReducedMotion(mediaQuery.matches)
+      setManualOverride(false)
+      setGreeting(false)
+    }
+    setReducedMotion(mediaQuery.matches)
 
     if (typeof mediaQuery.addEventListener === 'function') {
       mediaQuery.addEventListener('change', updatePreference)
@@ -39,8 +57,15 @@ export function AgentMascot({ className }: AgentMascotProps) {
   }, [])
 
   useEffect(() => {
-    if (reducedMotion) setGreeting(false)
-  }, [reducedMotion])
+    const image = imageRef.current
+    if (image?.complete && image.naturalWidth > 0) markImageReady()
+  }, [markImageReady])
+
+  const handleImageError = () => {
+    imageReadyRef.current = false
+    setImageLoaded(false)
+    setGreeting(false)
+  }
 
   const greet = () => {
     if (!motionDisabled) setGreeting(true)
@@ -52,17 +77,28 @@ export function AgentMascot({ className }: AgentMascotProps) {
     }
   }
 
-  const motionLabel = reducedMotion
-    ? '모션 감소 설정으로 로봇 움직임이 꺼져 있습니다'
-    : paused ? '로봇 움직임 재생' : '로봇 움직임 멈추기'
-  const greetingLabel = reducedMotion
+  const toggleMotion = () => {
+    if (motionAllowed) {
+      setPaused(true)
+    } else {
+      setPaused(false)
+      setManualOverride(true)
+      if (imageLoaded) setGreeting(true)
+    }
+  }
+
+  const motionLabel = motionAllowed ? '로봇 애니메이션 멈추기' : '로봇 애니메이션 재생'
+  const greetingLabel = !imageLoaded
+    ? 'BitMan 로봇, 이미지가 준비되면 인사할 수 있습니다'
+    : reducedMotion && !manualOverride
     ? 'BitMan 로봇, 모션 감소 설정이 적용되어 있습니다'
     : paused ? 'BitMan 로봇, 움직임이 멈춰 있습니다' : 'BitMan 로봇에게 인사하기'
 
   return (
     <div
       className={['bitman-mascot', className].filter(Boolean).join(' ')}
-      data-motion={reducedMotion ? 'reduced' : paused ? 'paused' : 'running'}
+      data-motion={motionState}
+      data-manual-motion={manualOverride ? 'true' : 'false'}
     >
       <div className="bitman-mascot-float">
         <button
@@ -77,12 +113,15 @@ export function AgentMascot({ className }: AgentMascotProps) {
           onAnimationEnd={finishGreeting}
         >
           <img
+            ref={imageRef}
             src="/images/bitman-agent-v1.png"
             alt="BitMan 로고를 달고 인사하는 금색 AI 로봇"
             width="1280"
             height="1280"
             fetchPriority="high"
             draggable={false}
+            onLoad={markImageReady}
+            onError={handleImageError}
           />
         </button>
       </div>
@@ -92,14 +131,14 @@ export function AgentMascot({ className }: AgentMascotProps) {
         aria-label={motionLabel}
         aria-pressed={paused}
         title={motionLabel}
-        disabled={reducedMotion}
-        onClick={() => setPaused((value) => !value)}
+        onClick={toggleMotion}
       >
         <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
-          {motionDisabled
+          {!motionAllowed
             ? <path d="M4 2.5 11 7 4 11.5Z" fill="currentColor" />
             : <path d="M4.5 3v8M9.5 3v8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />}
         </svg>
+        <span>{motionAllowed ? '정지' : '재생'}</span>
       </button>
     </div>
   )
