@@ -19,13 +19,12 @@ export function AgentMascot({ className }: AgentMascotProps) {
   const imageReadyRef = useRef(false)
   const [imageLoaded, setImageLoaded] = useState(false)
   const [reducedMotion, setReducedMotion] = useState(getReducedMotionPreference)
-  const [manualOverride, setManualOverride] = useState(false)
   const [paused, setPaused] = useState(false)
   const [greeting, setGreeting] = useState(false)
-  const motionAllowed = !paused && (!reducedMotion || manualOverride)
+  const motionAllowed = !paused
   const motionDisabled = !imageLoaded || !motionAllowed
   const motionState = !imageLoaded ? 'loading'
-    : paused ? 'paused' : reducedMotion && !manualOverride ? 'reduced' : 'running'
+    : paused ? 'paused' : 'running'
 
   const markImageReady = useCallback(() => {
     if (imageReadyRef.current) return
@@ -40,8 +39,6 @@ export function AgentMascot({ className }: AgentMascotProps) {
     const mediaQuery = window.matchMedia(motionQuery)
     const updatePreference = () => {
       setReducedMotion(mediaQuery.matches)
-      setManualOverride(false)
-      setGreeting(false)
     }
     setReducedMotion(mediaQuery.matches)
 
@@ -72,7 +69,10 @@ export function AgentMascot({ className }: AgentMascotProps) {
   }
 
   const finishGreeting = (event: AnimationEvent<HTMLButtonElement>) => {
-    if (event.target === event.currentTarget && event.animationName === 'bitman-mascot-greeting') {
+    if (event.target === event.currentTarget && (
+      event.animationName === 'bitman-mascot-greeting'
+      || event.animationName === 'bitman-mascot-greeting-gentle'
+    )) {
       setGreeting(false)
     }
   }
@@ -82,7 +82,6 @@ export function AgentMascot({ className }: AgentMascotProps) {
       setPaused(true)
     } else {
       setPaused(false)
-      setManualOverride(true)
       if (imageLoaded) setGreeting(true)
     }
   }
@@ -90,15 +89,13 @@ export function AgentMascot({ className }: AgentMascotProps) {
   const motionLabel = motionAllowed ? '로봇 애니메이션 멈추기' : '로봇 애니메이션 재생'
   const greetingLabel = !imageLoaded
     ? 'BitMan 로봇, 이미지가 준비되면 인사할 수 있습니다'
-    : reducedMotion && !manualOverride
-    ? 'BitMan 로봇, 모션 감소 설정이 적용되어 있습니다'
     : paused ? 'BitMan 로봇, 움직임이 멈춰 있습니다' : 'BitMan 로봇에게 인사하기'
 
   return (
     <div
       className={['bitman-mascot', className].filter(Boolean).join(' ')}
       data-motion={motionState}
-      data-manual-motion={manualOverride ? 'true' : 'false'}
+      data-reduced-motion={reducedMotion ? 'true' : 'false'}
     >
       <div className="bitman-mascot-float">
         <button
@@ -138,7 +135,6 @@ export function AgentMascot({ className }: AgentMascotProps) {
             ? <path d="M4 2.5 11 7 4 11.5Z" fill="currentColor" />
             : <path d="M4.5 3v8M9.5 3v8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />}
         </svg>
-        <span>{motionAllowed ? '정지' : '재생'}</span>
       </button>
     </div>
   )

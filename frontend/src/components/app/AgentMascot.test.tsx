@@ -60,16 +60,13 @@ describe('AgentMascot browser motion behavior', () => {
     expect(greet.classList.contains('is-greeting')).toBe(true)
   })
 
-  it('keeps reduced-motion autoplay static but lets the user explicitly play', () => {
+  it('automatically starts gentler motion after load with reduced motion enabled', () => {
     mockMotionPreference(true)
-    const { root, image, greet, toggle } = renderMascot()
+    const { root, image, toggle } = renderMascot()
     fireEvent.load(image)
 
-    expect(root.dataset.motion).toBe('reduced')
-    expect(greet.classList.contains('is-greeting')).toBe(false)
-    // Native click respects HTML disabled buttons, unlike synthetic dispatch.
-    act(() => toggle.click())
     expect(root.dataset.motion).toBe('running')
+    expect(root.dataset.reducedMotion).toBe('true')
     expect(toggle.disabled).toBe(false)
   })
 
@@ -84,22 +81,26 @@ describe('AgentMascot browser motion behavior', () => {
     expect(root.dataset.motion).toBe('running')
   })
 
-  it('a new reduced-motion preference cancels autoplay and a manual play override', () => {
+  it('changes the motion intensity with preferences while preserving optional pause', () => {
     const preference = mockMotionPreference(false)
-    const { root, image, greet, toggle } = renderMascot()
+    const { root, image, toggle } = renderMascot()
     fireEvent.load(image)
     expect(root.dataset.motion).toBe('running')
 
     preference.setReduced(true)
-    expect(root.dataset.motion).toBe('reduced')
-    expect(greet.classList.contains('is-greeting')).toBe(false)
-    act(() => toggle.click())
     expect(root.dataset.motion).toBe('running')
+    expect(root.dataset.reducedMotion).toBe('true')
 
     preference.setReduced(false)
+    expect(root.dataset.motion).toBe('running')
+    expect(root.dataset.reducedMotion).toBe('false')
+    act(() => toggle.click())
+    expect(root.dataset.motion).toBe('paused')
     preference.setReduced(true)
-    expect(root.dataset.motion).toBe('reduced')
-    expect(greet.classList.contains('is-greeting')).toBe(false)
+    expect(root.dataset.motion).toBe('paused')
+    expect(root.dataset.reducedMotion).toBe('true')
+    act(() => toggle.click())
+    expect(root.dataset.motion).toBe('running')
   })
 
   it('starts the greeting when a cached PNG is already decoded on mount', () => {

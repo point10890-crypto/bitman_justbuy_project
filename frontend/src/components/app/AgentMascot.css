@@ -62,11 +62,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  width: 62px;
+  width: 32px;
   height: 32px;
-  font-size: 11px;
-  font-weight: 600;
   border: 1px solid #5a523a;
   border-radius: 999px;
   background: #1d211de6;
@@ -76,7 +73,7 @@
 .bitman-mascot .bitman-mascot-motion-toggle::after {
   content: '';
   position: absolute;
-  inset: -6px 0;
+  inset: -6px;
   border-radius: inherit;
 }
 
@@ -86,15 +83,22 @@
   outline-offset: 4px;
 }
 
+.bitman-mascot[data-reduced-motion='true'] .bitman-mascot-float {
+  animation-name: bitman-mascot-floating-gentle;
+  animation-duration: 4.8s;
+}
+
+.bitman-mascot[data-reduced-motion='true'] .bitman-mascot-greet.is-greeting {
+  animation-name: bitman-mascot-greeting-gentle;
+}
+
 .bitman-mascot[data-motion='paused'] .bitman-mascot-float,
 .bitman-mascot[data-motion='paused'] .bitman-mascot-greet {
   animation-play-state: paused;
 }
 
 .bitman-mascot[data-motion='loading'] .bitman-mascot-float,
-.bitman-mascot[data-motion='loading'] .bitman-mascot-greet,
-.bitman-mascot[data-motion='reduced'] .bitman-mascot-float,
-.bitman-mascot[data-motion='reduced'] .bitman-mascot-greet {
+.bitman-mascot[data-motion='loading'] .bitman-mascot-greet {
   animation: none;
   transform: none;
 }
@@ -106,13 +110,16 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .bitman-mascot:not([data-manual-motion='true']) .bitman-mascot-float,
-  .bitman-mascot:not([data-manual-motion='true']) .bitman-mascot-greet,
-  .bitman-mascot:not([data-manual-motion='true']) .bitman-mascot-greet.is-greeting {
-    animation: none;
-    transform: none;
-  }
+@keyframes bitman-mascot-floating-gentle {
+  0%, 100% { transform: translateY(0) rotate(-0.3deg); }
+  50% { transform: translateY(-3px) rotate(0.3deg); }
+}
+
+@keyframes bitman-mascot-greeting-gentle {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  22% { transform: rotate(-1deg) scale(1.01); }
+  50% { transform: rotate(1deg) scale(1.01); }
+  75% { transform: rotate(-0.5deg) scale(1.005); }
 }
 
 @keyframes bitman-mascot-floating {
