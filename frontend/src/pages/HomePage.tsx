@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAnalysis, type AnalysisResult } from '../hooks/useAnalysis'
 import { getStoredToken, useAuth } from '../contexts/AuthContext'
 import { useMainConditions } from '../hooks/useMainConditions'
 import { fetchConditionSection, type ConditionSectionResponse } from '../api/conditionApi'
+import './HomePage.css'
 
 type Section = {
   id: string
@@ -239,14 +240,14 @@ export default function HomePage() {
   const loadConditionEndpoint = async (section: Section) => {
     if (section.id === 'alerts') return
     setEndpointLoading(section.id)
-    setEndpointStatus(prev => ({ ...prev, [section.id]: '조건검색 엔드포인트 호출 중' }))
+    setEndpointStatus(prev => ({ ...prev, [section.id]: '최신 후보 불러오는 중' }))
 
     try {
       const latest = await fetchConditionSection(section.id, getStoredToken() || undefined)
       setEndpointRows(prev => ({ ...prev, [section.id]: rowsFromCondition(latest, section.rows) }))
-      setEndpointStatus(prev => ({ ...prev, [section.id]: latest.signals?.length ? `${latest.title} 엔드포인트 반영` : `${latest.title} 결과 없음` }))
+      setEndpointStatus(prev => ({ ...prev, [section.id]: latest.signals?.length ? `${latest.title} 최신 후보 반영` : `${latest.title} 결과 없음` }))
     } catch (err) {
-      setEndpointStatus(prev => ({ ...prev, [section.id]: err instanceof Error ? err.message : '엔드포인트 호출 실패' }))
+      setEndpointStatus(prev => ({ ...prev, [section.id]: err instanceof Error ? err.message : '최신 후보를 불러오지 못했습니다' }))
     }
     setEndpointLoading(null)
   }
@@ -316,7 +317,7 @@ export default function HomePage() {
     return {
       ...section,
       rows: endpointRows[section.id] || rowsFromCondition(apiSection, section.rows),
-      sourceStatus: endpointLoading === section.id ? '조건검색 엔드포인트 호출 중' : endpointStatus[section.id] || sectionSourceStatus(apiSection),
+      sourceStatus: endpointLoading === section.id ? '최신 후보 불러오는 중' : endpointStatus[section.id] || sectionSourceStatus(apiSection),
       asOf: apiSection?.asOf,
       asOfLabel: formatKstTime(apiSection?.asOf),
       warning: sectionWarning(apiSection),
@@ -324,15 +325,35 @@ export default function HomePage() {
   })
 
   return (
-    <main className="search-home-page">
-      <form className="maker-search-box" onSubmit={handleSearch}>
-        <input
-          value={query}
-          onChange={event => setQuery(event.target.value)}
-          placeholder="종목명 또는 조건을 입력하세요"
-        />
-        <button type="submit">분석</button>
-      </form>
+    <main className="search-home-page agent-home">
+      <section className="agent-welcome" aria-labelledby="agent-welcome-title">
+        <div className="agent-welcome-copy">
+          <span className="agent-identity"><span aria-hidden="true">B</span> 나의 AI 분석 파트너</span>
+          <h1 id="agent-welcome-title">오늘의 종목,<br />BitMan과 함께.</h1>
+          <p>단타부터 종가매매까지, 조건에 맞는 종목을 한곳에서.</p>
+          <form className="maker-search-box" onSubmit={handleSearch} role="search">
+            <span className="agent-search-icon" aria-hidden="true" />
+            <input
+              aria-label="분석할 종목명 또는 조건"
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="종목·조건 검색"
+            />
+            <button type="submit">분석하기</button>
+          </form>
+        </div>
+        <div className="agent-welcome-art">
+          <div className="agent-orbit" aria-hidden="true" />
+          <img src="/images/bitman-agent-v1.png" width="1280" height="1280" fetchPriority="high" alt="BitMan 로고를 달고 인사하는 금색 AI 로봇" />
+          <span className="agent-greeting">안녕하세요, BitMan입니다.</span>
+        </div>
+      </section>
+
+      <nav className="agent-mode-nav" aria-label="조건검색 바로가기">
+        {sections.map(section => (
+          <Link key={section.id} className={`agent-card-${section.icon}`} to={`/#${section.id}`}><span className="agent-mode-dot" aria-hidden="true" /><span>{section.title}</span></Link>
+        ))}
+      </nav>
 
       {conditionsError && (
         <div className="condition-feed-status">
@@ -349,12 +370,17 @@ export default function HomePage() {
         </div>
       )}
 
+      <div className="agent-section-heading">
+        <div><h2>조건별 관심 종목</h2><p>카드를 선택해 후보를 확인하고 상세 분석을 받아보세요.</p></div>
+        <span>BitMan 조건검색</span>
+      </div>
+      <div className="agent-condition-grid">
       {displayedSections.map(section => (
-        <section id={section.id} className="search-rank-card" key={section.id}>
+        <section id={section.id} className={`search-rank-card agent-card-${section.icon}`} key={section.id} aria-labelledby={`${section.id}-title`}>
           <div className="rank-card-title-row">
             <CategoryIcon type={section.icon} />
             <div className="rank-title-copy">
-              <h2>{section.title}</h2>
+              <h2 id={`${section.id}-title`}>{section.title}</h2>
               <span>
                 {conditionsLoading ? '조건검색 갱신 중' : section.sourceStatus}
                 {!conditionsLoading && section.asOfLabel ? ` · ${section.asOfLabel} 기준` : ''}
@@ -364,6 +390,7 @@ export default function HomePage() {
             <button
               className="top3-badge"
               type="button"
+              aria-label={section.id === 'alerts' ? '종목 알림이 보기' : `${section.title} 상위 후보 새로고침`}
               onClick={() => section.id === 'alerts' ? document.getElementById('alerts')?.scrollIntoView({ behavior: 'smooth' }) : loadConditionEndpoint(section)}
             >
               TOP3
@@ -413,7 +440,7 @@ export default function HomePage() {
               disabled={endpointLoading === section.id}
               onClick={() => loadConditionEndpoint(section)}
             >
-              {endpointLoading === section.id ? '조건검색 엔드포인트 호출 중...' : `${section.title} 조건검색 엔드포인트 불러오기`}
+              {endpointLoading === section.id ? '최신 후보 불러오는 중...' : `${section.title} 최신 후보 새로고침`}
             </button>
           )}
 
@@ -438,6 +465,7 @@ export default function HomePage() {
           )}
         </section>
       ))}
+      </div>
 
       <div className="home-action-grid">
         <button type="button" onClick={runUsageEndpoint}>앱 이용방법</button>

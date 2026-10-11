@@ -1,14 +1,9 @@
 import { Navigate, useNavigate } from 'react-router-dom'
 import { PWAInstallPrompt } from '../components/app/PWAInstallPrompt'
 import { useAuth } from '../contexts/AuthContext'
+import './LandingPage.css'
 
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
-
-const previewRows = [
-  { label: '단타', name: '로XXX', price: '3XXX', high: '3XXX', rate: '+10.09%' },
-  { label: '스윙', name: '현XXX', price: '31,800', high: '35,000', rate: '관찰' },
-  { label: '주도주', name: '한XXX', price: '980억', high: '+8.7%', rate: '중' },
-]
 
 const featureCards = [
   { title: '단타', desc: '장중 거래대금과 체결 흐름을 기준으로 빠른 후보를 포착합니다.' },
@@ -34,7 +29,7 @@ export default function LandingPage() {
   if (user) return <Navigate to="/" replace />
 
   return (
-    <main className="bm-landing with-public-contact">
+    <main className="bm-landing agent-landing with-public-contact">
       <nav className="bm-landing-nav">
         <button className="bitman-logo-lockup" type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
           <span className="bitman-logo-mark">
@@ -60,33 +55,18 @@ export default function LandingPage() {
       </nav>
 
       <section className="bm-hero">
-        <div className="bm-hero-media" aria-hidden="true">
-          <div className="bm-phone-preview">
-            <header>
-              <span className="bitman-logo-mark bm-phone-logo">B<i /><em /></span>
-              <strong>오늘 뭐사?</strong>
-              <small>2026.05.16</small>
-            </header>
-            <div className="bm-phone-banner">실시간이슈 바로확인</div>
-            {previewRows.map(row => (
-              <div className="bm-preview-card" key={row.label}>
-                <div>
-                  <span className="bm-preview-icon" />
-                  <strong>{row.label}</strong>
-                  <b>TOP3</b>
-                </div>
-                <p><span>종목명</span><span>포착가</span><span>최고가</span><span>상태</span></p>
-                <p><span>{row.name}</span><span>{row.price}</span><span>{row.high}</span><span>{row.rate}</span></p>
-              </div>
-            ))}
+        <div className="bm-hero-media">
+          <div className="agent-landing-mascot">
+            <img src="/images/bitman-agent-v1.png" width="1280" height="1280" fetchPriority="high" alt="BitMan 로고를 달고 인사하는 금색 AI 로봇" />
+            <span>나의 AI 분석 파트너, BitMan</span>
           </div>
         </div>
 
         <div className="bm-hero-copy">
-          <p className="bm-eyebrow">월 구독형 AI 조건검색식 서비스</p>
-          <h1>BitMan 오늘 뭐사? AI 조건검색기</h1>
+          <p className="bm-eyebrow">나의 AI 분석 파트너</p>
+          <h1>오늘의 종목,<br />BitMan과 함께.</h1>
           <p className="bm-hero-desc">
-            단타, 스윙, 주도주, 테마, 종목 알림이를 한 화면에서 확인하는 모바일 전용 조건검색 앱입니다.
+            단타, 스윙, 주도주, 테마, 종목 알림이를 한 화면에서 확인하세요.
             KIS 조건검색과 DART 공시, AI 요약을 연결해 오늘 볼 종목을 빠르게 정리합니다.
           </p>
           <div className="bm-hero-actions">

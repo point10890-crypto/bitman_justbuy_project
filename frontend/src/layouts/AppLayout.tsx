@@ -194,7 +194,7 @@ export default function AppLayout() {
   }
 
   return (
-    <div className={`search-app-shell${isAdminPage ? ' admin-mode-shell' : ''}`}>
+    <div className={`search-app-shell${isAdminPage ? ' admin-mode-shell' : ''}${location.pathname === '/' ? ' agent-home-shell' : ''}`}>
       <header className="search-app-header">
         <div className="search-header-top">
           <button className="bitman-logo-lockup app-logo-lockup" type="button" onClick={() => navigate('/')}>
