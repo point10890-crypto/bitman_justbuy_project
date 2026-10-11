@@ -18,7 +18,7 @@ export interface MemberInput {
 }
 
 /** 오늘(KST) 날짜 키. 백엔드가 KST 기준으로 만료를 판정하므로 맞춘다. */
-function todayKst(): string {
+export function todayKst(): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Seoul',
     year: 'numeric',

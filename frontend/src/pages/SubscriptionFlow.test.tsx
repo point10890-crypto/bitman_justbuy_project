@@ -2,11 +2,12 @@
 import { createContext, useContext, useState, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import type { User } from '../contexts/AuthContext'
 import { fetchSubscriptionPlans, type SubscriptionPlanDto } from '../api/authApi'
 import { isSubscriptionExpired } from '../lib/memberTier'
 import PublicOnlyRoute from '../components/guards/PublicOnlyRoute'
+import SubscribedRoute from '../components/guards/SubscribedRoute'
 import SubscribePage from './SubscribePage'
 import LoginPage from './LoginPage'
 import RegisterPage from './RegisterPage'
@@ -63,6 +64,12 @@ function expiredUser(plan: PlanId = 'SIX_MONTHS', overrides: Partial<FixtureUser
     depositorName: '샘플입금자', ...overrides,
   })
 }
+function activeMonthlyUser(overrides: Partial<FixtureUser> = {}): FixtureUser {
+  return freeUser({
+    subscription: 'pro', subscriptionPlan: 'MONTHLY', subscriptionEndDate: '2099-12-31',
+    subscriptionApprovedAt: '2026-01-01', depositorName: '샘플입금자', ...overrides,
+  })
+}
 function FixtureAuthProvider({ initialUser, children }: { initialUser: FixtureUser | null; children: ReactNode }) {
   const [user, setUser] = useState(initialUser)
   const login: FixtureAuth['login'] = async (...args) => {
@@ -95,7 +102,11 @@ function FixtureAuthProvider({ initialUser, children }: { initialUser: FixtureUs
 }
 function LocationProbe() {
   const location = useLocation()
-  return <output data-testid="flow-route">{location.pathname}{location.search}</output>
+  return <>
+    <output data-testid="flow-route">{location.pathname}{location.search}</output>
+    <Link to="/supply">샘플 유료 수급 확인</Link>
+    <Link to="/my">샘플 계정 페이지</Link>
+  </>
 }
 function renderFlow(path: string, user: FixtureUser | null = null, renewal = false) {
   const url = new URL(path, 'https://fixture.invalid')
@@ -109,6 +120,7 @@ function renderFlow(path: string, user: FixtureUser | null = null, renewal = fal
           <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
           <Route path="/" element={<div>샘플 앱 홈</div>} />
           <Route path="/my" element={<MyPage />} />
+          <Route path="/supply" element={<SubscribedRoute><div>샘플 유료 수급 화면</div></SubscribedRoute>} />
         </Routes>
       </MemoryRouter>
     </FixtureAuthProvider>,
@@ -129,7 +141,7 @@ async function chooseSixMonths() {
 }
 async function submitSubscription() {
   fireEvent.change(screen.getByLabelText('입금자명'), { target: { value: '샘플입금자' } })
-  const name = /^(?:재)?구독 신청하기$/
+  const name = /^(?:(?:재)?구독 신청하기|6개월 업그레이드 신청하기)$/
   await waitFor(() => expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(false))
   fireEvent.click(screen.getByRole('button', { name }))
 }
@@ -281,7 +293,7 @@ describe('subscription selection through public auth and renewal pages', () => {
     renderFlow('/my', freeUser({ subscription: 'pro', subscriptionRenewalPending: true, subscriptionPlan: 'MONTHLY', requestedSubscriptionPlan: 'SIX_MONTHS', depositorName: '샘플입금자', subscriptionEndDate: '2099-12-31', subscriptionApprovedAt: '2026-01-01' }))
 
     expectSixMonthPaymentDetails()
-    expect(screen.getByText('2099-12-31')).toBeTruthy()
+    expect(screen.getAllByText('2099-12-31').length).toBeGreaterThan(0)
     expect(screen.getAllByText('연장 승인대기').length).toBeGreaterThan(0)
     expect(applyMock).not.toHaveBeenCalled()
   })
@@ -393,6 +405,101 @@ describe('subscription selection through public auth and renewal pages', () => {
     await waitFor(() => expect(screen.getByTestId('flow-route').textContent).toBe('/'))
     expect(screen.getByText('샘플 앱 홈')).toBeTruthy()
     expect(refreshMock).toHaveBeenCalledOnce()
+    expect(applyMock).not.toHaveBeenCalled()
+  })
+
+  it('opens the dedicated six-month upgrade from an active monthly account with its current expiry preserved', async () => {
+    renderFlow('/my', activeMonthlyUser())
+    fireEvent.click(screen.getByRole('button', { name: '6개월 이용권으로 업그레이드' }))
+
+    await waitFor(() => expect(screen.getByTestId('flow-route').textContent).toBe('/subscribe?plan=SIX_MONTHS&renewal=1'))
+    expect(screen.getByRole('heading', { name: '6개월 이용권 업그레이드', level: 1 })).toBeTruthy()
+    const summary = screen.getByRole('region', { name: '6개월 업그레이드 안내' })
+    for (const value of ['1개월', '2099-12-31', '2100-06-30', '150,000원']) expect(summary.textContent).toContain(value)
+    expect((screen.getByLabelText('입금자명') as HTMLInputElement).value).toBe('샘플입금자')
+    expect(screen.getByText(/국민은행/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: '6개월 업그레이드 신청하기' })).toBeTruthy()
+    expect(applyMock).not.toHaveBeenCalled()
+  })
+
+  it('restores an explicit upgrade URL on entry and switches back to ordinary monthly renewal when monthly is selected', async () => {
+    renderFlow('/subscribe?plan=SIX_MONTHS&renewal=1', activeMonthlyUser())
+
+    expect(screen.getByRole('heading', { name: '6개월 이용권 업그레이드', level: 1 })).toBeTruthy()
+    expect((screen.getByRole('radio', { name: /6개월/ }) as HTMLInputElement).checked).toBe(true)
+    expect(selectedPrice()).toContain('150,000원')
+    fireEvent.click(screen.getByRole('radio', { name: /1개월/ }))
+
+    await waitFor(() => expect(screen.getByTestId('flow-route').textContent).toBe('/subscribe?plan=MONTHLY&renewal=1'))
+    expect(screen.getByRole('heading', { name: '이용권 연장', level: 1 })).toBeTruthy()
+    expect(screen.queryByRole('region', { name: '6개월 업그레이드 안내' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '6개월 업그레이드 신청하기' })).toBeNull()
+    expect(selectedPrice()).toContain('30,000원')
+    await submitSubscription()
+    await waitFor(() => expect(applyMock).toHaveBeenCalledExactlyOnceWith('샘플입금자', 'MONTHLY'))
+  })
+
+  it('submits six-month upgrade once, retains monthly access while pending, and displays the approved six-month expiry after refresh', async () => {
+    renderFlow('/subscribe?plan=SIX_MONTHS&renewal=1', activeMonthlyUser())
+    expect(screen.getByRole('button', { name: '6개월 업그레이드 신청하기' })).toBeTruthy()
+    await submitSubscription()
+
+    await waitFor(() => expect(screen.getByTestId('flow-route').textContent).toBe('/my'))
+    expect(applyMock).toHaveBeenCalledExactlyOnceWith('샘플입금자', 'SIX_MONTHS')
+    expect(screen.getByRole('heading', { name: '6개월 업그레이드 승인 대기' })).toBeTruthy()
+    expectSixMonthPaymentDetails()
+    expect(screen.getAllByText('2099-12-31').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: '6개월 이용권으로 업그레이드' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '6개월 업그레이드 신청하기' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('link', { name: '샘플 유료 수급 확인' }))
+    await waitFor(() => expect(screen.getByText('샘플 유료 수급 화면')).toBeTruthy())
+    expect(screen.getByTestId('flow-route').textContent).toBe('/supply')
+    fireEvent.click(screen.getByRole('link', { name: '샘플 계정 페이지' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '6개월 업그레이드 승인 대기' })).toBeTruthy())
+
+    refreshMock.mockResolvedValue(activeMonthlyUser({ subscriptionPlan: 'SIX_MONTHS', subscriptionEndDate: '2100-06-30', requestedSubscriptionPlan: undefined, subscriptionRenewalPending: false }))
+    fireEvent.click(screen.getByRole('button', { name: '승인 상태 새로고침' }))
+
+    await waitFor(() => expect(screen.queryByRole('region', { name: '신청 및 입금 정보' })).toBeNull())
+    expect(screen.getByText('2100-06-30')).toBeTruthy()
+    expect(screen.getByText('6개월')).toBeTruthy()
+    expect(screen.getAllByText('구독중').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('heading', { name: '6개월 업그레이드 승인 대기' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '6개월 이용권으로 업그레이드' })).toBeNull()
+    expect(screen.getByTestId('flow-route').textContent).toBe('/my')
+    expect(refreshMock).toHaveBeenCalledOnce()
+    expect(applyMock).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a six-month request made before monthly expiry as an upgrade but blocks paid access after expiry', async () => {
+    const pendingUser = {
+      ...expiredUser('MONTHLY', { subscription: 'pending', requestedSubscriptionPlan: 'SIX_MONTHS' }),
+      subscriptionRequestedAt: '1999-12-31T00:00:00Z',
+    }
+    renderFlow('/supply', pendingUser)
+
+    await waitFor(() => expect(screen.getByTestId('flow-route').textContent).toMatch(/^\/subscribe(?:\?|$)/))
+    expect(screen.queryByText('샘플 유료 수급 화면')).toBeNull()
+    expect(screen.getByRole('heading', { name: '6개월 업그레이드 승인 대기 중', level: 1 })).toBeTruthy()
+    expectSixMonthPaymentDetails()
+    expect(screen.queryByRole('button', { name: '6개월 업그레이드 신청하기' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '6개월 이용권으로 업그레이드' })).toBeNull()
+    expect(applyMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['an existing six-month member', activeMonthlyUser({ subscriptionPlan: 'SIX_MONTHS' })],
+    ['an administrator', activeMonthlyUser({ role: 'ADMIN' })],
+    ['an unlimited member', activeMonthlyUser({ subscriptionEndDate: undefined })],
+    ['an expired monthly member', expiredUser('MONTHLY')],
+    ['a member awaiting renewal approval', activeMonthlyUser({ subscriptionRenewalPending: true, requestedSubscriptionPlan: 'SIX_MONTHS' })],
+    ['a pending member without current access', expiredUser('MONTHLY', { subscription: 'pending', requestedSubscriptionPlan: 'SIX_MONTHS' })],
+  ] as const)('does not offer another six-month upgrade to %s', (_label, user) => {
+    renderFlow('/my', user)
+
+    expect(screen.queryByRole('button', { name: '6개월 이용권으로 업그레이드' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '6개월 업그레이드 신청하기' })).toBeNull()
     expect(applyMock).not.toHaveBeenCalled()
   })
 })

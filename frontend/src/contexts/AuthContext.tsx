@@ -18,6 +18,7 @@ export interface User {
   subscription: 'free' | 'pending' | 'pro'
   subscriptionEndDate?: string
   subscriptionApprovedAt?: string
+  subscriptionRequestedAt?: string
   subscriptionExpired?: boolean
   subscriptionRenewalPending?: boolean
   subscriptionPlan?: SubscriptionPlanId
@@ -66,6 +67,7 @@ function dtoToUser(dto: UserDto): User {
     subscription: tier === 'ACTIVE' ? 'pro' : isExpired ? 'free' : rawSubscription,
     subscriptionEndDate: dto.subscriptionEndDate ?? undefined,
     subscriptionApprovedAt: dto.subscriptionApprovedAt ?? undefined,
+    subscriptionRequestedAt: dto.subscriptionRequestedAt ?? undefined,
     subscriptionExpired: isExpired,
     subscriptionRenewalPending: isPendingRenewal,
     subscriptionPlan: dto.subscriptionPlan ?? undefined,
@@ -119,12 +121,13 @@ function getStoredUser(): User | null {
     // 캐시된 사용자도 같은 판정을 다시 통과시킨다. 날짜가 넘어간 뒤 앱을 열면
     // 저장 시점의 티어가 더 이상 맞지 않는다.
     const user = parsed as User
-    const tier = memberTierOf(user)
+    const rawSubscription = user.subscriptionRenewalPending ? 'pending' : user.subscription
+    const tier = memberTierOf({ ...user, subscription: rawSubscription })
     return {
       ...user,
-      subscription: tier === 'ACTIVE' ? 'pro' : tier === 'EXPIRED' ? 'free' : user.subscription,
+      subscription: tier === 'ACTIVE' ? 'pro' : tier === 'EXPIRED' ? 'free' : rawSubscription,
       subscriptionExpired: tier === 'EXPIRED',
-      subscriptionRenewalPending: tier === 'ACTIVE' && user.subscription === 'pending',
+      subscriptionRenewalPending: tier === 'ACTIVE' && rawSubscription === 'pending',
     }
   } catch {
     return null

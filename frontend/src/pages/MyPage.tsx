@@ -7,6 +7,8 @@ import { getSubscriptionPlan, subscribePath } from '../lib/subscriptionPlans'
 import { SubscriptionPaymentDetails } from '../components/app/SubscriptionPaymentDetails'
 import { SubscriptionExpiredNotice } from '../components/app/SubscriptionExpiredNotice'
 import { memberTierOf } from '../lib/memberTier'
+import { canUpgradeToSixMonths, isSixMonthUpgradePending } from '../lib/subscriptionUpgrade'
+import { SubscriptionUpgradeDetails } from '../components/app/SubscriptionUpgradeDetails'
 
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
 
@@ -58,6 +60,8 @@ export default function MyPage() {
   const renewal = expired || (memberTierOf(user) === 'ACTIVE' && !pendingPlan)
   const hasPlan = user.subscription !== 'free' || user.subscriptionApprovedAt || user.subscriptionEndDate
   const unlimited = user.role === 'ADMIN' || (user.subscription === 'pro' && !user.subscriptionEndDate)
+  const canUpgrade = canUpgradeToSixMonths(user)
+  const upgradePending = isSixMonthUpgradePending(user)
 
   const handleProfile = async (event: FormEvent) => {
     event.preventDefault()
@@ -139,6 +143,7 @@ export default function MyPage() {
           <p>이용권 플랜, 승인 상태와 만료일을 확인합니다.</p>
         </div>
         {expired && <SubscriptionExpiredNotice plan={user.subscriptionPlan} endDate={user.subscriptionEndDate} />}
+        {upgradePending && <SubscriptionUpgradeDetails endDate={user.subscriptionEndDate} pending />}
         {pendingPlan && !unlimited && (
           <SubscriptionPaymentDetails plan={user.requestedSubscriptionPlan} depositorName={user.depositorName} />
         )}
@@ -151,8 +156,12 @@ export default function MyPage() {
             <div><span>플랜 금액</span><strong>{hasPlan && !unlimited ? `${currentPlan.price.toLocaleString('ko-KR')}원` : '-'}</strong></div>
           </>}
         </div>
+        {canUpgrade && <div className="subscription-upgrade-offer">
+          <SubscriptionUpgradeDetails endDate={user.subscriptionEndDate} />
+          <button className="my-primary-button" type="button" onClick={() => navigate(subscribePath('SIX_MONTHS', true))}>6개월 이용권으로 업그레이드</button>
+        </div>}
         <button
-          className="my-primary-button"
+          className={`my-primary-button${canUpgrade ? ' subscription-manage-button' : ''}`}
           type="button"
           onClick={() => pendingPlan ? refreshUser() : unlimited ? navigate('/') : navigate(subscribePath(currentPlan.id, renewal), {
             state: {

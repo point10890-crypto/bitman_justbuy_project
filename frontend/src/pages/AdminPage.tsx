@@ -2,6 +2,8 @@ import { Children, cloneElement, isValidElement, useEffect, useMemo, useState, t
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getStoredToken, useAuth } from '../contexts/AuthContext'
 import { getSubscriptionPlan } from '../lib/subscriptionPlans'
+import { isSixMonthUpgradePending, subscriptionUpgradeEndDate } from '../lib/subscriptionUpgrade'
+import { isSubscriptionExpired } from '../lib/memberTier'
 import {
   approveSubscription,
   adminResetPassword,
@@ -50,6 +52,22 @@ function subscriptionPlanSummary(user: UserDto, pending = false) {
   if (!pending && user.subscription === 'FREE' && !user.subscriptionApprovedAt && !user.subscriptionEndDate) return '미구독'
   const plan = getSubscriptionPlan(pending ? user.requestedSubscriptionPlan : user.subscriptionPlan)
   return `${plan.label} · ${plan.price.toLocaleString('ko-KR')}원`
+}
+
+function PendingSubscriptionPlanDetails({ user }: { user: UserDto }) {
+  const summary = subscriptionPlanSummary(user, true)
+  if (!isSixMonthUpgradePending(user)) return <span>{summary}</span>
+  const expired = isSubscriptionExpired(user.subscriptionEndDate)
+
+  return (
+    <div>
+      <strong>1개월 → 6개월 업그레이드</strong><br />
+      <span>{summary} · 일시 납부</span><br />
+      <small>{expired ? '기존' : '현재'} 만료일 {formatDate(user.subscriptionEndDate)}{expired ? ' · 이용 기간 종료' : '까지 이용 유지'}</small><br />
+      <small>{expired ? '승인일부터 6개월 이용' : '승인 시 기존 만료일에 6개월 추가'}</small><br />
+      <small>오늘 승인 시 만료일 {formatDate(subscriptionUpgradeEndDate(user.subscriptionEndDate))}</small>
+    </div>
+  )
 }
 
 const productMenu: AdminMenuEntry[] = [
@@ -760,7 +778,7 @@ export default function AdminPage() {
                     <td>{user.name}</td>
                     <td>{user.email}</td>
                     <td>{user.depositorName || '-'}</td>
-                    <td>{subscriptionPlanSummary(user, true)}</td>
+                    <td><PendingSubscriptionPlanDetails user={user} /></td>
                     <td>{formatDateTime(user.subscriptionRequestedAt ?? user.createdAt)}</td>
                     <td><StatusBadge status={user.subscription} /></td>
                     <td className="admin-row-actions">
@@ -820,7 +838,7 @@ export default function AdminPage() {
                 <tr key={user.id}>
                   <td>{user.name}</td>
                   <td>{user.depositorName || '-'}</td>
-                  <td>{subscriptionPlanSummary(user, user.subscription === 'PENDING')}</td>
+                  <td>{user.subscription === 'PENDING' ? <PendingSubscriptionPlanDetails user={user} /> : subscriptionPlanSummary(user)}</td>
                   <td>{formatDate(user.subscriptionApprovedAt)}</td>
                   <td>{formatDate(user.subscriptionEndDate)}</td>
                   <td><StatusBadge status={user.subscription} /></td>
