@@ -67,6 +67,10 @@ Interfaces: `void watch(List<String> codes)`, `Map<String,Object> facts(String c
 
 - [x] Focused tests followed by full backend suite and frontend build.
 - [x] Review every category's actual consumer, not just class existence.
-- [ ] Commit/push intended files only, deploy to MiniPC, verify matching JAR and health.
-- [ ] Verify configured rights/HTS presence without exposing values and perform permitted bounded live checks.
-- [ ] Verify existing cron and actual acknowledged delivery evidence, preserving unconfirmed or future scheduled outcomes as pending.
+- [x] Commit/push intended files only, deploy to MiniPC, verify matching JAR and health.
+- [x] Verify configured rights/HTS presence without exposing values and perform permitted bounded live checks.
+- [x] Verify existing cron and actual acknowledged delivery evidence, preserving unconfirmed or future scheduled outcomes as pending.
+
+Rights remain unconfirmed and HTS ID is absent. New authenticated sources remain disabled; this is an activation prerequisite, not a successful live-source verification. Existing authenticated website direct quote and unavailable advanced-condition behavior were verified at 08:50–08:51.
+
+08:50 cron started and completed at 08:52. All four modes had 2/2 successful agents; CATALYST_BURST published one pick with two explicit Telegram acknowledgements and zero delivery failures. Other modes produced no new publication and preserved prior cache; EMPTY is inferred from the execution branch, not directly proven by saved metadata. Future slots remain unverified.
