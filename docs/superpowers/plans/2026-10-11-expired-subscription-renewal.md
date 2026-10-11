@@ -28,7 +28,7 @@
 - [x] Add backend regression coverage for expired FREE/PRO six-month reapplication, duplicate-request immutability and approval from KST today.
 - [x] Run all frontend/backend tests and production builds, review the final diff and bump the PWA cache.
 - [x] Deploy MiniPC and both Cloudflare Pages branches; verify service health, exact URLs, assets and worker version.
-- [ ] Commit/push the final generated assets and deployment evidence; verify remote main matches HEAD.
+- [x] Commit/push the final generated assets and deployment evidence; verify remote main matches HEAD.
 
 ## Verification limitation
 
@@ -53,3 +53,4 @@ The Windows Computer Use tool stopped this turn because it could not determine t
 - `https://bitman-justbuy.pages.dev/` and `https://production.bitman-justbuy.pages.dev/` both serve the expected JS/CSS and PWA cache version. Their `/subscribe?plan=SIX_MONTHS&renewal=1` URLs resolve to the same current build.
 - Deployed JS contains the re-subscription CTA, pending heading, expiry summary and returning-account login copy. CSS includes the shared expiry notice styles.
 - These deployed checks used HTTP responses; they do not replace the unavailable authenticated real-browser UI check described above.
+- Source and static asset commits were fast-forwarded to main and pushed. `git ls-remote origin refs/heads/main` matched local HEAD; final status contains only the unrelated changes that existed before this task.
