@@ -62,3 +62,6 @@
 - 변경된 계약의 테스트 2개가 기존 구현에서 실패한 뒤 수정본에서 전체 36개가 통과했다. TypeScript/Vite 빌드 성공: JS `index-CVOv63WQ.js`, CSS `index-OQVDe-YQ.css`.
 - 로컬 실제 Home 컴포넌트: 모션 감소 초기 자동 시작, 동적 설정 전환과 정지 유지, 일반 모션 시작을 확인했다. 320px Home에서 아무 버튼도 누르지 않고 4.13초·160개 화면 샘플의 transform 변화와 수평 넘침 없음, 버튼 오른쪽 299.8px를 확인했다. Landing 390px도 자동 재생과 작은 인사 종료가 정상이다.
 - 검증용 HTML/TSX 및 숨김 Vite 서버는 정리했다. 운영 인증·기기 설정·저장소 및 캐릭터 PNG는 변경하지 않았다.
+- Cloudflare Pages main/production 및 MiniPC 배포 완료(14:14 KST). 두 Pages의 JS/CSS 해시와 SW r4, Spring 정적 페이지의 동일 해시를 확인했다.
+- 실서비스 IAB와 사용 중인 Chrome 탭에서 `data-motion=running`, 32px 아이콘, 빈 버튼 텍스트와 새 JS 해시를 확인했다. 버튼 조작 없이 3.63초 촬영한 실서비스 화면에서 19개 transform 샘플이 모두 달랐다. GIF: `tmp/bitman-mascot-autoplay.gif`.
+- MiniPC 배포 중 백엔드 244개 테스트를 다시 실행해 통과했다(14:13 KST). DB 백업·운영 설정을 보존했으며 MiniPC 로컬 및 공개 API health는 `status=ok`이다.
