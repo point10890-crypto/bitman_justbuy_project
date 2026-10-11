@@ -21,3 +21,12 @@
 사용자 피드백을 반영한 최종 수정 프롬프트:
 
 > Edit only the chest logo of this exact approved BitMan robot mascot. Replace the single capital B engraved on the center gold chest plate with the precise brand wordmark 'BitMan' (capital B and M, other letters lowercase), as a small horizontally centered, highly legible dark charcoal sans-serif wordmark with subtle engraved depth on the same golden chest plate. Fit the full word in one line naturally without stretching or crowding. Preserve everything else exactly: identical robot silhouette, gold and charcoal materials, face expression, antenna, waving hand, tablet, pose, feet, lighting, image framing, resolution, and genuinely transparent background. Do not add other text, objects, background, or change the robot design.
+
+## 검증 및 배포
+
+- 프론트엔드 테스트 30개 통과, TypeScript/Vite 빌드 성공.
+- 백엔드 41개 테스트 스위트, 244개 테스트 통과(실행: 2026-10-11 13:11 KST).
+- 로컬 브라우저: 320·390·820·821·900·901·1440px 요청 너비에서 수평 넘침 없음. 구독 마스킹, 빈 결과, 검색 분석/닫기, 후보 갱신, 바로가기/활성 메뉴를 확인했다. 로컬 샘플만 사용했으며 실제 LLM은 호출하지 않았다.
+- Cloudflare Pages main/production과 MiniPC Spring 정적 리소스를 같은 빌드로 배포했다. JS `index-CyUOO5Sy.js`, CSS `index-CWOuGEdW.css`, SW `bitman-v20261011-agent-design-r1`.
+- 실서비스 브라우저에서 메인 화면의 실제 종목 행, 캐릭터 이미지, PC 두 열 카드, 공개 소개 화면과 회원가입 이동을 확인했다.
+- MiniPC 로컬 및 공개 API health: `status=ok`. 운영 DB는 배포 전 백업했다.
