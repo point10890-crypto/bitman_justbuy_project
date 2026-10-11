@@ -1,12 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { PWAInstallPrompt } from '../components/app/PWAInstallPrompt'
 import { isSubscriptionExpired, useAuth } from '../contexts/AuthContext'
+import { authPath, formatWon, getSubscriptionPlan, postAuthPath, subscriptionPlanFromSearch } from '../lib/subscriptionPlans'
 
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
 
 export default function RegisterPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { register, user, isLoading } = useAuth()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -17,13 +19,16 @@ export default function RegisterPage() {
   const [agreeRisk, setAgreeRisk] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const params = new URLSearchParams(location.search)
+  const selectedPlan = params.has('plan') ? subscriptionPlanFromSearch(location.search) : undefined
+  const renewal = params.get('renewal') === '1' || !!(location.state as { renewal?: boolean } | null)?.renewal
 
   useEffect(() => {
     if (isLoading || !user) return
 
     const activePro = user.subscription === 'pro' && !isSubscriptionExpired(user.subscriptionEndDate)
-    navigate(user.role === 'ADMIN' || activePro ? '/' : '/subscribe', { replace: true })
-  }, [user, isLoading, navigate])
+    navigate(user.role === 'ADMIN' ? '/' : postAuthPath(location.search, activePro, renewal || !!user.subscriptionExpired), { replace: true })
+  }, [user, isLoading, navigate, location.search, renewal])
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
@@ -53,7 +58,7 @@ export default function RegisterPage() {
     try {
       setLoading(true)
       await register(name.trim(), email.trim().toLowerCase(), password)
-      navigate('/subscribe', { replace: true })
+      navigate(postAuthPath(location.search, false, renewal), { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : '회원가입에 실패했습니다.')
     } finally {
@@ -82,7 +87,7 @@ export default function RegisterPage() {
 
         <div className="auth-title">
           <h1>회원가입</h1>
-          <p>가입 후 월간 이용권을 신청하면 조건검색 TOP3 전체 결과를 볼 수 있습니다.</p>
+          <p>{selectedPlan ? `가입은 무료입니다. 선택한 ${getSubscriptionPlan(selectedPlan).label} 이용권 (${formatWon(getSubscriptionPlan(selectedPlan).price)}) 신청으로 이어집니다.` : '가입은 무료입니다. 이용권을 신청하면 조건검색 TOP3 전체 결과를 볼 수 있습니다.'}</p>
         </div>
 
         {error && <div className="auth-error">{error}</div>}
@@ -118,7 +123,7 @@ export default function RegisterPage() {
         </form>
 
         <p className="auth-link-row">
-          이미 계정이 있나요? <Link to="/login">로그인</Link>
+          이미 계정이 있나요? <Link to={authPath('login', selectedPlan, renewal)}>로그인</Link>
         </p>
         <div className="auth-install-row">
           <PWAInstallPrompt variant="compact" showWhenDismissed label="앱 설치하기" />

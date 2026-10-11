@@ -9,7 +9,6 @@ import MyPage from './pages/MyPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import SubscribePage from './pages/SubscribePage'
-import ProtectedRoute from './components/guards/ProtectedRoute'
 import SubscribedRoute from './components/guards/SubscribedRoute'
 import AdminRoute from './components/guards/AdminRoute'
 import PublicOnlyRoute from './components/guards/PublicOnlyRoute'
@@ -54,10 +53,8 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/register" element={<PublicOnlyRoute><RegisterPage /></PublicOnlyRoute>} />
           <Route path="/login"    element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
 
-          {/* 로그인 필수 (독립 전체화면) */}
-          <Route path="/subscribe" element={
-            <ProtectedRoute><SubscribePage /></ProtectedRoute>
-          } />
+          {/* 플랜 비교는 공개, 신청은 페이지에서 로그인 후 진행 */}
+          <Route path="/subscribe" element={<SubscribePage />} />
 
           {/* 로그인 + 구독 필수 (AppLayout 포함) — ADMIN은 구독 없이 자동 통과 */}
           <Route element={<SubscribedRoute><AppLayout /></SubscribedRoute>}>

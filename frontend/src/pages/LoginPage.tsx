@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { PWAInstallPrompt } from '../components/app/PWAInstallPrompt'
 import { isSubscriptionExpired, useAuth } from '../contexts/AuthContext'
+import { authPath, formatWon, getSubscriptionPlan, postAuthPath, subscriptionPlanFromSearch } from '../lib/subscriptionPlans'
 
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
 
@@ -14,28 +15,27 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(() => localStorage.getItem('bitman_remember') !== '0')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const params = new URLSearchParams(location.search)
+  const selectedPlan = params.has('plan') ? subscriptionPlanFromSearch(location.search) : undefined
+  const renewal = params.get('renewal') === '1' || !!(location.state as { renewal?: boolean } | null)?.renewal
 
   useEffect(() => {
     if (isLoading || !user) return
 
     const activePro = user.subscription === 'pro' && !isSubscriptionExpired(user.subscriptionEndDate)
-    if (user.role === 'ADMIN' || activePro) {
-      navigate('/', { replace: true })
-      return
-    }
-    navigate('/subscribe', {
+    navigate(user.role === 'ADMIN' ? '/' : postAuthPath(location.search, activePro, renewal || !!user.subscriptionExpired), {
       replace: true,
       state: user.subscriptionExpired
-        ? { message: '월간 이용권이 만료되었습니다. 구독을 연장해 주세요.', renewal: true }
+        ? { message: '이용권이 만료되었습니다. 구독을 연장해 주세요.', renewal: true }
         : undefined,
     })
-  }, [user, isLoading, navigate])
+  }, [user, isLoading, navigate, location.search, renewal])
 
   useEffect(() => {
-    const state = location.state as { message?: string } | null
+    const state = location.state as { message?: string; renewal?: boolean } | null
     if (state?.message) {
       setError(state.message)
-      navigate(location.pathname, { replace: true, state: {} })
+      navigate(`${location.pathname}${location.search}`, { replace: true, state: { renewal: state.renewal } })
     }
   }, [location, navigate])
 
@@ -54,18 +54,13 @@ export default function LoginPage() {
     try {
       setLoading(true)
       const loggedInUser = await login(email.trim().toLowerCase(), password, rememberMe)
-      if (loggedInUser.role === 'ADMIN') {
-        navigate('/', { replace: true })
-      } else if (loggedInUser.subscription === 'pro' && !loggedInUser.subscriptionExpired) {
-        navigate('/', { replace: true })
-      } else {
-        navigate('/subscribe', {
+      const activePro = loggedInUser.subscription === 'pro' && !loggedInUser.subscriptionExpired
+      navigate(loggedInUser.role === 'ADMIN' ? '/' : postAuthPath(location.search, activePro, renewal || !!loggedInUser.subscriptionExpired), {
           replace: true,
           state: loggedInUser.subscriptionExpired
-            ? { message: '월간 이용권이 만료되었습니다. 구독을 연장해 주세요.', renewal: true }
+            ? { message: '이용권이 만료되었습니다. 구독을 연장해 주세요.', renewal: true }
             : undefined,
         })
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '로그인에 실패했습니다.')
     } finally {
@@ -86,7 +81,7 @@ export default function LoginPage() {
 
         <div className="auth-title">
           <h1>로그인</h1>
-          <p>구독 중인 계정으로 오늘 포착된 조건검색 결과를 확인하세요.</p>
+          <p>{selectedPlan ? `로그인 후 선택한 ${getSubscriptionPlan(selectedPlan).label} 이용권 (${formatWon(getSubscriptionPlan(selectedPlan).price)}) 신청을 이어갑니다.` : '구독 중인 계정으로 오늘 포착된 조건검색 결과를 확인하세요.'}</p>
         </div>
 
         {error && <div className="auth-error">{error}</div>}
@@ -125,7 +120,7 @@ export default function LoginPage() {
         </form>
 
         <p className="auth-link-row">
-          계정이 없나요? <Link to="/register">회원가입</Link>
+          계정이 없나요? <Link to={authPath('register', selectedPlan, renewal)}>회원가입</Link>
         </p>
         <div className="auth-install-row">
           <PWAInstallPrompt variant="compact" showWhenDismissed label="앱 설치하기" />

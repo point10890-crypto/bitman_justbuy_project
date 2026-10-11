@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { linkTelegram, unlinkTelegram } from '../api/conditionApi'
 import { getStoredToken } from '../contexts/AuthContext'
+import { getSubscriptionPlan, subscribePath } from '../lib/subscriptionPlans'
 
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
 
@@ -18,7 +19,7 @@ function subscriptionActionLabel(subscription: string, expired?: boolean, renewa
   if (renewalPending) return '승인 상태 확인'
   if (subscription === 'pending') return '승인 상태 확인'
   if (subscription === 'pro' && !expired) return '구독 연장 / 관리'
-  return '월간 이용권 신청'
+  return '구독 플랜 선택'
 }
 
 export default function MyPage() {
@@ -40,6 +41,11 @@ export default function MyPage() {
   }, [user?.name])
 
   if (!user) return null
+
+  const pendingPlan = user.subscription === 'pending' || user.subscriptionRenewalPending
+  const currentPlan = getSubscriptionPlan(pendingPlan ? user.requestedSubscriptionPlan : user.subscriptionPlan)
+  const hasPlan = user.subscription !== 'free' || user.subscriptionApprovedAt || user.subscriptionEndDate
+  const unlimited = user.role === 'ADMIN' || (user.subscription === 'pro' && !user.subscriptionEndDate)
 
   const handleProfile = async (event: FormEvent) => {
     event.preventDefault()
@@ -118,30 +124,31 @@ export default function MyPage() {
       <section className="my-card">
         <div className="my-card-head">
           <h2>구독 관리</h2>
-          <p>월간 이용권 상태와 만료일을 확인합니다.</p>
+          <p>이용권 플랜, 승인 상태와 만료일을 확인합니다.</p>
         </div>
         <div className="my-status-grid">
           <div><span>상태</span><strong>{subscriptionLabel(user.subscription, user.subscriptionExpired, user.subscriptionRenewalPending)}</strong></div>
-          <div><span>만료일</span><strong>{user.subscriptionEndDate || '-'}</strong></div>
+          <div><span>만료일</span><strong>{unlimited ? '기간 제한 없음' : user.subscriptionEndDate || '-'}</strong></div>
           <div><span>입금자명</span><strong>{user.depositorName || '-'}</strong></div>
-          <div><span>월 구독료</span><strong>30,000원</strong></div>
+          <div><span>{pendingPlan ? '신청 플랜' : '이용 플랜'}</span><strong>{user.role === 'ADMIN' ? '관리자 이용권' : unlimited ? '무기한 이용권' : hasPlan ? currentPlan.label : '미선택'}</strong></div>
+          <div><span>플랜 금액</span><strong>{hasPlan && !unlimited ? `${currentPlan.price.toLocaleString('ko-KR')}원` : '-'}</strong></div>
         </div>
         <button
           className="my-primary-button"
           type="button"
-          onClick={() => navigate('/subscribe', {
+          onClick={() => unlimited ? navigate('/') : navigate(subscribePath(currentPlan.id, user.subscription === 'pro' && !user.subscriptionExpired && !user.subscriptionRenewalPending), {
             state: {
               renewal: user.subscription === 'pro' && !user.subscriptionExpired && !user.subscriptionRenewalPending,
               renewalPending: user.subscriptionRenewalPending,
               message: user.subscriptionRenewalPending
-                ? '기존 이용권은 유지되고 있으며, 다음 달 연장 승인을 기다리는 중입니다.'
+                ? '기존 이용권은 유지되고 있으며, 선택한 플랜의 연장 승인을 기다리는 중입니다.'
                 : user.subscription === 'pro' && !user.subscriptionExpired
-                ? '기존 이용 기간은 유지하면서 다음 달 이용권을 연장 신청합니다.'
+                ? '기존 이용 기간은 유지하면서 선택한 플랜의 이용권을 연장 신청합니다.'
                 : undefined,
             },
           })}
         >
-          {subscriptionActionLabel(user.subscription, user.subscriptionExpired, user.subscriptionRenewalPending)}
+          {unlimited ? '전체 분석으로 이동' : subscriptionActionLabel(user.subscription, user.subscriptionExpired, user.subscriptionRenewalPending)}
         </button>
       </section>
 

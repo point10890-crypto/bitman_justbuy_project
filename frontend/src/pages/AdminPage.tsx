@@ -1,6 +1,7 @@
 import { Children, cloneElement, isValidElement, useEffect, useMemo, useState, type FormEvent, type ReactElement, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getStoredToken, useAuth } from '../contexts/AuthContext'
+import { getSubscriptionPlan } from '../lib/subscriptionPlans'
 import {
   approveSubscription,
   adminResetPassword,
@@ -42,6 +43,14 @@ type AdminMenuEntry = {
 }
 
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
+
+function subscriptionPlanSummary(user: UserDto, pending = false) {
+  if (user.role === 'ADMIN') return '관리자 이용권'
+  if (!pending && user.subscription === 'PRO' && !user.subscriptionEndDate) return '무기한 이용권'
+  if (!pending && user.subscription === 'FREE' && !user.subscriptionApprovedAt && !user.subscriptionEndDate) return '미구독'
+  const plan = getSubscriptionPlan(pending ? user.requestedSubscriptionPlan : user.subscriptionPlan)
+  return `${plan.label} · ${plan.price.toLocaleString('ko-KR')}원`
+}
 
 const productMenu: AdminMenuEntry[] = [
   { type: 'route', key: 'home', label: '메인', desc: '오늘의 조건검색 홈', icon: '🏠', tone: 'home', route: '/' },
@@ -743,7 +752,7 @@ export default function AdminPage() {
                 최신 신청순 · 승인대기 검색 결과 {filteredPendingUsers.length}명 / 전체 {pendingUsers.length}명
               </div>
               <AdminTable
-                columns={['회원', '이메일', '입금자명', '신청일', '상태', '액션']}
+                columns={['회원', '이메일', '입금자명', '신청 플랜 / 금액', '신청일', '상태', '액션']}
                 emptyText={loading ? '불러오는 중입니다.' : search.trim() ? '검색된 승인 대기 회원이 없습니다.' : '승인 대기 회원이 없습니다.'}
               >
                 {filteredPendingUsers.map(user => (
@@ -751,6 +760,7 @@ export default function AdminPage() {
                     <td>{user.name}</td>
                     <td>{user.email}</td>
                     <td>{user.depositorName || '-'}</td>
+                    <td>{subscriptionPlanSummary(user, true)}</td>
                     <td>{formatDateTime(user.subscriptionRequestedAt ?? user.createdAt)}</td>
                     <td><StatusBadge status={user.subscription} /></td>
                     <td className="admin-row-actions">
@@ -769,7 +779,7 @@ export default function AdminPage() {
                   <tr key={user.id}>
                     <td>{user.name}</td>
                     <td>{user.depositorName || '-'}</td>
-                    <td>{user.subscription}</td>
+                    <td>{subscriptionPlanSummary(user)}</td>
                     <td>{formatDate(user.subscriptionEndDate)}</td>
                     <td><StatusBadge status={user.subscription} /></td>
                     <td className="admin-row-actions">
@@ -810,7 +820,7 @@ export default function AdminPage() {
                 <tr key={user.id}>
                   <td>{user.name}</td>
                   <td>{user.depositorName || '-'}</td>
-                  <td>{user.subscription}</td>
+                  <td>{subscriptionPlanSummary(user, user.subscription === 'PENDING')}</td>
                   <td>{formatDate(user.subscriptionApprovedAt)}</td>
                   <td>{formatDate(user.subscriptionEndDate)}</td>
                   <td><StatusBadge status={user.subscription} /></td>
@@ -820,7 +830,7 @@ export default function AdminPage() {
                     ) : user.subscription === 'PRO' ? (
                       <button disabled={actionId === user.id} onClick={() => runAction(user, 'revoke')}>구독 해제</button>
                     ) : (
-                      <button disabled={actionId === user.id} onClick={() => changeSubscription(user, 'PRO')}>수동 승인</button>
+                      <button disabled={actionId === user.id} onClick={() => user.subscription === 'PENDING' ? runAction(user, 'approve') : changeSubscription(user, 'PRO')}>수동 승인</button>
                     )}
                     <button disabled={actionId === user.id} onClick={() => startEditUser(user)}>수정</button>
                   </td>

@@ -1,0 +1,52 @@
+.subscription-flow-page .subscription-card { width: min(100%, 620px); padding: 32px; }
+.subscription-flow-page .subscription-title h1 { font-size: 30px; font-weight: 800; line-height: 1.25; }
+.subscription-flow-page .subscription-title p { font-weight: 500; }
+.subscription-flow-page .subscription-plan-options { border: 0; padding: 0; margin: 0 0 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-width: 0; }
+.subscription-plan-options legend { color: #c8d0dc; margin-bottom: 10px; font-size: 14px; font-weight: 650; }
+.subscription-flow-page .subscription-plan-option { position: relative; display: flex; flex-direction: column; gap: 9px; padding: 18px 15px; border: 1px solid #3a3f49; border-radius: 12px; background: #14171c; cursor: pointer; min-width: 0; }
+.subscription-flow-page .subscription-plan-option.selected { border-color: #e4c65a; background: #27251a; box-shadow: inset 0 0 0 1px #e4c65a; }
+.subscription-flow-page .subscription-plan-option input { position: absolute; top: 18px; right: 14px; width: 18px; height: 18px; accent-color: #e4c65a; }
+.subscription-flow-page .subscription-plan-period { font-size: 17px; font-weight: 750; padding-right: 24px; color: #f6f3e9; }
+.subscription-flow-page .subscription-plan-option strong { font-size: 26px; font-weight: 800; color: #f6f3e9; letter-spacing: -.03em; margin-top: auto; }
+.subscription-flow-page .subscription-plan-option small { font-size: 12px; color: #b8c0cb; line-height: 1.5; }
+.subscription-flow-page .subscription-plan-saving { align-self: flex-start; color: #e9cf78; font-size: 11px; font-weight: 650; }
+.subscription-flow-page .subscription-price { margin: 0 0 18px; background: #22221a; border-color: #50472b; }
+.subscription-flow-page .subscription-price strong { color: #f3d571; font-size: 27px; font-weight: 800; }
+.subscription-flow-page .subscription-price span { font-weight: 650; }
+.subscription-flow-page .subscription-flow-steps { list-style: none; padding: 0; margin: 24px 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.subscription-flow-page .subscription-flow-steps li { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #9aa6b8; }
+.subscription-flow-page .subscription-flow-steps strong { width: 24px; height: 24px; display: grid; place-items: center; flex-shrink: 0; border-radius: 50%; background: #282e38; color: #c0c9d6; font-size: 12px; }
+.subscription-flow-page .subscription-flow-steps .done strong { background: #35311e; color: #f3d571; }
+.subscription-flow-page .subscription-flow-steps .active { color: #e9dba5; }
+.subscription-flow-page .subscription-flow-steps .active strong { background: #e4c65a; color: #262111; }
+.subscription-flow-page .subscription-features li strong { font-weight: 600; font-size: 13px; }
+.subscription-flow-page .subscription-guest-actions { display: grid; gap: 13px; margin-top: 24px; }
+.subscription-flow-page .subscription-guest-actions p, .subscription-flow-page .subscription-renewal-note { color: #b8c0cb; line-height: 1.65; font-size: 13px; margin: 0; }
+.subscription-flow-page .subscription-renewal-note { margin-bottom: 20px; }
+.subscription-flow-page .auth-submit { display: grid; place-items: center; width: 100%; text-decoration: none; background: #e4c65a; color: #221e0f; font-weight: 750; min-height: 50px; }
+.subscription-flow-page .subscription-login-link { min-height: 44px; display: grid; place-items: center; color: #e5d18b; font-size: 14px; text-decoration: underline; text-underline-offset: 4px; }
+.subscription-flow-page .subscription-contact { margin-top: 16px; background: transparent; color: #c1cad8; border-color: #3c4451; font-weight: 600; }
+.subscription-flow-page .bank-box { background: #20221c; border-color: #49472d; }
+.subscription-flow-page .bank-box strong { color: #ead38a; font-weight: 700; overflow-wrap: anywhere; }
+.subscription-flow-page .bank-box button { flex-shrink: 0; color: #e9dba5; font-weight: 650; }
+.subscription-flow-page .subscription-note { font-weight: 500; }
+.subscription-flow-page .subscription-card.pending h1 { font-size: 27px; font-weight: 800; line-height: 1.3; }
+.subscription-flow-page .subscription-card.pending > p { font-weight: 500; margin-bottom: 18px; }
+.subscription-flow-page .subscription-catalog-error { padding: 14px; border: 1px solid #754941; border-radius: 8px; background: #372623; margin: 14px 0; }
+.subscription-flow-page .subscription-catalog-error p { margin: 0 0 9px; font-size: 13px; color: #f3c8bd; line-height: 1.5; }
+.subscription-flow-page .subscription-catalog-error button { padding: 8px 12px; background: #22252b; border: 1px solid #806056; border-radius: 6px; color: #f3dcd2; }
+.subscription-flow-page :is(button, a, input):focus-visible { outline: 2px solid #e4c65a; outline-offset: 4px; }
+@media (max-width: 480px) {
+  .subscription-flow-page .subscription-card { padding: 23px 18px; }
+  .subscription-flow-page .subscription-plan-options { gap: 9px; }
+  .subscription-flow-page .subscription-plan-option { padding: 15px 12px; gap: 8px; }
+  .subscription-flow-page .subscription-plan-option input { top: 15px; right: 11px; }
+  .subscription-flow-page .subscription-plan-option strong { font-size: 22px; }
+  .subscription-flow-page .subscription-plan-option small { font-size: 11px; }
+  .subscription-flow-page .subscription-plan-period { font-size: 16px; }
+  .subscription-flow-page .subscription-flow-steps { gap: 5px; }
+  .subscription-flow-page .subscription-flow-steps li { font-size: 11px; gap: 5px; }
+  .subscription-flow-page .subscription-price { padding: 14px 12px; }
+  .subscription-flow-page .subscription-price strong { font-size: 24px; }
+  .subscription-flow-page .bank-box { align-items: flex-start; }
+}

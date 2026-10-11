@@ -2,6 +2,7 @@ package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.dto.UserDto;
 import com.bitman.justbuy.entity.Role;
+import com.bitman.justbuy.entity.SubscriptionPlan;
 import com.bitman.justbuy.entity.SubscriptionStatus;
 import com.bitman.justbuy.entity.User;
 import com.bitman.justbuy.repository.UserRepository;
@@ -41,8 +42,17 @@ public class SubscriptionService {
 
     @Transactional
     public UserDto applyForSubscription(UUID userId, String depositorName) {
+        return applyForSubscription(userId, depositorName, SubscriptionPlan.MONTHLY);
+    }
+
+    @Transactional
+    public UserDto applyForSubscription(UUID userId, String depositorName, SubscriptionPlan plan) {
+        SubscriptionPlan requestedPlan = plan == null ? SubscriptionPlan.MONTHLY : plan;
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+        if (user.getRole() == Role.ADMIN) {
+            throw new IllegalStateException("관리자 계정은 항상 PRO이므로 입금 및 연장 신청이 필요하지 않습니다.");
+        }
         SubscriptionStatus previousStatus = user.getSubscription();
         String normalizedDepositorName = depositorName == null ? "" : depositorName.trim();
         if (normalizedDepositorName.isBlank()) {
@@ -53,10 +63,17 @@ public class SubscriptionService {
             throw new IllegalStateException("이미 구독 신청이 접수되었습니다. 관리자 승인을 기다려주세요.");
         }
 
+        // Legacy unlimited access must not become PENDING with no valid renewal window.
+        if (user.getRole() != Role.ADMIN && user.getSubscription() == SubscriptionStatus.PRO
+                && user.getSubscriptionEndDate() == null) {
+            throw new IllegalStateException("기간 제한 없는 이용권은 연장 신청이 필요하지 않습니다.");
+        }
+
         boolean keepCurrentAccess = isActivePro(user);
 
         // 활성 PRO는 기존 이용권을 유지한 채 연장 승인 대기로 전환한다.
         user.setSubscription(SubscriptionStatus.PENDING);
+        user.setRequestedSubscriptionPlan(requestedPlan);
         user.setDepositorName(normalizedDepositorName);
         user.setSubscriptionRequestedAt(LocalDateTime.now(KST));
         if (!keepCurrentAccess) {
@@ -87,12 +104,15 @@ public class SubscriptionService {
                     + "👤 이름: %s%n"
                     + "📧 이메일: %s%n"
                     + "💳 입금자명: %s%n"
+                    + "📦 신청 플랜: %s / %,d원%n"
                     + "🆔 userId: <code>%s</code>%n%n"
                     + "📋 대기 중: %d건%n"
                     + "👉 관리자 페이지에서 승인/거절 처리하세요.",
                     escape(user.getName()),
                     escape(user.getEmail()),
                     escape(normalizedDepositorName),
+                    requestedPlan.getLabel(),
+                    requestedPlan.getPrice(),
                     user.getId(),
                     pendingCount
                 );
@@ -191,19 +211,28 @@ public class SubscriptionService {
             throw new IllegalStateException("승인 대기 상태가 아닙니다.");
         }
 
-        LocalDate today = LocalDate.now(KST);
-        LocalDate baseDate = user.getSubscriptionEndDate() != null && !user.getSubscriptionEndDate().isBefore(today)
-            ? user.getSubscriptionEndDate()
-            : today;
-
-        user.setSubscription(SubscriptionStatus.PRO);
-        user.setSubscriptionEndDate(baseDate.plusMonths(1));
-        user.setSubscriptionApprovedAt(LocalDateTime.now(KST));
-        user.setSubscriptionRequestedAt(null);
+        approvePendingPlan(user);
         userRepository.save(user);
         log.info("Subscription approved: userId={}", userId);
 
         return UserDto.from(user);
+    }
+
+    /** Shared by explicit approval and an admin changing a pending member to PRO. */
+    private void approvePendingPlan(User user) {
+        LocalDate today = LocalDate.now(KST);
+        LocalDate baseDate = user.getSubscriptionEndDate() != null && !user.getSubscriptionEndDate().isBefore(today)
+            ? user.getSubscriptionEndDate()
+            : today;
+        SubscriptionPlan approvedPlan = user.getRequestedSubscriptionPlan() == null
+            ? SubscriptionPlan.MONTHLY : user.getRequestedSubscriptionPlan();
+
+        user.setSubscription(SubscriptionStatus.PRO);
+        user.setSubscriptionEndDate(baseDate.plusMonths(approvedPlan.getMonths()));
+        user.setSubscriptionPlan(approvedPlan);
+        user.setRequestedSubscriptionPlan(null);
+        user.setSubscriptionApprovedAt(LocalDateTime.now(KST));
+        user.setSubscriptionRequestedAt(null);
     }
 
     @Transactional
@@ -222,6 +251,7 @@ public class SubscriptionService {
 
         user.setDepositorName(null);
         user.setSubscriptionRequestedAt(null);
+        user.setRequestedSubscriptionPlan(null);
         if (hasPendingRenewalAccess(user, LocalDate.now(KST))) {
             user.setSubscription(SubscriptionStatus.PRO);
         } else {
@@ -300,6 +330,13 @@ public class SubscriptionService {
             if (user.getRole() == Role.ADMIN && newStatus != SubscriptionStatus.PRO) {
                 throw new IllegalStateException("관리자 계정은 항상 PRO 상태여야 합니다.");
             }
+            boolean statusChanged = newStatus != user.getSubscription();
+            if (user.getRole() != Role.ADMIN && user.getSubscription() == SubscriptionStatus.PENDING
+                    && newStatus == SubscriptionStatus.PRO) {
+                approvePendingPlan(user);
+            } else if (statusChanged) {
+                user.setRequestedSubscriptionPlan(null);
+            }
             user.setSubscription(newStatus);
             if (newStatus == SubscriptionStatus.PRO) {
                 user.setSubscriptionRequestedAt(null);
@@ -313,7 +350,7 @@ public class SubscriptionService {
             if (newStatus == SubscriptionStatus.PRO && user.getSubscriptionApprovedAt() == null) {
                 user.setSubscriptionApprovedAt(LocalDateTime.now(KST));
             }
-            if (newStatus == SubscriptionStatus.PENDING) {
+            if (newStatus == SubscriptionStatus.PENDING && statusChanged) {
                 user.setSubscriptionRequestedAt(LocalDateTime.now(KST));
                 user.setSubscriptionEndDate(null);
                 user.setSubscriptionApprovedAt(null);

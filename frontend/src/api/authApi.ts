@@ -1,6 +1,15 @@
 /** Auth / Subscription / Admin API 클라이언트 */
 import { API_BASE } from './config'
 
+export type SubscriptionPlanId = 'MONTHLY' | 'SIX_MONTHS'
+
+export interface SubscriptionPlanDto {
+  id: SubscriptionPlanId
+  label: string
+  months: number
+  price: number
+}
+
 export interface UserDto {
   id: string
   email: string
@@ -11,6 +20,8 @@ export interface UserDto {
   subscriptionRequestedAt: string | null
   subscriptionEndDate: string | null
   subscriptionApprovedAt: string | null  // ⭐ PRO 부여일 (승인일)
+  subscriptionPlan?: SubscriptionPlanId | null
+  requestedSubscriptionPlan?: SubscriptionPlanId | null
   createdAt: string
   telegramLinked?: boolean
 }
@@ -173,11 +184,17 @@ export async function fetchCurrentUser(token: string): Promise<UserDto> {
 
 // ─── Subscription ───
 
-export async function applySubscription(token: string, depositorName: string): Promise<UserDto> {
+export async function fetchSubscriptionPlans(): Promise<SubscriptionPlanDto[]> {
+  const res = await apiFetch(`${API_BASE}/api/subscription/plans`)
+  if (!res.ok) await handleError(res)
+  return res.json()
+}
+
+export async function applySubscription(token: string, depositorName: string, plan: SubscriptionPlanId = 'MONTHLY'): Promise<UserDto> {
   const res = await apiFetch(`${API_BASE}/api/subscription/apply`, {
     method: 'POST',
     headers: authHeaders(token),
-    body: JSON.stringify({ depositorName }),
+    body: JSON.stringify({ depositorName, plan }),
   })
   if (!res.ok) await handleError(res)
   const data = await res.json()

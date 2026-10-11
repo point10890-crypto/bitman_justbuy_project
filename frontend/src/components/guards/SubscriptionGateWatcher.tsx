@@ -45,7 +45,7 @@ export default function SubscriptionGateWatcher() {
             replace: true,
             state: {
               message: detail.message
-                || (expired ? '월간 이용권이 만료되었습니다. 재구독 신청을 해주세요.' : undefined),
+                || (expired ? '이용권이 만료되었습니다. 재구독 신청을 해주세요.' : undefined),
               renewal: expired,
               renewalPending: pending,
               from: location.pathname,

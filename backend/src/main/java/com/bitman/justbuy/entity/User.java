@@ -30,6 +30,18 @@ public class User {
     @Column(nullable = false)
     private SubscriptionStatus subscription = SubscriptionStatus.FREE;
 
+    /** Last approved plan; null preserves legacy members whose plan was not recorded. */
+    @Enumerated(EnumType.STRING)
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.VARCHAR)
+    @Column(length = 32)
+    private SubscriptionPlan subscriptionPlan;
+
+    /** Pending purchase, independent of the member's currently approved access. */
+    @Enumerated(EnumType.STRING)
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.VARCHAR)
+    @Column(length = 32)
+    private SubscriptionPlan requestedSubscriptionPlan;
+
     private String depositorName;
 
     private LocalDateTime subscriptionRequestedAt;
@@ -83,6 +95,10 @@ public class User {
     public void setRole(Role role) { this.role = role; }
     public SubscriptionStatus getSubscription() { return subscription; }
     public void setSubscription(SubscriptionStatus subscription) { this.subscription = subscription; }
+    public SubscriptionPlan getSubscriptionPlan() { return subscriptionPlan; }
+    public void setSubscriptionPlan(SubscriptionPlan subscriptionPlan) { this.subscriptionPlan = subscriptionPlan; }
+    public SubscriptionPlan getRequestedSubscriptionPlan() { return requestedSubscriptionPlan; }
+    public void setRequestedSubscriptionPlan(SubscriptionPlan requestedSubscriptionPlan) { this.requestedSubscriptionPlan = requestedSubscriptionPlan; }
     public String getDepositorName() { return depositorName; }
     public void setDepositorName(String depositorName) { this.depositorName = depositorName; }
     public LocalDateTime getSubscriptionRequestedAt() { return subscriptionRequestedAt; }

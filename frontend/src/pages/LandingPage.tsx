@@ -1,7 +1,8 @@
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { PWAInstallPrompt } from '../components/app/PWAInstallPrompt'
 import { useAuth } from '../contexts/AuthContext'
 import { AgentMascot } from '../components/app/AgentMascot'
+import { formatWon, SUBSCRIPTION_PLANS, subscribePath } from '../lib/subscriptionPlans'
 import './LandingPage.css'
 
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
@@ -51,7 +52,7 @@ export default function LandingPage() {
             showWhenDismissed
             label="앱 설치"
           />
-          <button type="button" onClick={() => navigate('/register')}>시작하기</button>
+          <button type="button" onClick={() => navigate('/subscribe')}>구독 플랜 보기</button>
         </div>
       </nav>
 
@@ -71,14 +72,14 @@ export default function LandingPage() {
             KIS 조건검색과 DART 공시, AI 요약을 연결해 오늘 볼 종목을 빠르게 정리합니다.
           </p>
           <div className="bm-hero-actions">
-            <button type="button" onClick={() => navigate('/register')}>무료 가입 후 구독 시작</button>
+            <button type="button" onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' })}>구독 플랜 보기</button>
             <PWAInstallPrompt
               variant="hero-button"
               className="bm-install-button"
               showWhenDismissed
               label="앱 설치하기"
             />
-            <button type="button" onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}>기능 보기</button>
+            <button type="button" onClick={() => navigate('/register')}>무료 회원가입</button>
           </div>
           <div className="bm-proof-row">
             <span>단타 TOP3</span>
@@ -107,24 +108,33 @@ export default function LandingPage() {
       <section className="bm-section bm-flow-section">
         <div className="bm-section-head">
           <p>사용 흐름</p>
-          <h2>가입하고, 구독하고, 오늘 포착된 TOP3를 확인합니다</h2>
+          <h2>이용권을 선택하고, 오늘 포착된 종목을 확인하세요</h2>
         </div>
         <div className="bm-flow">
-          <div><strong>1</strong><span>간편 회원가입</span></div>
-          <div><strong>2</strong><span>월간 이용권 구독</span></div>
-          <div><strong>3</strong><span>전체 종목 공개</span></div>
-          <div><strong>4</strong><span>알림 등록</span></div>
+          <div><strong>1</strong><span>플랜 선택</span></div>
+          <div><strong>2</strong><span>무료 가입 · 로그인</span></div>
+          <div><strong>3</strong><span>입금 · 구독 신청</span></div>
+          <div><strong>4</strong><span>승인 후 전체 공개</span></div>
         </div>
       </section>
 
-      <section className="bm-pricing">
-        <div>
-          <p className="bm-eyebrow">Monthly Plan</p>
-          <h2>월간 이용권</h2>
-          <strong className="bm-price">월 구독료 30,000원</strong>
-          <p>구독자는 종목명, 포착가, 최고가, 수익률, AI 요약, 종목 알림이를 모두 확인할 수 있습니다.</p>
+      <section className="bm-pricing bm-plan-pricing" id="pricing">
+        <div className="bm-plan-intro">
+          <h2>나에게 맞는 이용 기간을 선택하세요</h2>
+          <p>두 이용권 모두 전체 종목, AI 요약과 종목 알림이를 제공합니다. 선택한 플랜은 가입 후에도 이어집니다.</p>
         </div>
-        <button type="button" onClick={() => navigate('/register')}>구독 시작하기</button>
+        <div className="bm-plan-grid">
+          {SUBSCRIPTION_PLANS.map(plan => (
+            <article className={`bm-plan-card${plan.id === 'SIX_MONTHS' ? ' six-months' : ''}`} key={plan.id}>
+              <div className="bm-plan-heading"><h3>{plan.label} 이용권</h3>{plan.id === 'SIX_MONTHS' && <span>30,000원 절약</span>}</div>
+              <strong className="bm-price">{formatWon(plan.price)}</strong>
+              <p className="bm-plan-payment">{plan.id === 'SIX_MONTHS' ? '6개월 일시 납부 · 월 25,000원꼴' : '1개월 일시 납부'}</p>
+              <p>{plan.id === 'SIX_MONTHS' ? '1개월 이용권 6회 대비 30,000원 저렴합니다.' : '한 달 동안 BitMan 전체 분석을 이용하세요.'}</p>
+              <Link to={subscribePath(plan.id)}>{plan.label} 구독 선택</Link>
+            </article>
+          ))}
+        </div>
+        <p className="bm-plan-note">가입은 무료이며, 계좌 입금 확인 후 이용권이 활성화됩니다. 자동 결제는 되지 않습니다.</p>
       </section>
 
       <footer className="bm-footer">

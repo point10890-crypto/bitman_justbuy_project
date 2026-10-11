@@ -1,7 +1,9 @@
 package com.bitman.justbuy.controller;
 
 import com.bitman.justbuy.dto.SubscriptionApplyRequest;
+import com.bitman.justbuy.dto.SubscriptionPlanDto;
 import com.bitman.justbuy.dto.UserDto;
+import com.bitman.justbuy.entity.SubscriptionPlan;
 import com.bitman.justbuy.service.SubscriptionService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -9,6 +11,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
+import java.util.Arrays;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/subscription")
@@ -20,10 +24,16 @@ public class SubscriptionController {
         this.subscriptionService = subscriptionService;
     }
 
+    @GetMapping("/plans")
+    public List<SubscriptionPlanDto> plans() {
+        return Arrays.stream(SubscriptionPlan.values()).map(SubscriptionPlanDto::from).toList();
+    }
+
     @PostMapping("/apply")
     public ResponseEntity<UserDto> apply(@AuthenticationPrincipal UUID userId,
                                           @Valid @RequestBody SubscriptionApplyRequest request) {
-        return ResponseEntity.ok(subscriptionService.applyForSubscription(userId, request.depositorName()));
+        return ResponseEntity.ok(subscriptionService.applyForSubscription(
+            userId, request.depositorName(), SubscriptionPlan.fromId(request.plan())));
     }
 
     /** 회원 텔레그램 연결. body: {"chatId": "123456789"} */

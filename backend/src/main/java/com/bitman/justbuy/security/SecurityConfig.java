@@ -66,6 +66,7 @@ public class SecurityConfig {
                 .requestMatchers(new AntPathRequestMatcher("/history/**")).permitAll()
 
                 // Public API
+                .requestMatchers(new AntPathRequestMatcher("/api/subscription/plans", "GET")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/api/health")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/api/market/**")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/api/kr/jongga-v2/**")).permitAll()

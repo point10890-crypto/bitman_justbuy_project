@@ -5,8 +5,10 @@ import {
   updateProfile as apiUpdateProfile,
   changePassword as apiChangePassword,
   type UserDto,
+  type SubscriptionPlanId,
 } from '../api/authApi'
 import { memberTierOf } from '../lib/memberTier'
+import { authPath, subscriptionPlanFromSearch } from '../lib/subscriptionPlans'
 
 export interface User {
   id: string
@@ -18,6 +20,8 @@ export interface User {
   subscriptionApprovedAt?: string
   subscriptionExpired?: boolean
   subscriptionRenewalPending?: boolean
+  subscriptionPlan?: SubscriptionPlanId
+  requestedSubscriptionPlan?: SubscriptionPlanId
   /** 텔레그램 알림 연결 여부. chat id 원문은 서버가 내려주지 않는다. */
   telegramLinked?: boolean
   depositorName?: string
@@ -31,7 +35,7 @@ interface AuthContextType {
   login: (email: string, password: string, rememberMe?: boolean) => Promise<User>
   register: (name: string, email: string, password: string) => Promise<void>
   logout: () => void
-  applySubscription: (depositorName: string) => Promise<void>
+  applySubscription: (depositorName: string, plan?: SubscriptionPlanId) => Promise<void>
   refreshUser: () => Promise<void>
   updateProfile: (name: string) => Promise<void>
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>
@@ -64,6 +68,8 @@ function dtoToUser(dto: UserDto): User {
     subscriptionApprovedAt: dto.subscriptionApprovedAt ?? undefined,
     subscriptionExpired: isExpired,
     subscriptionRenewalPending: isPendingRenewal,
+    subscriptionPlan: dto.subscriptionPlan ?? undefined,
+    requestedSubscriptionPlan: dto.requestedSubscriptionPlan ?? undefined,
     telegramLinked: dto.telegramLinked ?? false,
     depositorName: dto.depositorName ?? undefined,
     createdAt: dto.createdAt,
@@ -174,7 +180,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // 현재 경로가 로그인/랜딩이 아닐 때만 이동 (무한 리다이렉트 방지)
       const path = window.location.pathname
       if (path !== '/login' && path !== '/landing' && path !== '/register') {
-        window.location.href = '/login'
+        window.location.href = path === '/subscribe'
+          ? authPath('login', subscriptionPlanFromSearch(window.location.search), new URLSearchParams(window.location.search).get('renewal') === '1')
+          : '/login'
       }
     }
     window.addEventListener('auth:unauthorized', onUnauthorized)
@@ -251,10 +259,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(REMEMBER_KEY)
   }
 
-  const applySubscription = async (depositorName: string) => {
+  const applySubscription = async (depositorName: string, plan: SubscriptionPlanId = 'MONTHLY') => {
     const token = getStoredToken()
-    if (!token || !user) return
-    const dto = await apiApplySubscription(token, depositorName)
+    if (!token || !user) throw new Error('로그인 후 구독을 신청해 주세요.')
+    const dto = await apiApplySubscription(token, depositorName, plan)
     const u = dtoToUser(dto)
     setUser(u)
     setUserData(JSON.stringify(u))

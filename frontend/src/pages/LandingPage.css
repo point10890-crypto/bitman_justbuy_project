@@ -19,6 +19,21 @@
 .agent-landing .agent-landing-mascot > span { position: relative; padding: 9px 16px; border: 1px solid #4a422b; border-radius: 10px; background: #24221a; color: #e2d1a1; font-size: 12px; }
 .agent-landing .bm-proof-row span { font-size: 12px; font-weight: 600; color: #b7c0ca; }
 .agent-landing :is(button, a):focus-visible { outline: 2px solid #f3cf45; outline-offset: 4px; }
+.bm-landing.agent-landing .bm-plan-pricing { display: block; background: #16191e; border-color: #393d43; padding: 36px; scroll-margin-top: 24px; }
+.agent-landing .bm-plan-intro h2 { font-size: 28px; font-weight: 800; letter-spacing: -.035em; }
+.agent-landing .bm-plan-intro > p { color: #b4bfcc; font-size: 14px; font-weight: 500; max-width: 680px; margin-top: 12px; }
+.agent-landing .bm-plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 26px; }
+.agent-landing .bm-plan-card { border: 1px solid #3c424d; background: #101318; border-radius: 12px; padding: 24px; display: flex; flex-direction: column; align-items: flex-start; }
+.agent-landing .bm-plan-card.six-months { border-color: #756639; background: #23231b; }
+.agent-landing .bm-plan-heading { width: 100%; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.agent-landing .bm-plan-heading h3 { font-size: 19px; font-weight: 750; color: #f3f4f6; }
+.agent-landing .bm-plan-heading span { font-size: 12px; color: #e9cf7b; border: 1px solid #66562b; padding: 4px 7px; border-radius: 6px; }
+.agent-landing .bm-plan-card .bm-price { display: block; font-size: 36px; color: #f6f3e9; font-weight: 800; margin: 22px 0 6px; line-height: 1.1; }
+.agent-landing .bm-plan-card p { margin: 10px 0 22px; font-size: 13px; color: #aeb8c5; font-weight: 500; line-height: 1.6; }
+.agent-landing .bm-plan-card .bm-plan-payment { color: #e2d39c; font-size: 13px; margin: 0; }
+.agent-landing .bm-plan-card a { margin-top: auto; min-height: 48px; width: 100%; display: grid; place-items: center; text-decoration: none; border: 1px solid #625735; border-radius: 8px; background: #303026; color: #f0dda0; font-size: 14px; font-weight: 700; }
+.agent-landing .bm-plan-card.six-months a { background: #e4c65a; border-color: #e4c65a; color: #221d0f; }
+.agent-landing .bm-plan-pricing .bm-plan-note { color: #aeb8c5; margin: 18px 0 0; font-size: 12px; font-weight: 500; }
 @media (max-width: 980px) {
   .bm-landing.agent-landing .bm-hero { padding: 38px 24px 56px; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 18px; min-height: 480px; }
   .agent-landing .bm-hero h1 { font-size: 36px; }
@@ -33,4 +48,8 @@
   .agent-landing .agent-landing-mascot::before { width: 188px; }
   .agent-landing .agent-landing-mascot > span { padding: 7px 13px; }
   .agent-landing .bm-hero h1 { font-size: clamp(28px, 7.5vw, 38px); }
+  .bm-landing.agent-landing .bm-plan-pricing { padding: 24px 18px; }
+  .agent-landing .bm-plan-intro h2 { font-size: 23px; line-height: 1.45; }
+  .agent-landing .bm-plan-grid { grid-template-columns: 1fr; gap: 14px; }
+  .agent-landing .bm-plan-card { padding: 22px; }
 }

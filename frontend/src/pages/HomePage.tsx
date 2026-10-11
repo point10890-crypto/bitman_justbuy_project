@@ -497,14 +497,14 @@ export default function HomePage() {
               from: '/',
               renewal: user?.subscriptionExpired,
               message: user?.subscriptionExpired
-                ? '월간 이용권이 만료되었습니다. 재구독 신청을 해주세요.'
+                ? '이용권이 만료되었습니다. 재구독 신청을 해주세요.'
                 : '구독하면 종목명과 진입가·목표가까지 전부 공개됩니다.',
             },
           })}
         >
           {user?.subscriptionExpired
             ? '재구독하고 전체 종목 보기'
-            : '월간 이용권 구독하고 전체 종목 보기'}
+            : '구독 플랜 선택하고 전체 종목 보기'}
         </button>
       )}
 
