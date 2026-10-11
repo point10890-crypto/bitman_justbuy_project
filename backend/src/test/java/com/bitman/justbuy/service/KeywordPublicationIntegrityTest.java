@@ -5,6 +5,7 @@ import com.bitman.justbuy.dto.AgentResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import java.util.List;
+import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -54,5 +55,19 @@ class KeywordPublicationIntegrityTest {
         assertThat(pick.path("quoteCheckedAt").asText()).isNotBlank();
         assertThat(result.round1().get(1).status()).isEqualTo("success");
         assertThat(result.finalContent()).contains("입력 수급 근거 확인", "수급 반전", "순매도 전환");
+    }
+    @Test void optionalExpansionEnrichesOnlyVerifiedCandidatesAndPreservesCoverageInPublication() {
+        when(kis.fetchDoubleNetBuyCandidates(5,3)).thenReturn(List.of(candidate("005930","70,000"),candidate("ABCDEF","10000")));
+        var expansion=mock(KisSourceExpansionService.class);
+        var coverage=Map.<String,Object>of("status","PARTIAL","requestedCodes",1,"enrichedCodes",1,"realtimeFreshQuotes",0);
+        when(expansion.enrich(List.of("005930"))).thenReturn(new KisSourceExpansionService.Enrichment("\n[검증된 추가 KIS 근거: PERIOD_ONLY]\n",coverage));
+        service.configureSourceExpansion(expansion);
+        analyst("{\"signals\":[{\"stockCode\":\"005930\",\"aiScore\":82,\"verdict\":\"WATCH\",\"summary\":\"입력 수급 근거 확인\",\"evidence\":[\"동시 순매수\"],\"riskFlags\":[\"수급 반전\"],\"invalidation\":\"순매도 전환\",\"displayStatus\":\"관찰\"}]}");
+        var result=service.analyze("쌍끌이 조건검색","수급분석");
+        assertThat(result.stockPicks()).extracting(p->p.code()).containsExactly("005930");
+        assertThat(result.metadata().sourceExpansion()).isEqualTo(coverage);
+        verify(expansion).enrich(List.of("005930"));
+        verify(agent).analyze(anyString(),contains("PERIOD_ONLY"));
+        assertThat(AnalysisOutcome.describe(result).metadata().sourceExpansion()).isEqualTo(coverage);
     }
 }

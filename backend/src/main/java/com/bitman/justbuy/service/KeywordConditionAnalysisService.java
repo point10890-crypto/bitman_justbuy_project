@@ -28,6 +28,9 @@ public class KeywordConditionAnalysisService {
     private final KisApiService kisApiService;
     private final DeepSeekAgent deepSeekAgent;
     private final ObjectMapper mapper;
+    private KisSourceExpansionService sourceExpansion;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void configureSourceExpansion(KisSourceExpansionService expansion) { this.sourceExpansion=expansion; }
 
     public KeywordConditionAnalysisService(KisApiService kisApiService,
                                            DeepSeekAgent deepSeekAgent,
@@ -52,6 +55,14 @@ public class KeywordConditionAnalysisService {
         long start = System.currentTimeMillis();
         List<ConditionCandidate> candidates = verifiedCandidates(kisApiService.fetchDoubleNetBuyCandidates(5, 3));
         String checkedAt = Instant.now().toString();
+        String additionalEvidence="";
+        Map<String,Object> sourceMetadata=null;
+        if(sourceExpansion!=null && !candidates.isEmpty()) {
+            try {
+                var enrichment=sourceExpansion.enrich(candidates.stream().map(ConditionCandidate::code).toList());
+                if(enrichment!=null) { additionalEvidence=enrichment.prompt(); sourceMetadata=enrichment.metadata(); }
+            } catch(RuntimeException ignored) { sourceMetadata=Map.of("status","UNAVAILABLE"); }
+        }
 
         String detectorContent = buildDetectorContent(query, candidates);
         AgentResult detector = new AgentResult(
@@ -67,7 +78,7 @@ public class KeywordConditionAnalysisService {
 
         AgentResult analyst = candidates.isEmpty()
             ? AgentResult.skipped("deepseek", "No verified KIS candidates")
-            : runDeepSeekAnalyst(query, candidates, checkedAt);
+            : runDeepSeekAnalyst(query, candidates, checkedAt, additionalEvidence);
         List<AgentResult> round1 = List.of(detector, analyst);
         List<StockPick> picks = candidates.stream()
             .map(candidate -> toStockPick(candidate, checkedAt))
@@ -86,7 +97,7 @@ public class KeywordConditionAnalysisService {
             null,
             Instant.now().toString(),
             !picks.isEmpty(),
-            new AnalysisResponse.Metadata(System.currentTimeMillis() - start, round1.size(), succeeded)
+            new AnalysisResponse.Metadata(System.currentTimeMillis() - start, round1.size(), succeeded,null,sourceMetadata)
         );
     }
 
@@ -103,7 +114,7 @@ public class KeywordConditionAnalysisService {
         return List.copyOf(verified.values());
     }
 
-    private AgentResult runDeepSeekAnalyst(String query, List<ConditionCandidate> candidates, String checkedAt) {
+    private AgentResult runDeepSeekAnalyst(String query, List<ConditionCandidate> candidates, String checkedAt, String additionalEvidence) {
         if (!deepSeekAgent.isAvailable()) {
             return AgentResult.skipped("deepseek", "API key not configured");
         }
@@ -120,7 +131,8 @@ public class KeywordConditionAnalysisService {
             """;
         String user = "사용자 검색어: " + query + "\n"
             + "KST 기준일: " + DateTimeFormatter.ISO_LOCAL_DATE.format(Instant.now().atZone(KST)) + "\n"
-            + "KIS 후보 데이터:\n" + toJson(candidatePayload(candidates));
+            + "KIS 후보 데이터:\n" + toJson(candidatePayload(candidates))
+            + (additionalEvidence==null?"":additionalEvidence);
         AgentResult result = deepSeekAgent.analyze(system, user);
         if (!"success".equals(result.status())) return safeAnalystResult(result, "", result.status(), result.error());
         List<EvidencePacket> packets = candidates.stream().map(candidate -> new EvidencePacket(

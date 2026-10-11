@@ -66,6 +66,17 @@ public class PrecomputeScheduler {
     private final Map<String, String> lastRunTimes = new ConcurrentHashMap<>();
     private final Clock clock;
     private final AtomicBoolean startupAttempted = new AtomicBoolean();
+    private final AtomicBoolean scheduledRunning = new AtomicBoolean();
+    private KisSourceExpansionService sourceExpansion;
+    @Autowired(required=false)
+    public void configureSourceExpansion(KisSourceExpansionService expansion) { this.sourceExpansion=expansion; }
+
+    @Scheduled(cron="0 40 8,11,14 * * MON-FRI", zone="Asia/Seoul")
+    public void prepareSourceExpansion() {
+        if(!isTradingDay() || sourceExpansion==null) return;
+        try { sourceExpansion.prepare(); }
+        catch(Exception ignored) { log.warn("[Scheduler] New source preparation unavailable; verified existing sources retained"); }
+    }
     @Value("${bitman.scheduler.startup-refresh-enabled:true}")
     private boolean startupRefreshEnabled = true;
 
@@ -117,6 +128,14 @@ public class PrecomputeScheduler {
             return;
         }
 
+        if(!scheduledRunning.compareAndSet(false,true)) {
+            log.info("[Scheduler] Startup recovery skipped while scheduled analysis is active");return;
+        }
+        try {
+        prepareSourceExpansion();
+        if(sourceExpansion!=null && sourceExpansion.isOfficiallyClosedToday()) {
+            log.info("[Scheduler] Startup analysis skipped: official KIS calendar reports market closed");return;
+        }
         log.info("[Scheduler] 🚀 서버 시작 — 캐시 확인 중...");
         int success = 0, total = 0;
         Set<String> seenCodes = new HashSet<>();  // ★ cross-mode dedup (cached 도 포함)
@@ -150,12 +169,9 @@ public class PrecomputeScheduler {
                         var meta  = cached.metadata();
                         int pickCount = picks != null ? picks.size() : 0;
                         int succeeded = meta != null ? meta.agentsSucceeded() : 0;
-                        if (telegramNotifier != null && isMarketHours && pickCount > 0 && succeeded > 0) {
-                            log.info("[Scheduler] 📨 {} — 장중 재시작 감지, 캐시 결과 즉시 발송 (dedup 적용)", mode);
-                            recordDelivery(run.runId(), telegramNotifier.sendAnalysisResult(mode, cached), pickCount);
-                        } else {
+                        {
                             conditionRunService.recordEvent(run.runId(), ConditionRunEventType.NOTIFICATION_SKIPPED,
-                                "startup cached notification skipped", Map.of(
+                                "startup cached notification skipped to avoid duplicate delivery", Map.of(
                                     "pickCount", pickCount,
                                     "agentsSucceeded", succeeded,
                                     "marketHours", isMarketHours,
@@ -181,6 +197,7 @@ public class PrecomputeScheduler {
         if (telegramNotifier != null) {
             telegramNotifier.sendStartupComplete(success, total);
         }
+        } finally { scheduledRunning.set(false); }
     }
 
     /**
@@ -197,6 +214,14 @@ public class PrecomputeScheduler {
         if (!isTradingDay()) {
             log.info("[Scheduler] ⏭ 분석 건너뜀 (휴장일)");
             return;
+        }
+        if(!scheduledRunning.compareAndSet(false,true)) {
+            log.warn("[Scheduler] Scheduled analysis already running; duplicate invocation skipped");return;
+        }
+        try {
+        prepareSourceExpansion();
+        if(sourceExpansion!=null && sourceExpansion.isOfficiallyClosedToday()) {
+            log.info("[Scheduler] Scheduled analysis skipped: official KIS calendar reports market closed");return;
         }
 
         int hour = nowKst().getHour();
@@ -221,6 +246,7 @@ public class PrecomputeScheduler {
 
         log.info("[Scheduler] ✅ {}:50 {} 완료 ({}/{}) — 누적 추천 {}종목",
             hour, round, success, scheduledModes.size(), seenCodes.size());
+        } finally { scheduledRunning.set(false); }
     }
 
     private boolean isTradingDay() {

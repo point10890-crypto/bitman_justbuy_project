@@ -182,11 +182,12 @@ public class TelegramNotifier {
         String emoji = (agentsUsed > 0 && agentsSucceeded == agentsUsed) ? "\u2705" : "\u26a0\ufe0f";
 
         // 헤더
-        sb.append(String.format("%s <b>[%s] \ubd84\uc11d \uc644\ub8cc</b>\n", emoji, localizeMode(mode)));
+        sb.append(String.format("%s <b>[%s] \ubd84\uc11d \uc644\ub8cc</b>\n", emoji, escapeHtml(localizeMode(mode))));
         sb.append(String.format("\u23f1 %.1f\ucd08 | \ud83e\udd16 %d/%d AI\n",
             totalDurationMs / 1000.0,
             agentsSucceeded,
             agentsUsed));
+        appendSourceCoverage(sb, meta != null ? meta.sourceExpansion() : null);
         sb.append("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n");
 
         // 추천 종목 리스트
@@ -195,9 +196,9 @@ public class TelegramNotifier {
             sb.append("\ud83d\udcca <b>\ucd94\ucc9c \uc885\ubaa9</b>\n\n");
             for (int i = 0; i < picks.size(); i++) {
                 StockPick pick = picks.get(i);
-                sb.append(String.format("<b>%d. %s</b>", i + 1, pick.name()));
+                sb.append(String.format("<b>%d. %s</b>", i + 1, escapeHtml(pick.name())));
                 if (pick.code() != null && !pick.code().isEmpty()) {
-                    sb.append(String.format(" (%s)", pick.code()));
+                    sb.append(String.format(" (%s)", escapeHtml(pick.code())));
                 }
                 sb.append("\n");
 
@@ -215,7 +216,7 @@ public class TelegramNotifier {
                 }
 
                 if (pick.action() != null && !pick.action().isEmpty()) {
-                    sb.append(String.format("   \ud83d\udccc %s", pick.action()));
+                    sb.append(String.format("   \ud83d\udccc %s", escapeHtml(pick.action())));
                     sb.append("\n");
                 }
 
@@ -223,7 +224,7 @@ public class TelegramNotifier {
                     String reason = pick.reason().length() > 100
                         ? pick.reason().substring(0, 100) + "..."
                         : pick.reason();
-                    sb.append(String.format("   \ud83d\udcdd %s", reason));
+                    sb.append(String.format("   \ud83d\udcdd %s", escapeHtml(reason)));
                     sb.append("\n");
                 }
                 sb.append("\n");
@@ -244,8 +245,8 @@ public class TelegramNotifier {
                 for (int i = 0; i < finTop.size(); i++) {
                     StockPick p = finTop.get(i);
                     sb.append(String.format("%d. %s (%s) — %d/100\n",
-                        i + 1, p.name(), p.code(), p.financialScore()));
-                    sb.append("   ").append(p.financialSummary()).append("\n");
+                        i + 1, escapeHtml(p.name()), escapeHtml(p.code()), p.financialScore()));
+                    sb.append("   ").append(escapeHtml(p.financialSummary())).append("\n");
                 }
                 sb.append("\n");
             }
@@ -254,6 +255,30 @@ public class TelegramNotifier {
         // v2.8.8: removed final-analysis section
         sb.append("\n\n🔗 https://api.bit-man.net");
         return send(sb.toString());
+    }
+
+    private static void appendSourceCoverage(StringBuilder text, Map<String, Object> coverage) {
+        if (coverage == null || coverage.isEmpty()) return;
+        Object rawStatus = coverage.get("status");
+        if (!(rawStatus instanceof String status) || !java.util.Set.of("AVAILABLE", "PARTIAL", "UNAVAILABLE",
+            "DISABLED", "MARKET_CLOSED").contains(status)) return;
+        Integer requested = coverageCount(coverage.get("requestedCodes"));
+        Integer enriched = coverageCount(coverage.get("enrichedCodes"));
+        Integer realtime = coverageCount(coverage.get("realtimeFreshQuotes"));
+        if (requested == null || requested == 0 || enriched == null || realtime == null
+            || enriched > requested || realtime > requested) return;
+        text.append("추가자료 확인 후보 ").append(enriched).append("/").append(requested).append("종목")
+            .append(" · 조회 후보 중 실시간 체결 ").append(realtime).append("종목");
+        if ("PARTIAL".equals(status) || "UNAVAILABLE".equals(status) || enriched < requested)
+            text.append(" · 일부 미확인");
+        text.append("\n");
+    }
+
+    private static Integer coverageCount(Object value) {
+        if (!(value instanceof Number number)) return null;
+        double numeric = number.doubleValue();
+        if (!Double.isFinite(numeric) || numeric < 0 || numeric > 20 || numeric != Math.rint(numeric)) return null;
+        return (int) numeric;
     }
 
     private long parsePrice(String s) {

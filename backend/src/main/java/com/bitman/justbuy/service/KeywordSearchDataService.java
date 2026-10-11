@@ -53,6 +53,13 @@ public class KeywordSearchDataService {
     private final ReentrantLock snapshotLock = new ReentrantLock();
     private final Map<String, CachedQuote> quoteCache = new ConcurrentHashMap<>();
     private volatile CachedSnapshot snapshotCache;
+    private KisCandidateSourceService expandedCandidates;
+    private KisSourceGateway sourceGateway;
+
+    @Autowired(required = false)
+    public void configureExpandedSources(KisCandidateSourceService candidates, KisSourceGateway gateway) {
+        this.expandedCandidates=candidates;this.sourceGateway=gateway;
+    }
 
     @Autowired
     public KeywordSearchDataService(KisApiService kis, ObjectMapper mapper) {
@@ -74,6 +81,7 @@ public class KeywordSearchDataService {
     }
 
     public Snapshot snapshot() {
+        if (expandedCandidates != null && sourceGateway != null && sourceGateway.isEnabled()) return expandedCandidates.snapshot();
         long deadline = System.nanoTime() + BUDGET_NANOS;
         if (Thread.currentThread().isInterrupted()) return unavailable("조회가 중단되었습니다.");
         Snapshot cached = cachedSnapshot();
@@ -140,6 +148,7 @@ public class KeywordSearchDataService {
     /** Exact-code lookup. The basic endpoint does not supply volume or trading value. */
     public Quote lookup(String code) {
         if (code == null || !code.matches("[0-9]{6}") || Thread.currentThread().isInterrupted()) return null;
+        if (expandedCandidates != null && sourceGateway != null && sourceGateway.isEnabled()) return expandedCandidates.lookup(code);
         CachedQuote cached = quoteCache.get(code);
         Instant now = clock.instant();
         if (cached != null && !now.isBefore(cached.value().fetchedAt()) && now.isBefore(cached.expiresAt())) return cached.value();

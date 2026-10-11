@@ -18,6 +18,9 @@ public class ConditionSearchPipeline {
 
     private final ConditionSearchFormulaCatalog formulaCatalog;
     private final AnalysisService analysisService;
+    private KisSourceExpansionService sourceExpansion;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void configureSourceExpansion(KisSourceExpansionService expansion) { this.sourceExpansion=expansion; }
 
     public ConditionSearchPipeline(ConditionSearchFormulaCatalog formulaCatalog,
                                    AnalysisService analysisService) {
@@ -48,7 +51,8 @@ public class ConditionSearchPipeline {
     public Map<String, Object> describe() {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("name", "BitMan condition-search pipeline");
-        result.put("version", "v1");
+        result.put("version", "v2");
+        if (sourceExpansion != null) result.put("sourceExpansion", sourceExpansion.readiness());
         result.put("entrypoints", Map.of(
             "precomputed", "/api/analysis/{mode}",
             "live", "/api/analysis/live",

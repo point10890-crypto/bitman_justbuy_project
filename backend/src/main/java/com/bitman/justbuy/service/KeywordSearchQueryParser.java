@@ -33,8 +33,12 @@ public class KeywordSearchQueryParser {
     private static final Pattern GENERIC = Pattern.compile(
         "종목(?:들을|들|을|만)?|조건\\s*검색|종목\\s*검색|검색|조건|찾아\\s*줘|보여\\s*줘|알려\\s*줘|찾기|해\\s*주세요|해주세요|해줘");
     private static final Pattern CONNECTOR = Pattern.compile("(?<![가-힣A-Za-z0-9])(?:과|와|및|그리고|인|한)(?![가-힣A-Za-z0-9])");
+    private static final Pattern VALUATION = Pattern.compile("(?<![A-Za-z0-9])(?i:PER|PBR)\\s*("+NUMBER+")\\s*(?:배)?\\s*(이상|이하|초과|미만|같음)(?![가-힣A-Za-z0-9])");
+    private static final Pattern MA_ALIGNMENT = Pattern.compile("(?:이평선|이동평균선?)\\s*정배열(?![가-힣A-Za-z0-9])");
+    private static final Pattern BREAKOUT_20 = Pattern.compile("20\\s*(?:일|거래일)\\s*(?:고점\\s*)?돌파(?![가-힣A-Za-z0-9])");
+    private static final Pattern VOLUME_RATIO_20 = Pattern.compile("거래량\\s*20\\s*(?:일|거래일)\\s*평균(?:\\s*대비)?\\s*("+NUMBER+")\\s*배\\s*(이상|이하|초과|미만|같음)(?![가-힣A-Za-z0-9])");
     private static final Pattern UNHANDLED_CONDITION = Pattern.compile(
-        "%|가격|현재가|주가|등락률|상승률|상승|하락|거래량|거래대금|순매수|외국인|기관|최근|거래일|이상|이하|초과|미만|같음|상위|(?i:TOP)");
+        "%|가격|현재가|주가|등락률|상승률|상승|하락|거래량|거래대금|순매수|외국인|기관|최근|거래일|이상|이하|초과|미만|같음|상위|(?i:TOP)|(?i:(?<![A-Za-z])(?:PER|PBR)(?![A-Za-z]))|이평선|이동평균|정배열|평균");
     private static final Pattern LEFTOVER_AMOUNT = Pattern.compile(
         NUMBER + "\\s*(만원|억원|원|만주|억주|주|%|만|억)|(?<![가-힣A-Za-z0-9])[0-9]+(?:[,.][0-9]+)?(?![가-힣A-Za-z0-9])");
     private static final List<Pattern> UNSUPPORTED = List.of(
@@ -59,7 +63,7 @@ public class KeywordSearchQueryParser {
         State state = new State();
         if (query == null || query.isBlank()) return state.invalid("검색어를 입력해 주세요");
         if (query.length() > 200) return state.invalid("검색어는 200자 이내로 입력해 주세요");
-        String input = normalize(query);
+        String input = parseResearch(normalize(query),state);
         for (Pattern pattern : UNSUPPORTED) {
             Matcher matcher = pattern.matcher(input);
             while (matcher.find()) state.unsupported.add("미지원 조건: " + matcher.group());
@@ -91,6 +95,30 @@ public class KeywordSearchQueryParser {
         if (state.unsupported.isEmpty()) state.applied.add(state.rankingExplicit
             ? labelForField(state.sortBy) + " 상위 " + state.limit + "종목" : "결과 최대 " + state.limit + "종목");
         return state.spec();
+    }
+
+    private String parseResearch(String input,State state) {
+        Matcher ratio=VALUATION.matcher(input);
+        while(ratio.find()) {
+            String field=ratio.group().trim().substring(0,3).toUpperCase(java.util.Locale.ROOT);
+            addResearchNumber(state,field,ratio.group(1),ratio.group(2),field);
+        }
+        String remaining=ratio.replaceAll(" ");
+        Matcher aligned=MA_ALIGNMENT.matcher(remaining);
+        while(aligned.find()) state.add(new Filter("MA_ALIGNED","EQ",BigDecimal.ONE,"이평선 정배열 (완료 60일봉 MA5 > MA20 > MA60)"));
+        remaining=aligned.replaceAll(" ");
+        Matcher breakout=BREAKOUT_20.matcher(remaining);
+        while(breakout.find()) state.add(new Filter("BREAKOUT20","EQ",BigDecimal.ONE,"완료 일봉 고가가 이전 20거래일 고가 돌파"));
+        remaining=breakout.replaceAll(" ");
+        Matcher volume=VOLUME_RATIO_20.matcher(remaining);
+        while(volume.find()) addResearchNumber(state,"VOLUME_RATIO20",volume.group(1),volume.group(2),"거래량 완료 20일 평균 대비");
+        return volume.replaceAll(" ");
+    }
+    private void addResearchNumber(State state,String field,String raw,String comparison,String label) {
+        BigDecimal value=new BigDecimal(raw.replace(",",""));
+        if(value.signum()<0 || value.compareTo(MAX_THRESHOLD)>0) {state.unsupported.add("지원 범위를 벗어난 배수 조건: "+label);return;}
+        String operator=switch(comparison){case "이상"->"GTE";case "이하"->"LTE";case "초과"->"GT";case "미만"->"LT";default->"EQ";};
+        state.add(new Filter(field,operator,value.stripTrailingZeros(),label+" "+value.stripTrailingZeros().toPlainString()+"배 "+comparison));
     }
 
     private String parseMarket(String input, State state) {
@@ -272,6 +300,8 @@ public class KeywordSearchQueryParser {
             case "CHANGE_PCT" -> "등락률";
             case "VOLUME" -> "거래량";
             case "TRADING_VALUE" -> "거래대금";
+            case "PER", "PBR" -> field;
+            case "VOLUME_RATIO20" -> "거래량 20일 평균 대비 배수";
             default -> field;
         };
     }

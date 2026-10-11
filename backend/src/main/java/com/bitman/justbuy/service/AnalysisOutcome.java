@@ -25,7 +25,7 @@ public enum AnalysisOutcome {
             response.isFresh() && outcome != EMPTY && outcome != FAILED,
             new AnalysisResponse.Metadata(metadata != null ? metadata.totalDurationMs() : 0,
                 metadata != null ? metadata.agentsUsed() : 0, metadata != null ? metadata.agentsSucceeded() : 0,
-                outcome.name()));
+                outcome.name(), metadata != null ? metadata.sourceExpansion() : null));
     }
 
     public static void requireSuccessfulAgents(AnalysisResponse response) {

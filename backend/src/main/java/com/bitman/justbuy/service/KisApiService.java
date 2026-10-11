@@ -144,6 +144,86 @@ public class KisApiService {
 
     public record ExtendedSnapshot(String status, String stockCode, Instant fetchedAt, JsonNode rows) {}
 
+    public record ReadOnlySnapshot(String status, Instant fetchedAt, JsonNode body) {}
+    private static final String QPATH="/uapi/domestic-stock/v1/quotations/";
+    private static final String FPATH="/uapi/domestic-stock/v1/finance/";
+    private static final Map<String,String> EXPANSION_READS=Map.ofEntries(
+        Map.entry(QPATH+"psearch-title","HHKST03900300"), Map.entry(QPATH+"psearch-result","HHKST03900400"),
+        Map.entry(QPATH+"intstock-multprice","FHKST11300006"), Map.entry(QPATH+"inquire-price","FHKST01010100"),
+        Map.entry(QPATH+"volume-rank","FHPST01710000"),
+        Map.entry("/uapi/domestic-stock/v1/ranking/fluctuation","FHPST01700000"),
+        Map.entry(QPATH+"inquire-daily-itemchartprice","FHKST03010100"),
+        Map.entry(FPATH+"financial-ratio","FHKST66430300"), Map.entry(FPATH+"growth-ratio","FHKST66430800"),
+        Map.entry(FPATH+"stability-ratio","FHKST66430600"),
+        Map.entry(FPATH+"income-statement","FHKST66430200"), Map.entry(FPATH+"balance-sheet","FHKST66430100"),
+        Map.entry("/uapi/domestic-stock/v1/ranking/near-new-highlow","FHPST01870000"),
+        Map.entry(QPATH+"investor-trade-by-stock-daily","FHPTJ04160001"),
+        Map.entry(QPATH+"program-trade-by-stock-daily","FHPPG04650201"),
+        Map.entry(QPATH+"inquire-index-category-price","FHPUP02140000"),
+        Map.entry(QPATH+"daily-credit-balance","FHPST04760000"), Map.entry(QPATH+"chk-holiday","CTCA0903R"),
+        Map.entry(QPATH+"inquire-time-dailychartprice","FHKST03010230"),
+        Map.entry(QPATH+"investor-trend-estimate","HHPTJ04160200"),
+        Map.entry(QPATH+"daily-short-sale","FHPST04830000"), Map.entry(QPATH+"daily-loan-trans","HHPST074500C0"),
+        Map.entry(QPATH+"inquire-time-itemchartprice","FHKST03010200"),
+        Map.entry(QPATH+"program-trade-by-stock","FHPPG04650101"));
+    private volatile String wsApproval;
+    private volatile Instant wsApprovalExpiry=Instant.EPOCH;
+
+    /** Closed allowlist: shared authentication never exposes a trading endpoint. */
+    public ReadOnlySnapshot fetchVerifiedReadOnly(String path,String trId,Map<String,String> params,long deadline) {
+        if (path==null || !Objects.equals(EXPANSION_READS.get(path),trId) || trId==null)
+            return readOnlyEmpty("BLOCKED_ENDPOINT");
+        if (params==null || params.size()>80 || params.entrySet().stream().anyMatch(e -> e.getKey()==null
+            || !e.getKey().matches("[A-Za-z0-9_]{1,40}") || e.getValue()==null || e.getValue().length()>100))
+            return readOnlyEmpty("INVALID_INPUT");
+        if (!isAvailable()) return readOnlyEmpty("NOT_CONFIGURED");
+        if (Thread.currentThread().isInterrupted()) return readOnlyEmpty("CANCELLED");
+        if (KisRestThrottle.remaining(deadline)<=TimeUnit.SECONDS.toNanos(2)) return readOnlyEmpty("BUDGET_EXCEEDED");
+        try {
+            String token=getAccessToken(extendedRestTemplate,deadline);
+            if (token==null) return readOnlyEmpty("TOKEN_UNAVAILABLE");
+            if (KisRestThrottle.remaining(deadline)<=TimeUnit.SECONDS.toNanos(2)) return readOnlyEmpty("BUDGET_EXCEEDED");
+            var headers=new HttpHeaders(); headers.setBearerAuth(token);
+            headers.set("appkey",kisProperties.appKey()); headers.set("appsecret",kisProperties.appSecret());
+            headers.set("tr_id",trId); headers.set("custtype","P");
+            var uri=org.springframework.web.util.UriComponentsBuilder.fromUriString(KIS_BASE+path);
+            params.forEach(uri::queryParam);
+            var response=exchange(extendedRestTemplate,uri.build().encode().toUriString(),HttpMethod.GET,new HttpEntity<>(headers),deadline);
+            KisRestThrottle.check(deadline);
+            if (!response.getStatusCode().is2xxSuccessful() || response.getBody()==null || response.getBody().length()>524_288)
+                return readOnlyEmpty("PROVIDER_ERROR");
+            JsonNode body=objectMapper.readTree(response.getBody());
+            if (!body.path("rt_cd").isTextual() || !"0".equals(body.path("rt_cd").asText())) {
+                if (path.equals(QPATH+"psearch-result") && "MCA05918".equals(body.path("msg_cd").asText())) {
+                    var empty=objectMapper.createObjectNode(); empty.put("rt_cd","0"); empty.putArray("output2");
+                    return new ReadOnlySnapshot("EMPTY",Instant.now(),empty);
+                }
+                return readOnlyEmpty("PROVIDER_ERROR");
+            }
+            return new ReadOnlySnapshot("AVAILABLE",Instant.now(),body);
+        } catch (Exception ignored) {
+            return readOnlyEmpty(Thread.currentThread().isInterrupted()?"CANCELLED":KisRestThrottle.remaining(deadline)<=0?"BUDGET_EXCEEDED":"PROVIDER_ERROR");
+        }
+    }
+    private ReadOnlySnapshot readOnlyEmpty(String status) {
+        return new ReadOnlySnapshot(status,Instant.now(),objectMapper.createObjectNode());
+    }
+    /** Credentials stay inside the service; callers receive only the ephemeral WS approval. */
+    public synchronized String fetchReadOnlyWsApproval(long deadline) {
+        if (!isAvailable() || Thread.currentThread().isInterrupted() || KisRestThrottle.remaining(deadline)<=TimeUnit.SECONDS.toNanos(2)) return null;
+        if (wsApproval!=null && Instant.now().isBefore(wsApprovalExpiry)) return wsApproval;
+        try {
+            var headers=new HttpHeaders(); headers.setContentType(MediaType.APPLICATION_JSON);
+            String body=objectMapper.writeValueAsString(Map.of("grant_type","client_credentials","appkey",kisProperties.appKey(),"secretkey",kisProperties.appSecret()));
+            var response=exchange(extendedRestTemplate,KIS_BASE+"/oauth2/Approval",HttpMethod.POST,new HttpEntity<>(body,headers),deadline);
+            KisRestThrottle.check(deadline);
+            if (!response.getStatusCode().is2xxSuccessful() || response.getBody()==null || response.getBody().length()>8192) return null;
+            String approval=objectMapper.readTree(response.getBody()).path("approval_key").asText("");
+            if (approval.isBlank() || approval.length()>1024) return null;
+            wsApproval=approval; wsApprovalExpiry=Instant.now().plus(20,ChronoUnit.HOURS); return wsApproval;
+        } catch (Exception ignored) { return null; }
+    }
+
     @Autowired
     void configureExtendedClient(@Qualifier("kisExtendedEvidence") RestTemplate client) {
         this.extendedRestTemplate = client;

@@ -48,6 +48,9 @@ public class MultiAgentOrchestrator {
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
     private com.bitman.justbuy.service.KisExtendedEvidenceService kisExtendedEvidenceService;
+    private com.bitman.justbuy.service.KisSourceExpansionService sourceExpansion;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void configureSourceExpansion(com.bitman.justbuy.service.KisSourceExpansionService expansion) { this.sourceExpansion=expansion; }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void configureSourceEvidence(com.bitman.justbuy.service.KisExtendedEvidenceService kisEvidence) {
@@ -323,7 +326,21 @@ public class MultiAgentOrchestrator {
         // ★ 쿼리에 포함된 종목의 실시간 가격을 추가 수집하여 프롬프트에 포함
         Map<String, String> candidateSources = new LinkedHashMap<>();
         Map<String, String> candidateNames = new LinkedHashMap<>();
+        Map<String,Object> sourceExpansionMetadata = null;
         collectCandidateRows(marketDataText, "MARKET_DATA", candidateSources, candidateNames);
+        if (sourceExpansion != null) {
+            checkBudget(deadline);
+            try {
+                var snapshot=sourceExpansion.candidateSnapshot();
+                var verified=snapshot.quotes().stream().filter(q -> q.code()!=null && q.code().matches("[0-9]{6}") && q.name()!=null && !q.name().isBlank() && q.price()!=null && q.price().signum()>0).limit(60).toList();
+                for(var quote:verified) {
+                    candidateSources.putIfAbsent(quote.code(),"KIS_SOURCE_EXPANSION");
+                    candidateNames.putIfAbsent(quote.code(),quote.name());
+                }
+                if(!verified.isEmpty()) marketDataText += "\n[KIS 검증 후보·조회 시세: "+snapshot.status()+"; 관측시각이 null이면 실시간 체결을 확인한 것이 아님]\n"+objectMapper.writeValueAsString(verified);
+            } catch(Exception ignored) { marketDataText += "\n[KIS 신규 후보 확인 불가]\n"; }
+            checkBudget(deadline);
+        }
         Map<String, String> queryStockPrices = new HashMap<>();
         try {
             String queryStockPriceText = fetchQueryStockPrices(query, queryStockPrices);
@@ -358,6 +375,14 @@ public class MultiAgentOrchestrator {
         queryCodes.stream().sorted().forEach(evidenceCodes::add);
         evidenceCodes.addAll(candidateSources.keySet());
         List<String> boundedEvidenceCodes = evidenceCodes.stream().filter(code -> code.matches("[0-9]{6}")).limit(5).toList();
+        if(sourceExpansion != null) {
+            checkBudget(deadline);
+            try {
+                var enrichment=sourceExpansion.enrich(boundedEvidenceCodes);
+                marketDataText += enrichment.prompt();sourceExpansionMetadata=enrichment.metadata();
+            } catch(Exception ignored) { sourceExpansionMetadata=Map.of("status","UNAVAILABLE"); }
+            checkBudget(deadline);
+        }
         if (!boundedEvidenceCodes.isEmpty()) {
             checkBudget(deadline);
             try {
@@ -580,7 +605,7 @@ public class MultiAgentOrchestrator {
         // The caller persists and tracks only its final publication after all periodic filters.
         return new AnalysisResponse(mode, query, publicResults, null, renderPublishedPicks(finalPicks), finalPicks, consensus,
             Instant.now().toString(), !finalPicks.isEmpty(),
-            new AnalysisResponse.Metadata(totalDuration, availableAgents.size(), successResults.size()));
+            new AnalysisResponse.Metadata(totalDuration, availableAgents.size(), successResults.size(),null,sourceExpansionMetadata));
     }
 
     private static void collectCandidateRows(String text, String source, Map<String, String> out, Map<String, String> names) {

@@ -13,6 +13,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class KeywordSearchQueryParserTest {
+    @org.junit.jupiter.api.Test void explicitResearchFiltersPreserveNumericPrecisionAndDoNotUseVagueConcepts() {
+        var spec = new KeywordSearchQueryParser().parse("PER 15.5배 이하 PBR 1.2 이하 이평선 정배열 20일 돌파 거래량 20일 평균 대비 2배 이상");
+        org.assertj.core.api.Assertions.assertThat(spec.unsupportedTerms()).isEmpty();
+        org.assertj.core.api.Assertions.assertThat(spec.filters()).extracting(KeywordSearchQueryParser.Filter::field)
+            .containsExactly("PER", "PBR", "MA_ALIGNED", "BREAKOUT20", "VOLUME_RATIO20");
+        org.assertj.core.api.Assertions.assertThat(spec.filters().getFirst().threshold()).isEqualByComparingTo("15.5");
+    }
+
+    @org.junit.jupiter.api.Test void researchConditionsRejectUnknownWindowsAndAmbiguousOrNegativeRatios() {
+        var parser = new KeywordSearchQueryParser();
+        for (String query : java.util.List.of("60일 돌파", "PER -1배 이하", "PBR 1% 이하", "거래량 10일 평균 대비 2배 이상", "저평가 정배열"))
+            org.assertj.core.api.Assertions.assertThat(parser.parse(query).unsupportedTerms()).as(query).isNotEmpty();
+    }
+
+    @org.junit.jupiter.api.Test void researchThresholdContradictionsAreRejected() {
+        org.assertj.core.api.Assertions.assertThat(new KeywordSearchQueryParser().parse("PER 20배 이상 PER 10배 이하").unsupportedTerms()).isNotEmpty();
+    }
 
     private final KeywordSearchQueryParser parser = new KeywordSearchQueryParser();
 

@@ -17,12 +17,15 @@ import com.bitman.justbuy.dto.KeywordSearchResponse.*;
 public class KeywordConditionSearchService {
     private final KeywordSearchQueryParser parser;
     private final KeywordSearchDataService data;
+    private KisResearchEvidenceService researchEvidence;
     private final Semaphore slots = new Semaphore(4);
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     public KeywordConditionSearchService(KeywordSearchQueryParser parser, KeywordSearchDataService data) {
         this.parser = parser;
         this.data = data;
     }
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void configureResearchEvidence(KisResearchEvidenceService research) { this.researchEvidence=research; }
     public KeywordSearchResponse search(String query) {
         Spec spec = parser.parse(query);
         if (!spec.unsupportedTerms().isEmpty()) return response(query,"UNSUPPORTED",spec,
@@ -69,7 +72,7 @@ public class KeywordConditionSearchService {
             }
             boolean matches=true;
             for (Filter f:spec.filters()) {
-                if (isFlow(f.field())) continue;
+                if (isFlow(f.field()) || isResearch(f.field())) continue;
                 BigDecimal v=metric(q,f.field());
                 if (v==null) { warnings.add(f.label()+"에 필요한 실측값 미확인 종목은 제외했습니다."); matches=false; }
                 else if (!compare(v,f)) matches=false;
@@ -82,6 +85,20 @@ public class KeywordConditionSearchService {
             if (matches) eligible.add(q);
         }
         eligible.sort(order(spec));
+        int priceEligibleCount=eligible.size();
+        boolean needsResearch=spec.filters().stream().anyMatch(f -> isResearch(f.field()));
+        boolean researchLimited=needsResearch && eligible.size()>5;
+        Map<String,KisResearchEvidenceService.CandidateEvidence> research=new LinkedHashMap<>();
+        if(needsResearch && !eligible.isEmpty()) {
+            if(researchLimited) warnings.add("KIS 기술·PER/PBR 조건은 시세 조건을 통과한 정렬 상위 5종목까지만 검증합니다. 전체 시장 기술 검색이 아닙니다.");
+            eligible=new ArrayList<>(eligible.subList(0,Math.min(5,eligible.size())));
+            if(researchEvidence!=null) try {
+                var batch=researchEvidence.fetchEvidence(eligible.stream().map(Quote::code).toList());
+                if(batch!=null && batch.candidates()!=null) for(var candidate:batch.candidates()) {
+                    if(candidate!=null && eligible.stream().anyMatch(q -> q.code().equals(candidate.stockCode()))) research.putIfAbsent(candidate.stockCode(),candidate);
+                }
+            } catch(RuntimeException ignored) { warnings.add("KIS 기술·PER/PBR 자료 미확인: 조건 값을 추정하지 않았습니다."); }
+        }
         boolean needsFlow=spec.filters().stream().anyMatch(f -> isFlow(f.field()));
         boolean flowLimited=needsFlow && eligible.size()>20;
         Map<String,Flow> flows=Map.of();
@@ -93,18 +110,31 @@ public class KeywordConditionSearchService {
         }
         var matched=new ArrayList<Match>();
         int verifiedFlows=0;
+        if(needsFlow) for(Quote q:eligible) if(validFlow(flows.get(q.code()),q.code(),spec)) verifiedFlows++;
+        int verifiedResearch=0;
         for (Quote q:eligible) {
+            var researchCandidate=research.get(q.code());
+            boolean researchKnown=true,researchMatches=true;
+            for(Filter filter:spec.filters()) if(isResearch(filter.field())) {
+                BigDecimal value=researchMetric(researchCandidate,filter.field());
+                if(value==null) {researchKnown=false;warnings.add("KIS "+filter.label()+" 실측 근거 미확인 종목은 제외했습니다. 이용 권한·자료 범위를 확인해 주세요.");}
+                else if(!compare(value,filter)) researchMatches=false;
+            }
+            if(needsResearch && !researchKnown) continue;
+            if(needsResearch) verifiedResearch++;
+            if(!researchMatches) continue;
             Flow flow=flows.get(q.code());
             if (needsFlow && !validFlow(flow,q.code(),spec)) {
                 warnings.add("요청한 수급 기간·실제 관측일·순매수 값 미확인 종목은 제외했습니다."); continue;
             }
-            if (needsFlow) verifiedFlows++;
             if (needsFlow && spec.filters().stream().filter(f -> isFlow(f.field())).anyMatch(f ->
                 !compare(BigDecimal.valueOf("FOREIGN_NET".equals(f.field()) ? flow.foreignNet():flow.institutionNet()),f))) continue;
             List<Evidence> evidence=new ArrayList<>();
             for (Filter f:spec.filters()) {
                 if (isFlow(f.field())) evidence.add(new Evidence(f.label(),Long.toString("FOREIGN_NET".equals(f.field()) ? flow.foreignNet():flow.institutionNet()),
                     "주","KIS OpenAPI",flow.fromDate()+" ~ "+flow.toDate()));
+                else if(isResearch(f.field())) evidence.add(new Evidence(f.label(),researchMetric(researchCandidate,f.field()).stripTrailingZeros().toPlainString(),
+                    Set.of("PER","PBR","VOLUME_RATIO20").contains(f.field())?"배":"충족","KIS OpenAPI",researchPeriod(researchCandidate,f.field())));
                 else evidence.add(new Evidence(f.label(),metric(q,f.field()).stripTrailingZeros().toPlainString(),unit(f.field()),q.source(),
                     q.observedAt()==null ? null:q.observedAt().toString()));
             }
@@ -121,9 +151,11 @@ public class KeywordConditionSearchService {
         if (!raw.isEmpty() && distinct.isEmpty()) outcome="UNAVAILABLE";
         if (raw.isEmpty() && !warnings.isEmpty()) outcome="UNAVAILABLE";
         if ((eligible.isEmpty() && missingRank>0) || (needsFlow && !eligible.isEmpty() && verifiedFlows==0)) outcome="UNAVAILABLE";
-        String scope=snapshot.scope()+(needsFlow ? " · 최근 "+spec.flowDays()+"개 실제 거래일 수급, 최대 20종목":"");
+        if(needsResearch && !eligible.isEmpty() && verifiedResearch==0) outcome="UNAVAILABLE";
+        String scope=snapshot.scope()+(needsFlow ? " · 최근 "+spec.flowDays()+"개 실제 거래일 수급, 최대 20종목":"")
+            +(needsResearch ? " · KIS 완료 일봉·PER/PBR 검증 최대 5종목":"");
         String sourceStatus="UNAVAILABLE".equals(outcome) ? "UNAVAILABLE":partial ? "PARTIAL":"COMPLETE";
-        return response(query,outcome,spec,new Scope(scope,distinct.size(),eligible.size(),count,flowLimited || count>limit),
+        return response(query,outcome,spec,new Scope(scope,distinct.size(),priceEligibleCount,count,flowLimited || researchLimited || count>limit),
             snapshot.fetchedAt(),sourceStatus,List.copyOf(warnings),picks);
     }
 
@@ -146,6 +178,38 @@ public class KeywordConditionSearchService {
         } catch (RuntimeException e) { return false; }
     }
     private static boolean isFlow(String field) { return "FOREIGN_NET".equals(field) || "INSTITUTION_NET".equals(field); }
+    private static boolean isResearch(String field) { return Set.of("PER","PBR","MA_ALIGNED","BREAKOUT20","VOLUME_RATIO20").contains(field); }
+    private static Map<String,Object> researchSource(KisResearchEvidenceService.CandidateEvidence candidate,String field) {
+        if(candidate==null) return Map.of();
+        Map<String,Object> source=Set.of("PER","PBR").contains(field)?candidate.valuation():candidate.technical();
+        return source==null?Map.of():source;
+    }
+    private static BigDecimal researchMetric(KisResearchEvidenceService.CandidateEvidence candidate,String field) {
+        Map<String,Object> source=researchSource(candidate,field);
+        if(!Set.of("AVAILABLE","PARTIAL_COVERAGE").contains(String.valueOf(source.get("status"))) || !"KIS OpenAPI".equals(source.get("source"))) return null;
+        try {
+            Instant fetched=Instant.parse(String.valueOf(source.get("fetchedAt")));Instant now=Instant.now();
+            if(fetched.isAfter(now.plusSeconds(1)) || fetched.isBefore(now.minusSeconds(Set.of("PER","PBR").contains(field)?60:600))) return null;
+            if(!Set.of("PER","PBR").contains(field)) {
+                LocalDate date=LocalDate.parse(String.valueOf(source.get("observedDate"))),today=LocalDate.now(KST);
+                if(date.isAfter(today) || date.isBefore(today.minusDays(7)) || !com.bitman.justbuy.util.KoreanMarketCalendar.isTradingDay(date)) return null;
+            }
+            String key=switch(field){case "PER"->"per";case "PBR"->"pbr";case "MA_ALIGNED"->"maAligned";case "BREAKOUT20"->"breakout20";default->"volumeRatio20";};
+            Object raw=source.get(key);
+            if(Set.of("MA_ALIGNED","BREAKOUT20").contains(field)) return raw instanceof Boolean b?b?BigDecimal.ONE:BigDecimal.ZERO:null;
+            if(!(raw instanceof BigDecimal) && !(raw instanceof Number) && !(raw instanceof String)) return null;
+            String numeric=raw.toString();if(numeric.length()>48 || !numeric.matches("[0-9]+(?:\\.[0-9]+)?")) return null;
+            BigDecimal value=new BigDecimal(numeric);
+            if(value.abs().compareTo(new BigDecimal("1000000000000000"))>0 || Set.of("PER","PBR").contains(field) && value.signum()<=0) return null;
+            return value;
+        } catch(RuntimeException ignored) {return null;}
+    }
+    private static String researchPeriod(KisResearchEvidenceService.CandidateEvidence candidate,String field) {
+        Map<String,Object> source=researchSource(candidate,field);
+        if(Set.of("PER","PBR").contains(field)) return null;
+        try {return LocalDate.parse(String.valueOf(source.get("coverageStart")))+" ~ "+LocalDate.parse(String.valueOf(source.get("coverageEnd")));}
+        catch(RuntimeException ignored){return null;}
+    }
     private static BigDecimal metric(Quote q,String field) {
         return switch(field) { case "PRICE" -> q.price(); case "CHANGE_PCT" -> q.changePct();
             case "VOLUME" -> q.volume(); case "TRADING_VALUE" -> q.tradingValueKrw(); default -> null; };

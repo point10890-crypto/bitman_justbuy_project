@@ -14,9 +14,13 @@ public record AnalysisResponse(
         boolean isFresh,
         Metadata metadata
 ) {
-    public record Metadata(long totalDurationMs, int agentsUsed, int agentsSucceeded, String publicationStatus) {
+    public record Metadata(long totalDurationMs, int agentsUsed, int agentsSucceeded, String publicationStatus,
+                           java.util.Map<String,Object> sourceExpansion) {
+        public Metadata(long totalDurationMs,int agentsUsed,int agentsSucceeded,String publicationStatus) {
+            this(totalDurationMs,agentsUsed,agentsSucceeded,publicationStatus,null);
+        }
         public Metadata(long totalDurationMs, int agentsUsed, int agentsSucceeded) {
-            this(totalDurationMs, agentsUsed, agentsSucceeded, null);
+            this(totalDurationMs, agentsUsed, agentsSucceeded, null, null);
         }
     }
 }

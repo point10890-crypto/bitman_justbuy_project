@@ -11,6 +11,57 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 class KeywordConditionSearchServiceTest {
+    @Test void verifiedResearchConditionsFilterActualQuoteCandidates() {
+        var research=mock(KisResearchEvidenceService.class);
+        service.configureResearchEvidence(research);
+        snapshot(quote("005930","삼성전자","KOSPI","60000","4","20000000000"),
+            quote("000660","SK하이닉스","KOSPI","40000","3","12000000000"));
+        when(research.fetchEvidence(anyList())).thenReturn(new KisResearchEvidenceService.EvidenceBatch("PARTIAL",time,List.of(
+            researchCandidate("005930",new BigDecimal("12"),true),researchCandidate("000660",new BigDecimal("25"),true))));
+        var result=service.search("PER 15배 이하 이평선 정배열");
+        assertThat(result.matches()).extracting(m -> m.code()).containsExactly("005930");
+        assertThat(result.matches().getFirst().evidence()).anyMatch(e -> e.source().equals("KIS OpenAPI") && e.observedValue().equals("12"));
+    }
+
+    @Test void disabledOrMissingResearchEvidenceIsUnavailableAndNeverAFalseEmptySearch() {
+        snapshot(quote("005930","삼성전자","KOSPI","60000","4","20000000000"));
+        assertThat(service.search("PER 15배 이하").outcome()).isEqualTo("UNAVAILABLE");
+        var research=mock(KisResearchEvidenceService.class);service.configureResearchEvidence(research);
+        when(research.fetchEvidence(anyList())).thenReturn(new KisResearchEvidenceService.EvidenceBatch("DISABLED",time,List.of()));
+        var result=service.search("20일 돌파");
+        assertThat(result.outcome()).isEqualTo("UNAVAILABLE");assertThat(result.matches()).isEmpty();
+        assertThat(result.warnings()).anyMatch(w -> w.contains("KIS") && w.contains("미확인"));
+    }
+
+    @Test void researchSubsetIsBoundedAndItsCoverageIsExplicit() {
+        var research=mock(KisResearchEvidenceService.class);service.configureResearchEvidence(research);
+        var quotes=new KeywordSearchDataService.Quote[6];for(int i=0;i<6;i++)quotes[i]=quote(String.format("%06d",i+1),"실측종목"+i,"KOSPI","10000","1","10000000000");
+        snapshot(quotes);
+        when(research.fetchEvidence(anyList())).thenAnswer(call -> new KisResearchEvidenceService.EvidenceBatch("PARTIAL",time,
+            ((List<String>)call.getArgument(0)).stream().map(code -> researchCandidate(code,new BigDecimal("10"),true)).toList()));
+        var result=service.search("PER 15 이하");
+        assertThat(result.matches()).hasSize(5);assertThat(result.scope().truncated()).isTrue();
+        assertThat(result.scope().label()).contains("5종목");
+        assertThat(result.warnings()).anyMatch(w -> w.contains("5종목"));
+    }
+
+    @Test void verifiedResearchNonMatchIsNormalEmptyAndNeverUsesEstimatedFlowAsAPoint() {
+        var research=mock(KisResearchEvidenceService.class);service.configureResearchEvidence(research);
+        snapshot(quote("005930","삼성전자","KOSPI","60000","4","20000000000"));
+        when(research.fetchEvidence(anyList())).thenReturn(new KisResearchEvidenceService.EvidenceBatch("PARTIAL",time,
+            List.of(researchCandidate("005930",new BigDecimal("25"),false))));
+        assertThat(service.search("PER 15 이하").outcome()).isEqualTo("EMPTY");
+        assertThat(service.search("이평선 정배열").matches()).isEmpty();
+    }
+
+    KisResearchEvidenceService.CandidateEvidence researchCandidate(String code,BigDecimal per,boolean aligned) {
+        String date=com.bitman.justbuy.util.KoreanMarketCalendar.previousTradingDay(LocalDate.now(ZoneId.of("Asia/Seoul"))).toString();
+        Map<String,Object> technical=Map.of("status","AVAILABLE","source","KIS OpenAPI","fetchedAt",time.toString(),"observedDate",date,
+            "coverageStart",LocalDate.parse(date).minusDays(80).toString(),"coverageEnd",date,"maAligned",aligned,"volumeRatio20",new BigDecimal("2"));
+        Map<String,Object> valuation=Map.of("status","AVAILABLE","source","KIS OpenAPI","fetchedAt",time.toString(),"per",per);
+        return new KisResearchEvidenceService.CandidateEvidence(code,technical,valuation,Map.of("status","UNAVAILABLE"),
+            Map.of("status","ESTIMATE_UNDATED"),Map.of("status","UNAVAILABLE"),Map.of("status","UNAVAILABLE"));
+    }
     final KeywordSearchDataService data = mock(KeywordSearchDataService.class);
     final KeywordSearchQueryParser parser = new KeywordSearchQueryParser();
     final KeywordConditionSearchService service = new KeywordConditionSearchService(parser, data);

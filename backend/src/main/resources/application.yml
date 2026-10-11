@@ -57,6 +57,10 @@ bitman:
   kis:
     app-key: ${BITMAN_KIS_APP_KEY:}
     app-secret: ${BITMAN_KIS_APP_SECRET:}
+    source-expansion:
+      enabled: ${BITMAN_KIS_SOURCE_EXPANSION_ENABLED:false}
+      licensed: ${BITMAN_KIS_SOURCE_EXPANSION_LICENSED:false}
+      hts-id: ${BITMAN_KIS_HTS_ID:}
     extended-evidence:
       enabled: ${BITMAN_KIS_EXTENDED_EVIDENCE_ENABLED:false}
   ecos:
