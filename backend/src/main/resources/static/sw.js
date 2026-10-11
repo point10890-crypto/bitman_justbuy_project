@@ -1,6 +1,6 @@
 /** BitMan Service Worker - freshness-first app shell */
 
-const CACHE_NAME = 'bitman-v20261011-agent-motion-r2'
+const CACHE_NAME = 'bitman-v20261011-agent-motion-r3'
 const SHELL_ASSETS = [
   '/manifest.json',
 ]

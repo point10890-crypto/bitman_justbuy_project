@@ -52,3 +52,5 @@
 - 회귀 테스트 6개 추가. 기존 코드에서 4개 실패 후 수정본에서 6개 모두 통과했고, 전체 프론트엔드 테스트 36개 및 빌드가 통과했다.
 - 실제 로컬 Home 320·390px에서 수동 재생·정지·키보드 인사·동적 모션 설정을 확인했다. 각 120개 화면 샘플로 인사와 부유의 전체 주기 동안 수평 넘침이 없음을 확인했다. Home·Landing PC 1440px도 정상이다.
 - 수정본 JS `index-BxZNavDC.js`, CSS `index-Dcx4dBH3.css`.
+- Cloudflare Pages main·production 및 MiniPC 배포 완료. 두 Pages URL의 자산 해시·SW r3를 확인했고, 실제 공개 앱에서 3.2초 움직임과 재생·정지 버튼을 확인했다. 실서비스 화면을 4.1초 촬영한 GIF는 `tmp/bitman-agent-motion-fixed.gif`에 보관한다.
+- MiniPC 배포 중 백엔드 244개 테스트가 다시 통과했다(13:48 KST). 운영 DB 백업을 보존했고, MiniPC 로컬·공개 health는 `status=ok`, Spring 페이지 자산 해시는 동일하다.
