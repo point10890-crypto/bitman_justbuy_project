@@ -27,6 +27,34 @@ class AdminSourceReadinessTest {
     private final ConditionSearchPipeline pipeline = mock(ConditionSearchPipeline.class);
     private final KisApiService kis = mock(KisApiService.class);
 
+    @Test void explicitFinancialProbeIsolatesUnexpectedProviderFailureWithoutExposingItsMessage() throws Exception {
+        var dart=mock(com.bitman.justbuy.service.DartApiService.class);
+        when(dart.fetchFinancialEvidence(List.of("028670"))).thenThrow(new IllegalStateException("private-key-do-not-return"));
+        var controller=new AdminController(null,analysis,pipeline,List.of(),kis,null,null,new ConditionRunService());
+        ReflectionTestUtils.setField(controller,"dartFinancialSource",dart);
+        var response=controller.getDartFinancialEvidence("028670");
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getBody()).containsEntry("status","UNAVAILABLE");
+        assertThat(new ObjectMapper().writeValueAsString(response.getBody())).doesNotContain("private-key-do-not-return");
+        verify(dart).fetchFinancialEvidence(List.of("028670"));
+        org.mockito.Mockito.verifyNoInteractions(kis,analysis);
+    }
+
+    @Test void savedQualityReportDoesNotExposePrivateQuestionsOrStartAnalysis() throws Exception {
+        var pick=new com.bitman.justbuy.dto.StockPick("팬오션","028670","6,510","6,750","6,420","주목","private rationale",50,"legacy score","MARKET_DATA","NAVER_FINANCE",java.time.Instant.now().toString());
+        var response=new com.bitman.justbuy.dto.AnalysisResponse("BREAKOUT","private user question",List.of(),null,"private final content",List.of(pick),null,
+            java.time.Instant.now().toString(),true,new com.bitman.justbuy.dto.AnalysisResponse.Metadata(1,2,2));
+        when(analysis.getStoredPrecomputed("BREAKOUT")).thenReturn(response);
+        var controller=new AdminController(null,analysis,pipeline,List.of(),kis,null,null,new ConditionRunService());
+        ReflectionTestUtils.setField(controller,"detectedStockQualityService",new com.bitman.justbuy.service.DetectedStockQualityService());
+        var body=controller.getDetectedStockQuality().getBody();
+        assertThat(body).containsEntry("publishedSlots",1).containsEntry("uniqueStocks",1);
+        String json=new ObjectMapper().writeValueAsString(body);
+        assertThat(json).contains("028670","LIMITED_EVIDENCE").doesNotContain("private user question","private rationale","private final content");
+        for(String mode:List.of("BREAKOUT","REVERSAL_EDGE","FLOW_LEADER","CATALYST_BURST"))verify(analysis).getStoredPrecomputed(mode);
+        verifyNoMoreInteractions(analysis); org.mockito.Mockito.verifyNoInteractions(kis);
+    }
+
     @Test
     void runtimeQueueStatusIsVisibleButUnexpectedPrivateFieldsAreNeverExposed() throws Exception {
         var adapter=mock(KiwoomReadOnlyService.class);

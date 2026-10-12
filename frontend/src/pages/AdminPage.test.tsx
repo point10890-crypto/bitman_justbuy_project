@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter } from 'react-router-dom'
 import {
   adminUpdateUser, approveSubscription, fetchAllUsers, fetchPendingSubscriptions,
-  fetchSystemStatus, refreshAllAnalysis, rejectSubscription, type UserDto,
+  fetchSystemStatus, fetchDartFinancialEvidence, refreshAllAnalysis, rejectSubscription, type UserDto,
 } from '../api/authApi'
 import AdminPage from './AdminPage'
 
@@ -20,6 +20,7 @@ vi.mock('../api/authApi', () => ({
   fetchAllUsers: vi.fn(),
   fetchPendingSubscriptions: vi.fn(),
   fetchSystemStatus: vi.fn(),
+  fetchDartFinancialEvidence: vi.fn(),
   refreshAllAnalysis: vi.fn(),
   rejectSubscription: vi.fn(),
   revokeSubscription: vi.fn(),
@@ -300,5 +301,50 @@ describe('admin market evidence queue visibility', () => {
     expect(progress.getByText('확인된 근거부터 사용합니다. 대기 중인 값은 조건 판정에 포함하지 않습니다.')).toBeTruthy()
     expect(refreshAllAnalysis).not.toHaveBeenCalled()
     expect(fetchSystemStatus).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('admin detected stock evidence quality', () => {
+  afterEach(cleanup)
+  it('shows actual evidence gaps and overlap without inventing a success probability or starting analysis', async () => {
+    vi.clearAllMocks()
+    vi.mocked(fetchAllUsers).mockResolvedValue([])
+    vi.mocked(fetchPendingSubscriptions).mockResolvedValue([])
+    vi.mocked(fetchSystemStatus).mockResolvedValue({ detectedStockQuality: {
+      status: 'SAVED_SNAPSHOT_ASSESSMENT', publishedSlots: 9, uniqueStocks: 4,
+      crossModeOverlap: [{ stockCode: '028670', occurrences: 4 }],
+      scope: '네 가지 AI 모드의 최신 저장 픽', performanceConclusion: '실제 수익률 개선은 아직 입증되지 않았습니다.',
+      modes: [{ mode: 'REVERSAL_EDGE', updatedAt: '2026-10-12T05:55:00Z', stocks: [{
+        stockCode: '005830', stockName: 'DB손해보험', evidenceState: 'LIMITED_EVIDENCE', quoteVerified: true,
+        quoteFresh: true, quoteSource: 'NAVER_FINANCE', quoteCheckedAt: '2026-10-12T05:55:00Z',
+        analystCount: 1, financialEvidenceAvailable: false, issues: ['FINANCIAL_EVIDENCE_MISSING', 'REWARD_RISK_BELOW_ONE'],
+      }], counts: {}, limitations: [] }],
+    } })
+    render(<MemoryRouter initialEntries={['/admin?view=system']}><AdminPage /></MemoryRouter>)
+    const section = within(await screen.findByRole('region', { name: '검출 종목 근거 품질' }))
+    expect(section.getByText('표시 항목 9개 · 서로 다른 종목 4개')).toBeTruthy()
+    expect(section.getByText('DB손해보험 (005830)')).toBeTruthy()
+    expect(section.getByText(/구조화 재무 근거 없음/)).toBeTruthy()
+    expect(section.getByText(/목표 상승폭보다 손절 하락폭이 큼/)).toBeTruthy()
+    expect(section.queryByText(/성공 확률/)).toBeNull()
+    expect(refreshAllAnalysis).not.toHaveBeenCalled()
+    expect(fetchSystemStatus).toHaveBeenCalledTimes(1)
+  })
+  it('checks only the entered stock after an explicit source probe and labels financial periods', async () => {
+    vi.clearAllMocks()
+    vi.mocked(fetchAllUsers).mockResolvedValue([])
+    vi.mocked(fetchPendingSubscriptions).mockResolvedValue([])
+    vi.mocked(fetchSystemStatus).mockResolvedValue({})
+    vi.mocked(fetchDartFinancialEvidence).mockResolvedValue({status:'AVAILABLE',source:'DART',evidence:{status:'AVAILABLE',capturedAt:'2026-10-12T09:00:00Z',stocks:[{
+      stockCode:'028670',status:'AVAILABLE',issues:[],facts:{businessYear:2026,reportCode:'11012',fsDiv:'CFS',currency:'KRW',receiptNo:'20260814000001',period:'HALF_YEAR_YTD',cashFlowPeriod:'HALF_YEAR_YTD',operatingCashFlow:123000000,risks:[]},
+    }]}})
+    render(<MemoryRouter initialEntries={['/admin?view=system']}><AdminPage /></MemoryRouter>)
+    expect(fetchDartFinancialEvidence).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button',{name:'DART 재무 연결 점검'}))
+    const section=within(await screen.findByRole('region',{name:'DART 전체 재무 연결 점검'}))
+    await waitFor(()=>expect(fetchDartFinancialEvidence).toHaveBeenCalledWith('admin-upgrade-fixture-token','028670'))
+    expect(await section.findByText(/2026년 · 반기 누적 · 연결 · KRW/)).toBeTruthy()
+    expect(section.getByText(/영업 현금흐름 123,000,000원 · 반기 누적/)).toBeTruthy()
+    expect(refreshAllAnalysis).not.toHaveBeenCalled()
   })
 })

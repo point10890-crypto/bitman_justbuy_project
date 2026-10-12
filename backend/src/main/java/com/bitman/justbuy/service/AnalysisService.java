@@ -65,6 +65,7 @@ public class AnalysisService {
     private final Path dataDir;
     private final Clock clock;
     private TrackRecordService trackRecordService;
+    private AnalysisEvidenceJournalService evidenceJournal;
     private final Semaphore executionSlots = new Semaphore(4);
     @Value("${bitman.analysis.run-timeout-ms:120000}")
     private long runTimeoutMs = 120_000L;
@@ -88,6 +89,9 @@ public class AnalysisService {
     void configureTracking(TrackRecordService trackRecordService) {
         this.trackRecordService = trackRecordService;
     }
+
+    @Autowired(required=false)
+    public void configureEvidenceJournal(AnalysisEvidenceJournalService journal){this.evidenceJournal=journal;}
 
     AnalysisService(MultiAgentOrchestrator orchestrator,
                     ConditionSearchFormulaCatalog formulaCatalog,
@@ -223,6 +227,16 @@ public class AnalysisService {
 
     /** Only callers which have already persisted the final published set use this. */
     public void recordPublishedAnalysis(AnalysisResponse response) {
+        if(response==null)return;
+        if(response!=null&&evidenceJournal!=null){
+            var decisions=response.stockPicks()==null?List.<Map<String,Object>>of():response.stockPicks().stream().map(p->{
+                var row=new LinkedHashMap<String,Object>(); row.put("stockCode",p.code());
+                try{row.put("currentPrice",new java.math.BigDecimal(p.currentPrice().replace(",", "").replace("원", "").trim()));}catch(RuntimeException ignored){}
+                row.put("quoteSource",p.quoteSource());row.put("quoteCheckedAt",p.quoteCheckedAt());row.put("financialScore",p.financialScore());return row;
+            }).toList();
+            evidenceJournal.capture("FINAL_PUBLICATION",response.mode(),response.stockPicks()==null?List.of():response.stockPicks().stream().map(com.bitman.justbuy.dto.StockPick::code).toList(),
+                response.metadata()==null?Map.of():Map.of("sourceCoverage",response.metadata().sourceExpansion()==null?Map.of():response.metadata().sourceExpansion()),decisions);
+        }
         if (trackRecordService != null && response.stockPicks() != null && !response.stockPicks().isEmpty()) {
             trackRecordService.recordAnalysis(response);
         }

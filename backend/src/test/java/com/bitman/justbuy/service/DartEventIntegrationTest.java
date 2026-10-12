@@ -44,12 +44,13 @@ class DartEventIntegrationTest {
         var previous = logger.getLevel(); logger.setLevel(ch.qos.logback.classic.Level.DEBUG);
         try {
             var corpMapper = mock(DartCorpCodeMapper.class);
-            when(corpMapper.getCorpCode("005930")).thenReturn("00126380");
+            when(corpMapper.getCachedCorpCode("005930")).thenReturn("00126380");
             var client = mock(RestTemplate.class);
             when(client.getForObject(anyString(), eq(String.class))).thenThrow(new IllegalStateException(
                 "https://opendart.fss.or.kr/api/company.json?crtfc_key=fixture-sensitive-marker"));
             new DartApiService(new DartProperties("fixture"), corpMapper, client, new ObjectMapper())
                 .fetchFormattedDartData("005930");
+            verify(corpMapper, never()).getCorpCode(anyString());
             assertThat(appender.list).isNotEmpty();
             assertThat(appender.list).allSatisfy(event -> {
                 assertThat(event.getFormattedMessage()).doesNotContain("crtfc_key", "fixture-sensitive-marker", "https://");

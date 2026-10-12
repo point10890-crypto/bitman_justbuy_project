@@ -85,6 +85,37 @@ class KisResearchEvidenceServiceTest {
         assertThat(technical().get("status")).isEqualTo("INSUFFICIENT_COVERAGE");
         assertThat(technical()).doesNotContainKeys("ma20", "ma60", "volumeRatio20");
     }
+    @Test void completedSixtyOneBarsExposeTrendAndRiskWithoutAdditionalRequests() {
+        stub("inquire-daily-itemchartprice",daily(61));
+        Map<String,Object> facts=technical();
+        assertThat(facts).containsKeys("return20dPct","return60dPct","atr14","atr14Pct","hv20AnnualizedPct");
+        assertThat(new java.math.BigDecimal(facts.get("return20dPct").toString())).isEqualByComparingTo("0");
+        assertThat(new java.math.BigDecimal(facts.get("return60dPct").toString())).isEqualByComparingTo("0");
+        assertThat(new java.math.BigDecimal(facts.get("atr14").toString())).isEqualByComparingTo("30");
+        assertThat(new java.math.BigDecimal(facts.get("atr14Pct").toString())).isEqualByComparingTo("27.272727");
+        assertThat(new java.math.BigDecimal(facts.get("hv20AnnualizedPct").toString())).isEqualByComparingTo("0");
+        assertThat(facts).containsEntry("atrReferencePriceBasis","LATEST_COMPLETED_ADJUSTED_CLOSE")
+            .containsEntry("source","KIS OpenAPI").containsEntry("fetchedAt",now.toString()).containsEntry("hv20AnnualizationDays",252);
+        verify(gateway,times(7)).fetch(anyString(),anyString(),anyMap(),anyLong());
+    }
+    @Test void twentyClosesAreNotTwentyReturnsAndSixtyClosesAreNotSixtyReturns() {
+        stub("inquire-daily-itemchartprice",daily(20));var twenty=technical();
+        assertThat(twenty).containsKeys("atr14","atr14Pct").doesNotContainKeys("return20dPct","return60dPct","hv20AnnualizedPct");
+        service=new KisResearchEvidenceService(gateway,mapper,clock);stub("inquire-daily-itemchartprice",daily(60));
+        assertThat(technical()).containsKeys("return20dPct","hv20AnnualizedPct").doesNotContainKey("return60dPct");
+    }
+    @Test void aGapJustBeforeSixtyVerifiedBarsCannotInventSixtyReturns() {
+        ObjectNode body=daily(62);body.withArray("output2").remove(60);stub("inquire-daily-itemchartprice",body);
+        assertThat(technical()).containsKeys("return20dPct","hv20AnnualizedPct").doesNotContainKey("return60dPct");
+    }
+    @Test void incompleteCurrentDayCannotAlterDerivedRiskOrReturns() {
+        ObjectNode body=daily(61);body.withArray("output2").insert(0,mapper.createObjectNode()
+            .put("stck_bsop_date","20261012").put("stck_oprc","999999").put("stck_hgpr","999999")
+            .put("stck_lwpr","999999").put("stck_clpr","999999").put("acml_vol","1"));
+        stub("inquire-daily-itemchartprice",body);var facts=technical();
+        assertThat(facts).containsEntry("incompleteCurrentBarExcluded",true).containsEntry("return20dToDate","2026-10-08");
+        assertThat(new java.math.BigDecimal(facts.get("atr14").toString())).isEqualByComparingTo("30");
+    }
 
     @Test void twentyBarsDoNotInventSixtyDayMovingAverage() {
         stub("inquire-daily-itemchartprice", daily(20));

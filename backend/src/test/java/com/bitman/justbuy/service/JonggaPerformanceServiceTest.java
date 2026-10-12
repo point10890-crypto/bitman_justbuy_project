@@ -122,6 +122,111 @@ class JonggaPerformanceServiceTest {
             .containsExactly("2026-07-23", "2026-07-22");
     }
 
+    @Test
+    void aDayWithOnlyUnmeasurableReturnsIsNotVerifiedOrWaitingForMissingRecords() throws Exception {
+        writeArchive("20260723", "2026-07-23");
+        when(repository.findByModeAndAnalysisDateBetweenOrderByAnalysisDateDescCreatedAtDesc(anyString(), any(), any()))
+            .thenReturn(List.of(
+                verified("005930", LocalDate.of(2026, 7, 23), 80_000L, 40_000L, -50.0, 44_000L, -45.0),
+                verified("000660", LocalDate.of(2026, 7, 23), 180_000L, 90_000L, -50.0, 99_000L, -45.0)));
+
+        var response = service.getPerformance("2026-07-23", "2026-07-23");
+
+        assertThat(response.days().getFirst().verified()).isFalse();
+        assertThat(response.days().getFirst().rows()).extracting(PerformanceRow::result)
+            .containsExactly("검증불가", "검증불가");
+        assertThat(response.verifiedCount()).isZero();
+        assertThat(response.avgCloseReturnPct()).isEqualTo("-");
+        assertThat(response.note()).contains("검증불가").doesNotContain("검증 기록이 아직 없습니다");
+    }
+
+    @Test
+    void anUnmeasurableRowKeepsTheDayIncompleteWithoutPollutingValidReturnStatistics() throws Exception {
+        writeArchive("20260723", "2026-07-23");
+        when(repository.findByModeAndAnalysisDateBetweenOrderByAnalysisDateDescCreatedAtDesc(anyString(), any(), any()))
+            .thenReturn(List.of(
+                verified("005930", LocalDate.of(2026, 7, 23), 80_000L, 82_000L, 2.5, 85_000L, 6.25),
+                verified("000660", LocalDate.of(2026, 7, 23), 180_000L, 90_000L, -50.0, 99_000L, -45.0)));
+
+        var response = service.getPerformance("2026-07-23", "2026-07-23");
+
+        assertThat(response.days().getFirst().verified()).isFalse();
+        assertThat(response.verifiedCount()).isEqualTo(1);
+        assertThat(response.wins()).isEqualTo(1);
+        assertThat(response.avgCloseReturnPct()).isEqualTo("+2.50%");
+        assertThat(response.avgMaxReturnPct()).isEqualTo("+6.25%");
+        assertThat(response.note()).contains("검증불가").doesNotContain("미검증으로 표시");
+    }
+
+    @Test
+    void displayedEntryUsesTheRecordedReturnBaselineWhenTheArchiveWasLaterChanged() throws Exception {
+        writeArchive("20260723", "2026-07-23");
+        when(repository.findByModeAndAnalysisDateBetweenOrderByAnalysisDateDescCreatedAtDesc(anyString(), any(), any()))
+            .thenReturn(List.of(verified("005930", LocalDate.of(2026, 7, 23), 90_000L, 94_500L, 5.0, 99_000L, 10.0)));
+
+        var response = service.getPerformance("2026-07-23", "2026-07-23");
+        var tracked = response.days().getFirst().rows().getFirst();
+
+        assertThat(tracked.entryPrice()).isEqualTo("90,000");
+        assertThat(tracked.closePrice()).isEqualTo("94,500");
+        assertThat(tracked.closeReturnPct()).isEqualTo("+5.00%");
+        assertThat(response.days().getFirst().rows().get(1).entryPrice()).isEqualTo("180,000");
+    }
+
+    @Test
+    void aMissingRecordedBaselineCannotBeReplacedByTheArchiveToValidateReturns() throws Exception {
+        writeArchive("20260723", "2026-07-23");
+        for (Long invalidBaseline : java.util.Arrays.asList(null, 0L, -1L)) {
+            var record = verified("005930", LocalDate.of(2026, 7, 23), 80_000L, 82_000L, 2.5, 85_000L, 6.25);
+            record.setPriceAtAnalysis(invalidBaseline);
+            when(repository.findByModeAndAnalysisDateBetweenOrderByAnalysisDateDescCreatedAtDesc(anyString(), any(), any()))
+                .thenReturn(List.of(record));
+
+            var response = service.getPerformance("2026-07-23", "2026-07-23");
+            var row = response.days().getFirst().rows().getFirst();
+
+            assertThat(row.entryPrice()).isEqualTo("-");
+            assertThat(row.result()).isEqualTo("검증불가");
+            assertThat(row.closeReturnPct()).isEqualTo("-");
+            assertThat(row.maxReturnPct()).isEqualTo("-");
+            assertThat(response.verifiedCount()).isZero();
+        }
+    }
+
+    @Test
+    void aDayWithOnlyMeasurableWinsOrFlatsRemainsVerified() throws Exception {
+        writeArchive("20260723", "2026-07-23");
+        when(repository.findByModeAndAnalysisDateBetweenOrderByAnalysisDateDescCreatedAtDesc(anyString(), any(), any()))
+            .thenReturn(List.of(
+                verified("005930", LocalDate.of(2026, 7, 23), 80_000L, 82_000L, 2.5, 85_000L, 6.25),
+                verified("000660", LocalDate.of(2026, 7, 23), 180_000L, 180_000L, 0.0, 185_400L, 3.0)));
+
+        var response = service.getPerformance("2026-07-23", "2026-07-23");
+
+        assertThat(response.days().getFirst().verified()).isTrue();
+        assertThat(response.days().getFirst().rows()).extracting(PerformanceRow::result).containsExactly("승", "보합");
+        assertThat(response.verifiedCount()).isEqualTo(2);
+        assertThat(response.flats()).isEqualTo(1);
+    }
+
+    @Test
+    void displayedTargetAndStopUseTheSameRecordedLevelsAsTheHitFlags() throws Exception {
+        writeArchive("20260723", "2026-07-23");
+        var record = verified("005930", LocalDate.of(2026, 7, 23), 90_000L, 94_500L, 5.0, 99_000L, 10.0);
+        record.setTargetPrice(100_000L);
+        record.setStopLoss(87_000L);
+        record.setHitTarget(false);
+        when(repository.findByModeAndAnalysisDateBetweenOrderByAnalysisDateDescCreatedAtDesc(anyString(), any(), any()))
+            .thenReturn(List.of(record));
+
+        var row = service.getPerformance("2026-07-23", "2026-07-23").days().getFirst().rows().getFirst();
+
+        assertThat(row.targetPrice()).isEqualTo("100,000");
+        assertThat(row.stopLoss()).isEqualTo("87,000");
+        assertThat(row.hitTarget()).isFalse();
+        assertThat(row.hitStop()).isFalse();
+    }
+
     private AnalysisTrackRecord verified(String code, LocalDate date, long entry, long close,
                                          double closeReturn, long high, double maxReturn) {
         AnalysisTrackRecord record = new AnalysisTrackRecord();

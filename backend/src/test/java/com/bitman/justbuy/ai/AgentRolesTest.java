@@ -6,6 +6,11 @@ import static org.assertj.core.api.Assertions.*;
 
 class AgentRolesTest {
 
+    @Test void deepseekHasEvidenceOnlyAdversarialRole() {
+        assertThat(AgentRoles.getSpecialization("deepseek")).contains("반증", "출처", "기간", "MOCK", "자료 결측");
+        assertThat(AgentRoles.getFullSuffix("deepseek")).contains("json:analysis");
+    }
+
     // ── 2-에이전트 전문화 존재 확인 ─────────────────────────
     @Test
     void chatgpt_hasSpecialization() {

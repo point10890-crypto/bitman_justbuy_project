@@ -64,6 +64,15 @@ public class AdminController {
     @Autowired(required = false)
     private KiwoomReadOnlyService kiwoomReadOnlyService;
 
+    @Autowired(required=false)
+    private com.bitman.justbuy.service.DetectedStockQualityService detectedStockQualityService;
+
+    @Autowired(required=false)
+    private com.bitman.justbuy.service.AnalysisEvidenceJournalService analysisEvidenceJournalService;
+
+    @Autowired(required=false)
+    private com.bitman.justbuy.service.DartApiService dartFinancialSource;
+
     @Autowired
     private Environment environment;
 
@@ -210,6 +219,8 @@ public class AdminController {
 
         // Configuration presence only. Never probe providers or return credential values.
         result.put("dataSources", dataSourceReadiness());
+        if(detectedStockQualityService!=null)result.put("detectedStockQuality",detectedStockQuality());
+        if(analysisEvidenceJournalService!=null)result.put("evidenceJournal",analysisEvidenceJournalService.status());
         if(kiwoomReadOnlyService!=null){
             Map<String,Object> readiness=kiwoomReadOnlyService.readiness();
             if(readiness!=null){
@@ -243,6 +254,41 @@ public class AdminController {
         result.put("responseTime", System.currentTimeMillis() - startMs);
 
         return ResponseEntity.ok(result);
+    }
+
+    /** Evaluate saved results without new provider or AI requests and without exposing user queries. */
+    @GetMapping("/analysis/quality")
+    public ResponseEntity<Map<String,Object>> getDetectedStockQuality(){return ResponseEntity.ok(detectedStockQuality());}
+
+    /** Explicit admin-only single-stock source probe, never part of a status refresh. */
+    @GetMapping("/analysis/financial-evidence/{stockCode}")
+    public ResponseEntity<Map<String,Object>> getDartFinancialEvidence(@PathVariable String stockCode){
+        if(stockCode==null||!stockCode.matches("[0-9]{6}"))return ResponseEntity.badRequest().body(Map.of("status","INVALID_STOCK_CODE"));
+        if(dartFinancialSource==null)return ResponseEntity.ok(Map.of("status","NOT_CONFIGURED","source","DART"));
+        com.bitman.justbuy.service.DartFinancialEvidenceService.EvidenceSnapshot snapshot;
+        try{snapshot=dartFinancialSource.fetchFinancialEvidence(List.of(stockCode));}
+        catch(RuntimeException ignored){return ResponseEntity.ok(Map.of("status","UNAVAILABLE","source","DART"));}
+        if(snapshot==null)return ResponseEntity.ok(Map.of("status","UNAVAILABLE","source","DART"));
+        if(analysisEvidenceJournalService!=null)analysisEvidenceJournalService.capture("SOURCE_PROBE","OTHER",List.of(stockCode),Map.of("dartFinancial",snapshot),List.of());
+        return ResponseEntity.ok(Map.of("status",snapshot.status(),"source","DART","evidence",snapshot));
+    }
+
+    private Map<String,Object> detectedStockQuality(){
+        if(detectedStockQualityService==null)return Map.of("status","UNAVAILABLE","modes",List.of());
+        var modes=new java.util.ArrayList<com.bitman.justbuy.service.DetectedStockQualityService.ModeQuality>();
+        for(String mode:List.of("BREAKOUT","REVERSAL_EDGE","FLOW_LEADER","CATALYST_BURST")){
+            try{modes.add(detectedStockQualityService.evaluate(mode,analysisService.getStoredPrecomputed(mode)));}
+            catch(RuntimeException ignored){modes.add(detectedStockQualityService.evaluate(mode,null));}
+        }
+        var occurrences=new LinkedHashMap<String,Integer>();
+        modes.forEach(m->m.stocks().forEach(s->{if(s.stockCode()!=null)occurrences.merge(s.stockCode(),1,Integer::sum);}));
+        int slots=modes.stream().mapToInt(m->m.stocks().size()).sum();
+        var overlaps=occurrences.entrySet().stream().filter(e->e.getValue()>1)
+            .map(e->Map.of("stockCode",e.getKey(),"occurrences",e.getValue())).toList();
+        return Map.of("status","SAVED_SNAPSHOT_ASSESSMENT","evaluatedAt",Instant.now().toString(),"modes",modes,
+            "publishedSlots",slots,"uniqueStocks",occurrences.size(),"crossModeOverlap",overlaps,
+            "scope","네 가지 AI 모드의 최신 저장 픽. 단타·주도주 별도 실시간 스캐너와 종가매매는 별도 평가 필요.",
+            "performanceConclusion","자료 근거 평가이며 실제 수익률 개선은 아직 입증되지 않았습니다.");
     }
 
     private List<Map<String, Object>> dataSourceReadiness() {

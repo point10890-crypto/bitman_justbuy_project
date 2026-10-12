@@ -116,7 +116,8 @@ public class JonggaPerformanceService {
             }
             allRows.addAll(rows);
 
-            boolean verified = rows.stream().noneMatch(row -> "미검증".equals(row.result()));
+            boolean verified = rows.stream().allMatch(row -> "승".equals(row.result())
+                || "패".equals(row.result()) || "보합".equals(row.result()));
             days.add(new DayGroup(date.toString(), verified, avgOf(closeReturns(rows)), rows));
         }
 
@@ -149,19 +150,22 @@ public class JonggaPerformanceService {
         int notMeasurable = (int) rows.stream()
             .filter(row -> RESULT_NOT_MEASURABLE.equals(row.result()))
             .count();
+        long unverified = rows.stream().filter(row -> RESULT_UNVERIFIED.equals(row.result())).count();
 
         String note;
         if (rows.isEmpty()) {
             note = "해당 기간에 종가매매 조건검색 기록이 없습니다.";
+        } else if (notMeasurable == rows.size()) {
+            note = "모든 종목이 검증불가로 분류되어 집계할 수 있는 성과가 없습니다.";
         } else if (verifiedCount == 0) {
-            note = "목록만 있고 익일 성과 검증 기록이 아직 없습니다. 검증은 추천 다음 영업일 장마감 후 채워집니다.";
-        } else if (verifiedCount < rows.size()) {
+            note = "익일 성과 검증 대기 종목은 미검증으로 표시됩니다. 검증은 추천 다음 영업일 장마감 후 채워집니다.";
+        } else if (unverified > 0) {
             note = "일부 종목은 익일 성과 검증 기록이 없어 미검증으로 표시됩니다.";
         } else {
             note = "진입가 대비 익일 종가 수익률과 익일 고가 기준 최대수익률입니다.";
         }
         if (notMeasurable > 0) {
-            note += " 액면분할·합병 등으로 진입가와 기준이 달라진 " + notMeasurable
+            note += " 성과 기준가격이 없거나 가격 기준 불일치가 의심되는 " + notMeasurable
                 + "건은 검증불가로 분류해 통계에서 제외했습니다.";
         }
 
@@ -199,12 +203,14 @@ public class JonggaPerformanceService {
     }
 
     private PerformanceRow toRow(int rank, JsonNode signal, AnalysisTrackRecord record, Double benchmark) {
-        long entry = JonggaSignals.entryPrice(signal);
-        long target = signal.path("target_price").asLong(0);
-        long stop = signal.path("stop_price").asLong(0);
+        // Tracked returns and hit flags use the recorded levels, even when an archive changes later.
+        Long entry = record == null ? Long.valueOf(JonggaSignals.entryPrice(signal)) : record.getPriceAtAnalysis();
+        Long target = record == null ? Long.valueOf(signal.path("target_price").asLong(0)) : record.getTargetPrice();
+        Long stop = record == null ? Long.valueOf(signal.path("stop_price").asLong(0)) : record.getStopLoss();
 
         boolean verified = record != null && record.getClosePrice() != null;
         boolean measurable = verified
+            && entry != null && entry > 0 && record.getClosePrice() > 0
             && !isPriceLimitViolation(record.getCloseReturn(), record.getMaxReturn1d());
 
         Double excess = measurable && benchmark != null && record.getCloseReturn() != null

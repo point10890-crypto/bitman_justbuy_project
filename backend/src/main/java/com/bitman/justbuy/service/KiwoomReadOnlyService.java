@@ -430,6 +430,8 @@ public class KiwoomReadOnlyService {
             BigDecimal prior=bars.subList(bars.size()-21,bars.size()-1).stream().map(Bar::high).max(BigDecimal::compareTo).orElseThrow();
             out.put("previous20High",prior);out.put("breakout20",bars.getLast().high().compareTo(prior)>0);out.put("breakoutBasis","LATEST_COMPLETED_HIGH_ABOVE_PREVIOUS_20_COMPLETED_HIGHS");
         }
+        out.putAll(DeterministicTechnicalEvidence.calculate(bars.stream()
+            .map(bar->new DeterministicTechnicalEvidence.Bar(bar.date(),bar.high(),bar.low(),bar.close())).toList(),completed));
         if(bars.size()<60) out.put("status","PARTIAL_COVERAGE");return out;
     }
     private Map<String,Object> investors(String code,LocalDate expected,Read response) {

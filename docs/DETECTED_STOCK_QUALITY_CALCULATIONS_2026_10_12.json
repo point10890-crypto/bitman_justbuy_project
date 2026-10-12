@@ -1,0 +1,174 @@
+{
+  "queries": {
+    "picks": "SELECT mode, stock, code, current, target, stop, quoteSource, quoteCheckedAt, CASE WHEN target > current AND current > stop THEN ROUND((target-current)/(current-stop),2) ELSE NULL END AS rewardRisk FROM main.stock_picks ORDER BY rewardRisk ASC, mode, code",
+    "frequency": "SELECT stock, code, COUNT(*) AS occurrences FROM main.stock_picks GROUP BY code, stock ORDER BY occurrences DESC, code",
+    "legacy": "SELECT mode, samples, winRate, avgReturnPct, basis FROM main.legacy_performance ORDER BY avgReturnPct ASC"
+  },
+  "datasets": {
+    "picks": [
+      {
+        "mode": "스윙",
+        "stock": "DB손해보험",
+        "code": "005830",
+        "current": 194400,
+        "target": 197600,
+        "stop": 186000,
+        "quoteSource": "NAVER_FINANCE",
+        "quoteCheckedAt": "2026-10-12T05:51:51.002736100Z",
+        "rewardRisk": 0.38
+      },
+      {
+        "mode": "스윙",
+        "stock": "팬오션",
+        "code": "028670",
+        "current": 6500,
+        "target": 6800,
+        "stop": 6080,
+        "quoteSource": "NAVER_FINANCE",
+        "quoteCheckedAt": "2026-10-12T05:51:51.002736100Z",
+        "rewardRisk": 0.71
+      },
+      {
+        "mode": "테마주",
+        "stock": "삼표시멘트",
+        "code": "038500",
+        "current": 7610,
+        "target": 8300,
+        "stop": 6800,
+        "quoteSource": "NAVER_FINANCE",
+        "quoteCheckedAt": "2026-10-12T05:53:43.601049300Z",
+        "rewardRisk": 0.85
+      },
+      {
+        "mode": "스윙",
+        "stock": "HMM",
+        "code": "011200",
+        "current": 21900,
+        "target": 22900,
+        "stop": 20800,
+        "quoteSource": "NAVER_FINANCE",
+        "quoteCheckedAt": "2026-10-12T05:51:51.002736100Z",
+        "rewardRisk": 0.91
+      },
+      {
+        "mode": "주도주",
+        "stock": "HMM",
+        "code": "011200",
+        "current": 21900,
+        "target": 23000,
+        "stop": 20850,
+        "quoteSource": "NAVER_FINANCE",
+        "quoteCheckedAt": "2026-10-12T05:52:56.196604900Z",
+        "rewardRisk": 1.05
+      },
+      {
+        "mode": "테마주",
+        "stock": "HMM",
+        "code": "011200",
+        "current": 21900,
+        "target": 23500,
+        "stop": 20500,
+        "quoteSource": "NAVER_FINANCE",
+        "quoteCheckedAt": "2026-10-12T05:53:43.601049300Z",
+        "rewardRisk": 1.14
+      },
+      {
+        "mode": "테마주",
+        "stock": "팬오션",
+        "code": "028670",
+        "current": 6490,
+        "target": 7100,
+        "stop": 6000,
+        "quoteSource": "NAVER_FINANCE",
+        "quoteCheckedAt": "2026-10-12T05:53:43.601049300Z",
+        "rewardRisk": 1.24
+      },
+      {
+        "mode": "주도주",
+        "stock": "팬오션",
+        "code": "028670",
+        "current": 6490,
+        "target": 7000,
+        "stop": 6090,
+        "quoteSource": "NAVER_FINANCE",
+        "quoteCheckedAt": "2026-10-12T05:52:56.196604900Z",
+        "rewardRisk": 1.27
+      },
+      {
+        "mode": "단타",
+        "stock": "팬오션",
+        "code": "028670",
+        "current": 6510,
+        "target": 6750,
+        "stop": 6420,
+        "quoteSource": "NAVER_FINANCE",
+        "quoteCheckedAt": "2026-10-12T08:32:29.037772Z",
+        "rewardRisk": 2.67
+      }
+    ],
+    "frequency": [
+      {
+        "stock": "팬오션",
+        "code": "028670",
+        "occurrences": 4
+      },
+      {
+        "stock": "HMM",
+        "code": "011200",
+        "occurrences": 3
+      },
+      {
+        "stock": "DB손해보험",
+        "code": "005830",
+        "occurrences": 1
+      },
+      {
+        "stock": "삼표시멘트",
+        "code": "038500",
+        "occurrences": 1
+      }
+    ],
+    "legacy": [
+      {
+        "mode": "단타",
+        "samples": 257,
+        "winRate": 39,
+        "avgReturnPct": -1.76,
+        "basis": "장중 포착가 → 당일 종가"
+      },
+      {
+        "mode": "테마주",
+        "samples": 333,
+        "winRate": 39,
+        "avgReturnPct": -1.3,
+        "basis": "추천가 → 1거래일 후 종가"
+      },
+      {
+        "mode": "주도주",
+        "samples": 296,
+        "winRate": 39,
+        "avgReturnPct": -1.17,
+        "basis": "추천가 → 1거래일 후 종가"
+      },
+      {
+        "mode": "종가매매",
+        "samples": 47,
+        "winRate": 36,
+        "avgReturnPct": -1.01,
+        "basis": "추천일 종가 → 익일 종가"
+      },
+      {
+        "mode": "스윙",
+        "samples": 270,
+        "winRate": 43,
+        "avgReturnPct": -0.98,
+        "basis": "추천가 → 1거래일 후 종가"
+      }
+    ]
+  },
+  "summary": {
+    "slots": 9,
+    "distinctStocks": 4,
+    "rewardRiskBelowOne": 4
+  }
+}

@@ -181,6 +181,8 @@ public class KisResearchEvidenceService {
             out.put("volumeCompressionRatio5To15",newVolume.divide(oldVolume,4,RoundingMode.HALF_UP));
             out.put("contraction",newRange.compareTo(oldRange)<0 && newVolume.compareTo(oldVolume)<0);
         }
+        out.putAll(DeterministicTechnicalEvidence.calculate(ordered.stream()
+            .map(bar->new DeterministicTechnicalEvidence.Bar(bar.date(),bar.high(),bar.low(),bar.close())).toList(),bars.lastKey()));
         return Map.copyOf(out);
     }
 

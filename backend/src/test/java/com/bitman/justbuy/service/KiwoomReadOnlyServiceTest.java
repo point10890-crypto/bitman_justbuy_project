@@ -145,6 +145,30 @@ class KiwoomReadOnlyServiceTest {
         assertThat(facts.get("coverageStart")).isNotNull();
         assertThat(facts.get("volumeRatioBasis")).isEqualTo("LATEST_COMPLETED_VOLUME_OVER_20_COMPLETED_AVERAGE");
     }
+    @Test void completedMockHistoryExposesSameTrendAndRiskFormulaWithoutExtraRequests() {
+        Fixture fixture=new Fixture();fixture.reply("ka10081",chartBody("005930",61));
+        var service=new KiwoomReadOnlyService(fixture,mapper,fixture.clock,true,false,"fixture-key","fixture-secret","MOCK");
+        Map<String,Object> facts=part(service.fetchEvidence(List.of("005930"),Map.of("005930",List.of("technical"))),"technical");
+        assertThat(facts).containsKeys("return20dPct","return60dPct","atr14","atr14Pct","hv20AnnualizedPct");
+        assertThat((BigDecimal)facts.get("return20dPct")).isEqualByComparingTo("11.111111");
+        assertThat((BigDecimal)facts.get("return60dPct")).isEqualByComparingTo("42.857143");
+        assertThat((BigDecimal)facts.get("atr14")).isEqualByComparingTo("3");
+        assertThat((BigDecimal)facts.get("atr14Pct")).isEqualByComparingTo("1.5");
+        assertThat((BigDecimal)facts.get("hv20AnnualizedPct")).isPositive();
+        assertThat(facts).containsEntry("source","KIWOOM_REST_MOCK").containsEntry("environment","MOCK")
+            .containsEntry("fetchedAt",now.toString()).containsEntry("atrReferencePriceBasis","LATEST_COMPLETED_ADJUSTED_CLOSE");
+        assertThat(fixture.calls).hasSize(2);assertThat(fixture.calls.stream().map(Call::api).toList()).containsExactly("au10001","ka10081");
+    }
+    @Test void twentyCompletedClosesDoNotInventTwentyOrSixtyReturns() {
+        Fixture fixture=new Fixture();fixture.reply("ka10081",chartBody("005930",20));
+        assertThat(part(only(fixture,"technical"),"technical")).containsKeys("atr14","atr14Pct")
+            .doesNotContainKeys("return20dPct","return60dPct","hv20AnnualizedPct");
+    }
+    @Test void missingRecentTradingDaySuppressesDerivedRiskAndPeriodReturns() {
+        Fixture fixture=new Fixture();ObjectNode body=chartBody("005930",61);body.withArray("stk_dt_pole_chart_qry").remove(10);
+        fixture.reply("ka10081",body);
+        assertThat(part(only(fixture,"technical"),"technical")).doesNotContainKeys("return20dPct","return60dPct","atr14","atr14Pct","hv20AnnualizedPct");
+    }
     @Test void mockRequestsRespectOnePerSecondWhileRealKeepsFivePerSecond() {
         Fixture fixture=new Fixture();fixture.reply("ka10001",basic("005930"));fixture.reply("ka10081",chartBody("005930",60));
         var service=new KiwoomReadOnlyService(fixture,mapper,fixture.clock,true,true,"fixture-key","fixture-secret","MOCK");

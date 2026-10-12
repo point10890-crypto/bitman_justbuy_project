@@ -12,8 +12,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,7 +21,6 @@ import java.util.Map;
 @Service
 public class KeywordConditionAnalysisService {
 
-    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final String MODE_DUAL_NET_BUY = "KEYWORD_DUAL_NET_BUY";
 
     private final KisApiService kisApiService;
@@ -31,10 +28,13 @@ public class KeywordConditionAnalysisService {
     private final ObjectMapper mapper;
     private KisSourceExpansionService sourceExpansion;
     private KeywordConditionSearchService keywordSearch;
+    private DeepSeekConditionVerifier evidenceVerifier;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     public void configureKeywordSearch(KeywordConditionSearchService keywordSearch) {this.keywordSearch=keywordSearch;}
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     public void configureSourceExpansion(KisSourceExpansionService expansion) { this.sourceExpansion=expansion; }
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void configureEvidenceVerifier(DeepSeekConditionVerifier verifier) { this.evidenceVerifier=verifier; }
 
     public KeywordConditionAnalysisService(KisApiService kisApiService,
                                            DeepSeekAgent deepSeekAgent,
@@ -42,6 +42,7 @@ public class KeywordConditionAnalysisService {
         this.kisApiService = kisApiService;
         this.deepSeekAgent = deepSeekAgent;
         this.mapper = mapper;
+        this.evidenceVerifier = new DeepSeekConditionVerifier(deepSeekAgent, mapper);
     }
 
     public boolean supports(String query, String mode) {
@@ -83,7 +84,7 @@ public class KeywordConditionAnalysisService {
 
         AgentResult analyst = candidates.isEmpty()
             ? AgentResult.skipped("deepseek", "No verified KIS candidates")
-            : runDeepSeekAnalyst(query, candidates, checkedAt, additionalEvidence);
+            : runDeepSeekAnalyst(query, candidates, checkedAt, additionalEvidence, Map.of());
         List<AgentResult> round1 = List.of(detector, analyst);
         List<StockPick> picks = candidates.stream()
             .map(candidate -> toStockPick(candidate, checkedAt))
@@ -135,7 +136,7 @@ public class KeywordConditionAnalysisService {
         String evidence=search==null?"":"\n[공급자별 독립 조회 근거: 시세와 수급 출처·환경·시각을 유지]\n"+toJson(search);
         AgentResult detector=new AgentResult("condition-tools",buildDetectorContent(query,candidates),"KIS / Kiwoom REST verified condition detector",
             0,0,candidates.isEmpty()?"skipped":"success",candidates.isEmpty()?"No verified double-net-buy matches":null,System.currentTimeMillis()-start);
-        AgentResult analyst=candidates.isEmpty()?AgentResult.skipped("deepseek","No verified candidates"):runDeepSeekAnalyst(query,candidates,checkedAt,evidence);
+        AgentResult analyst=candidates.isEmpty()?AgentResult.skipped("deepseek","No verified candidates"):runDeepSeekAnalyst(query,candidates,checkedAt,evidence,matches);
         List<StockPick> picks=candidates.stream().map(candidate->{var match=matches.get(candidate.code());return new StockPick(candidate.name(),candidate.code(),
             formatPriceText(candidate.currentPrice()),"","","주목",candidate.reason(),0,"","DUAL_PROVIDER_CONDITION_SEARCH",
             match.quoteSource(),match.quoteCheckedAt().toString());}).toList();
@@ -160,35 +161,25 @@ public class KeywordConditionAnalysisService {
         return List.copyOf(verified.values());
     }
 
-    private AgentResult runDeepSeekAnalyst(String query, List<ConditionCandidate> candidates, String checkedAt, String additionalEvidence) {
-        if (!deepSeekAgent.isAvailable()) {
-            return AgentResult.skipped("deepseek", "API key not configured");
+    private AgentResult runDeepSeekAnalyst(String query, List<ConditionCandidate> candidates, String checkedAt,
+                                          String additionalEvidence, Map<String,KeywordSearchResponse.Match> matches) {
+        List<EvidencePacket> packets = candidates.stream().map(candidate -> keywordPacket(candidate, checkedAt, matches.get(candidate.code()))).toList();
+        evidenceVerifier.capture(packets, Map.of());
+        AgentResult result;
+        try {
+            if (deepSeekAgent == null || !deepSeekAgent.isAvailable())
+                return AgentResult.skipped("deepseek", "API key not configured");
+            String user = evidenceVerifier.buildUserMessage(packets)
+                + "\n[사용자 검색 조건: 증거 카탈로그 밖 수치는 주장에 사용하지 않음]\n" + query
+                + (additionalEvidence == null ? "" : additionalEvidence);
+            result = deepSeekAgent.analyze(DeepSeekConditionVerifier.verificationInstructions(), user);
+        } catch (RuntimeException ignored) {
+            return AgentResult.error("deepseek", "", "Evidence analysis unavailable", 0);
         }
-
-        String system = """
-            You are BitMan's Korean stock condition-search analyst.
-            Use only the provided verified provider candidate data. Preserve each source, environment and observation period.
-            Do not invent stock names, stock codes, foreign/institution values, targets, or news.
-            Return one JSON object only. Do not use markdown or prose outside JSON.
-            Use only candidate stockCode values. aiScore must be an integer from 0 to 99.
-            verdict must be VALID, WATCH, OVERHEATED or REJECT. Do not give buy instructions.
-            Every signal needs nonempty Korean summary, evidence, riskFlags and invalidation.
-            Schema: {"signals":[{"stockCode":"000000","aiScore":82,"verdict":"WATCH","summary":"...","evidence":["..."],"riskFlags":["..."],"invalidation":"...","displayStatus":"관찰"}]}
-            """;
-        String user = "사용자 검색어: " + query + "\n"
-            + "KST 기준일: " + DateTimeFormatter.ISO_LOCAL_DATE.format(Instant.now().atZone(KST)) + "\n"
-            + "검증된 후보 데이터:\n" + toJson(candidatePayload(candidates))
-            + (additionalEvidence==null?"":additionalEvidence);
-        AgentResult result = deepSeekAgent.analyze(system, user);
-        if (!"success".equals(result.status())) return safeAnalystResult(result, "", result.status(), result.error());
-        List<EvidencePacket> packets = candidates.stream().map(candidate -> new EvidencePacket(
-            "KEYWORD", MODE_DUAL_NET_BUY, checkedAt, candidate.code(), candidate.name(),
-            candidate.currentPrice(), candidate.changeRate(), 0, List.of(candidate.reason()),
-            Map.of("source", candidate.source(), "foreignNet", candidate.foreignNet(),
-                "institutionNet", candidate.institutionNet(), "totalSmartNet", candidate.totalSmartNet())
-        )).toList();
-        Map<String, EvidenceVerdict> verdicts = new DeepSeekConditionVerifier(deepSeekAgent, mapper)
-            .parse(result.content(), packets);
+        if (result == null) return AgentResult.error("deepseek", "", "Evidence analysis unavailable", 0);
+        if (!"success".equals(result.status())) return safeAnalystResult(result, "", result.status(), "Evidence analysis unavailable");
+        Map<String, EvidenceVerdict> verdicts = evidenceVerifier.parse(result.content(), packets);
+        evidenceVerifier.capture(packets, verdicts);
         if (verdicts.isEmpty()) return safeAnalystResult(result, "", "error", "Invalid candidate evidence response");
         StringBuilder safeContent = new StringBuilder();
         for (ConditionCandidate candidate : candidates) {
@@ -204,28 +195,35 @@ public class KeywordConditionAnalysisService {
         return safeAnalystResult(result, safeContent.toString().trim(), "success", null);
     }
 
+    private EvidencePacket keywordPacket(ConditionCandidate candidate, String checkedAt, KeywordSearchResponse.Match match) {
+        Map<String,Object> metrics = new LinkedHashMap<>();
+        metrics.put("source",candidate.source());
+        metrics.put("unit","shares");
+        metrics.put("foreignNet",candidate.foreignNet());
+        metrics.put("institutionNet",candidate.institutionNet());
+        metrics.put("totalSmartNet",candidate.totalSmartNet());
+        if (match != null) {
+            var flow = match.evidence().stream().filter(item -> "외국인 순매수".equals(item.condition()) && "주".equals(item.unit())).findFirst().orElse(null);
+            if (flow != null) {
+                if (flow.environment() != null) metrics.put("environment",flow.environment());
+                if (flow.observedAt() != null) metrics.put("period",flow.observedAt());
+            }
+            Map<String,Object> quote = new LinkedHashMap<>();
+            if (match.quoteSource() != null) quote.put("source",match.quoteSource());
+            if (match.quoteEnvironment() != null) quote.put("environment",match.quoteEnvironment());
+            if (match.observedAt() != null) quote.put("observedDate",match.observedAt().toString());
+            quote.put("period","POINT_IN_TIME");
+            quote.put("unit","KRW");
+            quote.put("currentPrice",match.currentPrice());
+            metrics.put("primaryQuote",quote);
+        }
+        return new EvidencePacket("KEYWORD",MODE_DUAL_NET_BUY,checkedAt,candidate.code(),candidate.name(),
+            candidate.currentPrice(),candidate.changeRate(),0,List.of(candidate.reason()),metrics);
+    }
+
     private AgentResult safeAnalystResult(AgentResult result, String content, String status, String error) {
         return new AgentResult(result.agent(), content, result.model(), result.inputTokens(), result.outputTokens(),
             status, error, result.durationMs(), result.thoughtTokens(), result.totalTokens());
-    }
-
-    private List<Map<String, Object>> candidatePayload(List<ConditionCandidate> candidates) {
-        List<Map<String, Object>> payload = new ArrayList<>();
-        for (ConditionCandidate c : candidates) {
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("name", c.name());
-            item.put("code", c.code());
-            item.put("currentPrice", c.currentPrice());
-            item.put("changeRate", c.changeRate());
-            item.put("foreignNet", c.foreignNet());
-            item.put("institutionNet", c.institutionNet());
-            item.put("individualNet", c.individualNet());
-            item.put("totalSmartNet", c.totalSmartNet());
-            item.put("source", c.source());
-            item.put("reason", c.reason());
-            payload.add(item);
-        }
-        return payload;
     }
 
     private StockPick toStockPick(ConditionCandidate candidate, String checkedAt) {
@@ -255,7 +253,7 @@ public class KeywordConditionAnalysisService {
         sb.append("'").append(query).append("'는 외국인과 기관이 동시에 순매수한 쌍끌이 매수 조건으로 해석했습니다.\n\n");
         if (candidates.isEmpty()) {
             sb.append("조건 검출 결과: 현재 확인한 후보군 안에서는 조건을 동시에 만족하는 종목을 찾지 못했습니다.\n");
-            sb.append("확인 범위: 외국인 순매수, 거래량 상위, 상승률 상위 후보를 기준으로 최근 3일 외국인/기관 합산 수급을 재확인했습니다.\n");
+            sb.append("확인 범위: 현재 조회 가능한 실제 후보·수급 자료 안에서 검색하며 요청 기간에 맞는 자료가 부족할 수 있습니다.\n");
             sb.append("다음 액션: 장중 데이터 갱신 후 다시 조회하거나, '외국인 기관 동시 순매수 거래대금 상위'처럼 범위를 좁혀 조회하세요.\n");
         } else {
             sb.append("실데이터 조건 검출 종목\n");

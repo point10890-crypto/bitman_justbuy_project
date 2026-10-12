@@ -6,7 +6,9 @@ import java.time.Instant;
 @Service
 public class KisSourceExpansionService {
     private static final org.slf4j.Logger log=org.slf4j.LoggerFactory.getLogger(KisSourceExpansionService.class);
-    public record Enrichment(String prompt,Map<String,Object> metadata) {}
+    public record Enrichment(String prompt,Map<String,Object> metadata,Map<String,Object> evidence) {
+        public Enrichment(String prompt,Map<String,Object> metadata){this(prompt,metadata,Map.of());}
+    }
     private final KisSourceGateway gateway;
     private final StockUniverseService universe;
     private final KisCandidateSourceService candidates;
@@ -93,7 +95,8 @@ public class KisSourceExpansionService {
         try {
             String prompt="\n[KIS 신규 소스 검증 근거] 미확인 항목은 판단 근거로 사용하지 않는다. 장중 수급 ESTIMATE_UNDATED는 날짜 미확인 추정치이며 확정 수급이 아니다. 재무 units UNCONFIRMED를 점수·금액으로 환산하지 않는다. 일봉 observedDate는 날짜이며 실시간 체결시각이 아니다. 테마 소속은 마스터 분류이며 현재 뉴스·호재를 의미하지 않는다. 업종이 숫자 코드이면 정식 업종명 미확인이다. 마스터는 숫자 6자리 코드만 포함하므로 전체 상장시장이라고 간주하지 않는다.\n"
                 +mapper.writeValueAsString(Map.of("master",master,"research",batch,"realtime",live,"supplementalResearch",supplemental,"historicalMinutes",historical,"marketSeparatedRealtime",supplementalLive));
-            return new Enrichment(prompt,metadata);
+            return new Enrichment(prompt,metadata,Map.of("research",batch,"realtime",live,"supplementalResearch",supplemental,
+                "historicalMinutes",historical,"marketSeparatedRealtime",supplementalLive));
         } catch(Exception ignored) { return new Enrichment("\n[KIS 신규 근거 표현 변환 실패]\n",metadata); }
     }
     public Map<String,Object> readiness() {

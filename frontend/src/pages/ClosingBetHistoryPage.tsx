@@ -51,6 +51,14 @@ function formatDateLabel(date: string) {
   })
 }
 
+function dayVerificationLabel(day: JonggaPerformanceResponse['days'][number]) {
+  const unmeasurable = day.rows.filter(row => row.result === '검증불가').length
+  if (day.rows.length > 0 && unmeasurable === day.rows.length) return '전체 검증불가 · 성과 집계 제외'
+  if (unmeasurable > 0) return '일부 검증불가 · 가능한 성과만 집계'
+  if (day.verified) return `검증 완료 · 평균 ${day.avgCloseReturnPct}`
+  return '익일 성과 검증 대기'
+}
+
 export default function ClosingBetHistoryPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -136,7 +144,7 @@ export default function ClosingBetHistoryPage() {
             <div className="rank-title-copy">
               <h2>{formatDateLabel(day.date)}</h2>
               <span>
-                {day.verified ? `검증 완료 · 평균 ${day.avgCloseReturnPct}` : '익일 성과 미검증'}
+                {dayVerificationLabel(day)}
               </span>
             </div>
           </div>

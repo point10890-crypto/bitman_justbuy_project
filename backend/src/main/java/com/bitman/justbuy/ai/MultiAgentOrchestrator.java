@@ -51,6 +51,9 @@ public class MultiAgentOrchestrator {
     private com.bitman.justbuy.service.KisSourceExpansionService sourceExpansion;
     private com.bitman.justbuy.service.KiwoomReadOnlyService kiwoomSupplement;
     private com.bitman.justbuy.service.KiwoomConditionEnricher kiwoomConditionEnricher;
+    private com.bitman.justbuy.service.AnalysisEvidenceJournalService evidenceJournal;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void configureEvidenceJournal(com.bitman.justbuy.service.AnalysisEvidenceJournalService journal){this.evidenceJournal=journal;}
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     public void configureSourceExpansion(com.bitman.justbuy.service.KisSourceExpansionService expansion) { this.sourceExpansion=expansion; }
 
@@ -378,10 +381,6 @@ public class MultiAgentOrchestrator {
             StockParser.KNOWN_STOCKS.entrySet().stream().filter(entry -> code.equals(entry.getValue()))
                 .findFirst().ifPresent(entry -> candidateNames.putIfAbsent(code, entry.getKey()));
         });
-        String dartText = fetchDartDataForStocks(queryCodes);
-        if (!dartText.isEmpty()) {
-            marketDataText += dartText;
-        }
 
         // ★ KIS 실시간 시세 + 수급 데이터 추가
         String kisText = fetchKisData(queryCodes, mode);
@@ -395,12 +394,37 @@ public class MultiAgentOrchestrator {
         queryCodes.stream().sorted().forEach(evidenceCodes::add);
         evidenceCodes.addAll(candidateSources.keySet());
         List<String> boundedEvidenceCodes = evidenceCodes.stream().filter(code -> code.matches("[0-9]{6}")).limit(5).toList();
+        var financialByCode=new LinkedHashMap<String,com.bitman.justbuy.service.DartFinancialEvidenceService.StockEvidence>();
+        var auditFacts=new LinkedHashMap<String,Object>();
+        if(!boundedEvidenceCodes.isEmpty()&&dartApiService!=null){
+            checkBudget(deadline);
+            try{
+                var snapshot=dartApiService.fetchFinancialEvidence(boundedEvidenceCodes);
+                if(snapshot!=null){
+                    marketDataText+=Objects.requireNonNullElse(dartApiService.formatFinancialEvidence(snapshot),"");
+                    if(snapshot.stocks()!=null)for(var stock:snapshot.stocks())
+                        if(stock!=null&&boundedEvidenceCodes.contains(stock.stockCode()))financialByCode.putIfAbsent(stock.stockCode(),stock);
+                    @SuppressWarnings("unchecked") Map<String,Object> financialMetadata=objectMapper.copy().findAndRegisterModules().convertValue(snapshot,Map.class);
+                    var combined=new LinkedHashMap<String,Object>(sourceExpansionMetadata==null?Map.of():sourceExpansionMetadata);
+                    combined.put("dartFinancial",financialMetadata);sourceExpansionMetadata=Collections.unmodifiableMap(combined);
+                    auditFacts.put("dartFinancial",financialMetadata);
+                }
+            }catch(Exception ignored){marketDataText+="\n[DART 전체 재무 근거 확인 불가. 기간·통화·현금흐름을 추정하지 않는다.]\n";}
+            checkBudget(deadline);
+        }
         if(sourceExpansion != null) {
             checkBudget(deadline);
             try {
                 var enrichment=sourceExpansion.enrich(boundedEvidenceCodes);
-                marketDataText += enrichment.prompt();sourceExpansionMetadata=enrichment.metadata();
-            } catch(Exception ignored) { sourceExpansionMetadata=Map.of("status","UNAVAILABLE"); }
+                marketDataText += enrichment.prompt();
+                var combined=new LinkedHashMap<String,Object>(enrichment.metadata());
+                if(sourceExpansionMetadata!=null)combined.putAll(sourceExpansionMetadata);
+                sourceExpansionMetadata=Collections.unmodifiableMap(combined);
+                auditFacts.put("kisCoverage",enrichment.metadata());auditFacts.put("kis",enrichment.evidence());
+            } catch(Exception ignored) {
+                var combined=new LinkedHashMap<String,Object>(sourceExpansionMetadata==null?Map.of():sourceExpansionMetadata);
+                combined.put("status","UNAVAILABLE");sourceExpansionMetadata=Collections.unmodifiableMap(combined);
+            }
             checkBudget(deadline);
         }
         if (kiwoomConditionEnricher != null && !activeKiwoomSource().isEmpty()) {
@@ -415,6 +439,7 @@ public class MultiAgentOrchestrator {
                 try {
                     var evidence = kiwoomConditionEnricher.enrich(names);
                     marketDataText += evidence.prompt();
+                    auditFacts.put("kiwoom",evidence.facts());
                     var metadata = new LinkedHashMap<String,Object>(sourceExpansionMetadata == null ? Map.of() : sourceExpansionMetadata);
                     metadata.put("kiwoomSupplement", evidence.coverage());
                     sourceExpansionMetadata = Map.copyOf(metadata);
@@ -424,6 +449,8 @@ public class MultiAgentOrchestrator {
                 checkBudget(deadline);
             }
         }
+
+        if(evidenceJournal!=null)evidenceJournal.capture("CANDIDATE_EVIDENCE",mode,List.copyOf(evidenceCodes),auditFacts,List.of());
         if (!boundedEvidenceCodes.isEmpty()) {
             checkBudget(deadline);
             try {
@@ -626,7 +653,9 @@ public class MultiAgentOrchestrator {
             if (current <= 0 || candidateName == null || candidateName.isBlank() || publishedPicks.size() >= 10) continue;
             FinancialScore financial;
             try {
-                financial = financialScorer.score(pick.code());
+                // The same bounded, pre-AI snapshot is used for display; no new post-AI DART calls.
+                financial = financialByCode.containsKey(pick.code())
+                    ? financialScorer.scoreFromEvidence(financialByCode.get(pick.code())) : FinancialScore.empty();
             } catch (Exception e) {
                 financial = FinancialScore.empty();
             }
@@ -678,6 +707,13 @@ public class MultiAgentOrchestrator {
         long totalDuration = System.currentTimeMillis() - totalStart;
         checkBudget(deadline);
         List<StockPick> finalPicks = List.copyOf(publishedPicks.values());
+        if(evidenceJournal!=null){
+            var decisions=round1Results.stream().map(r->{
+                var decision=new LinkedHashMap<String,Object>();decision.put("agent",r.agent());decision.put("status",r.status());
+                decision.put("inputTokens",r.inputTokens());decision.put("outputTokens",r.outputTokens());return decision;
+            }).toList();
+            evidenceJournal.capture("AGENT_PUBLICATION_DRAFT",mode,finalPicks.stream().map(StockPick::code).toList(),auditFacts,decisions);
+        }
         Set<String> parsedCodes = new HashSet<>();
         agentPicks.values().forEach(picks -> picks.forEach(pick -> parsedCodes.add(pick.code())));
         long outsidePool = parsedCodes.stream().filter(code -> !candidateSources.containsKey(code)).count();

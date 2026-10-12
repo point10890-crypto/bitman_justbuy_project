@@ -1,0 +1,460 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "BitMan 검출 종목 품질 평가",
+    "generatedAt": "2026-10-12T09:12:00Z",
+    "sources": [
+      {
+        "id": "current_picks",
+        "label": "BitMan 운영 저장 픽 · 2026년 10월 12일",
+        "url": "https://bitman-justbuy.pages.dev/",
+        "path": "docs/DETECTED_STOCK_QUALITY_SNAPSHOT_2026_10_12.json",
+        "notes": "MiniPC 네 모드의 최신 공개 픽 9개만 읽음. 사용자 질문·회원·키 미포함. 오전/오후 저장 시각은 행별 상이함."
+      },
+      {
+        "id": "legacy_performance",
+        "label": "BitMan 성적표 · 최근 30일",
+        "url": "https://bitman-justbuy.pages.dev/performance",
+        "notes": "2026-09-12~2026-10-12 운영 화면을 10월12일 오후6시경 확인. 과거 계산 기준의 저장 성과가 섞임. 모드별 보유 구간이 다름. 비용 반영 실현손익 또는 새 시스템 성과로 해석 불가."
+      },
+      {
+        "id": "pipeline_audit",
+        "label": "BitMan 분석 파이프라인 코드 감사",
+        "path": "docs/ANALYSIS_STRENGTHENING_RND_2026_10_12.md",
+        "notes": "재무 기간·문자열 가점·AI 수치 근거·보존 구조를 실제 Spring 코드에서 확인."
+      },
+      {
+        "id": "picks_query",
+        "label": "저장 픽 목표·손절 계산",
+        "path": "docs/evaluate-detected-stock-quality.mjs",
+        "query": {
+          "engine": "sqlite",
+          "sql": "SELECT mode, stock, code, current, target, stop, quoteSource, quoteCheckedAt, CASE WHEN target > current AND current > stop THEN ROUND((target-current)/(current-stop),2) ELSE NULL END AS rewardRisk FROM main.stock_picks ORDER BY rewardRisk ASC, mode, code",
+          "description": "MiniPC 공개 저장 픽 스냅샷을 main.stock_picks에 적재하여 실제 실행한 SQL. 회원 DB·질문·키·API 조회 없음."
+        }
+      },
+      {
+        "id": "frequency_query",
+        "label": "모드 간 종목 중복 계산",
+        "path": "docs/evaluate-detected-stock-quality.mjs",
+        "query": {
+          "engine": "sqlite",
+          "sql": "SELECT stock, code, COUNT(*) AS occurrences FROM main.stock_picks GROUP BY code, stock ORDER BY occurrences DESC, code",
+          "description": "MiniPC 공개 저장 픽 스냅샷을 main.stock_picks에 적재하여 실제 실행한 SQL. 회원 DB·질문·키·API 조회 없음."
+        }
+      },
+      {
+        "id": "legacy_query",
+        "label": "기존 성적표 표시값",
+        "path": "docs/evaluate-detected-stock-quality.mjs",
+        "query": {
+          "engine": "sqlite",
+          "sql": "SELECT mode, samples, winRate, avgReturnPct, basis FROM main.legacy_performance ORDER BY avgReturnPct ASC",
+          "description": "운영 UI에서 확인해 보존한 성적표 표시값을 메모리 main.legacy_performance에 적재. 과거 기준이 섞이며 새 시스템 성과가 아님."
+        }
+      }
+    ],
+    "cards": [],
+    "charts": [
+      {
+        "id": "overlap",
+        "title": "종목별 모드 등장 횟수",
+        "type": "bar",
+        "dataset": "frequency",
+        "sourceId": "frequency_query",
+        "encodings": {
+          "x": {
+            "field": "stock",
+            "type": "nominal"
+          },
+          "y": {
+            "field": "occurrences",
+            "type": "quantitative"
+          }
+        }
+      },
+      {
+        "id": "returns",
+        "title": "최근 30일 성적표의 모드별 평균 수익률 (%)",
+        "type": "bar",
+        "dataset": "legacy",
+        "sourceId": "legacy_query",
+        "encodings": {
+          "x": {
+            "field": "mode",
+            "type": "nominal"
+          },
+          "y": {
+            "field": "avgReturnPct",
+            "type": "quantitative"
+          }
+        }
+      }
+    ],
+    "tables": [
+      {
+        "id": "targets",
+        "title": "저장 픽의 목표·손절 설정",
+        "dataset": "picks",
+        "sourceId": "picks_query",
+        "defaultSort": {
+          "field": "rewardRisk",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "mode",
+            "label": "모드"
+          },
+          {
+            "field": "stock",
+            "label": "종목"
+          },
+          {
+            "field": "code",
+            "label": "종목코드"
+          },
+          {
+            "field": "current",
+            "label": "저장 현재가 (원)"
+          },
+          {
+            "field": "target",
+            "label": "AI 목표가 (원)"
+          },
+          {
+            "field": "stop",
+            "label": "AI 손절가 (원)"
+          },
+          {
+            "field": "rewardRisk",
+            "label": "상승폭 / 하락폭"
+          }
+        ]
+      },
+      {
+        "id": "performance",
+        "title": "기존 성적표 표시값 · 모드별 기준",
+        "dataset": "legacy",
+        "sourceId": "legacy_query",
+        "defaultSort": {
+          "field": "avgReturnPct",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "mode",
+            "label": "모드"
+          },
+          {
+            "field": "samples",
+            "label": "표시 검증 건수"
+          },
+          {
+            "field": "winRate",
+            "label": "승률 (%)"
+          },
+          {
+            "field": "avgReturnPct",
+            "label": "평균 수익률 (%)"
+          },
+          {
+            "field": "basis",
+            "label": "수익률 기준"
+          }
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# BitMan 검출 종목 품질 평가"
+      },
+      {
+        "id": "summary",
+        "type": "markdown",
+        "body": "## Executive Summary\n\n- **현재 근거 품질은 보완이 필요합니다.** 시세 출처는 확인되지만 구조화 재무·기술·수급 근거를 종목별로 재현하는 자료가 부족합니다. 높은 AI 합의 점수는 성공 확률이 아닙니다.\n- **선택지가 겹칩니다.** 네 AI 모드의 저장 픽은 9개 항목, 4개 종목입니다. 팬오션·HMM이 7개 항목에 등장합니다. 독립적인 전략·종목 9개로 읽으면 편중을 놓칠 수 있습니다.\n- **목표·손절 설정과 기존 성적은 재검토 대상입니다.** 4개 항목은 목표 상승폭보다 손절 하락폭이 큽니다. 기존 최근 30일 성적표는 다섯 모드 모두 평균이 음수지만, 과거 계산 기준이 섞여 새 시스템의 성과를 증명하지 못합니다."
+      },
+      {
+        "id": "overlap_text",
+        "type": "markdown",
+        "sourceId": "current_picks",
+        "body": "## 9개 표시 항목이 4개 종목에 집중됩니다\n\n팬오션은 네 모드, HMM은 세 모드, DB손해보험과 삼표시멘트는 각각 한 모드에 있습니다. 반복 검출은 여러 조건을 동시에 만족한다는 의미일 수 있으며, 그 자체가 오류는 아닙니다. 다만 같은 종목·같은 기초 자료의 반복을 독립적인 분석 검증으로 세면 안 됩니다. 평가 단위는 **모드·종목·검출 시각**이며, 종목 수와 항목 수를 별도로 관리해야 합니다."
+      },
+      {
+        "id": "overlap_chart",
+        "type": "chart",
+        "chartId": "overlap"
+      },
+      {
+        "id": "targets_text",
+        "type": "markdown",
+        "sourceId": "current_picks",
+        "body": "## 스윙 세 항목과 테마주 한 항목은 목표·손절 비대칭을 확인해야 합니다\n\n목표까지 상승폭 ÷ 손절까지 하락폭은 HMM 스윙 0.91, DB손해보험 스윙 0.38, 팬오션 스윙 0.71, 삼표시멘트 테마주 0.85입니다. 이는 표시 가격의 기하학적 비율이며 승률·기대수익률이 아닙니다. 목표·손절은 AI가 제시한 가격으로서 실제 도달 가능성, 변동성, 비용과 체결을 검증해야 합니다. 비율 하나로 종목의 좋고 나쁨을 단정하지 않습니다."
+      },
+      {
+        "id": "targets_table",
+        "type": "table",
+        "tableId": "targets"
+      },
+      {
+        "id": "evidence_text",
+        "type": "markdown",
+        "sourceId": "pipeline_audit",
+        "body": "## 숫자 점수보다 당시 자료를 재현할 수 있어야 합니다\n\n기존 DART 재무 평가는 공시 제목 단어에 가점을 주고 분기순이익/기말자본을 기간 설명 없는 ROE로 표시하는 경로가 있습니다. 이러한 점수는 검증된 재무 건전성이나 투자 성과가 아닙니다. 종목별 보고 기간·연결/별도·통화·접수번호·원계정과 기술·수급의 관측일이 필요합니다. KIS와 키움 자료는 공급자·서버 환경을 보존하고 가격을 평균하거나 수급을 합산하지 않아야 합니다."
+      },
+      {
+        "id": "performance_text",
+        "type": "markdown",
+        "sourceId": "legacy_performance",
+        "body": "## 기존 성적은 약하지만 새 시스템의 성적으로 볼 수 없습니다\n\n최근 30일 성적표 표시 기준 승률은 36~43%, 모드별 평균 수익률은 -0.98%~-1.76%입니다. 전체 1,203건의 표시 집계는 서로 다른 보유 구간을 합친 결과이며 과거 계산 기준의 값도 포함합니다. 홈 화면에서 새 기준의 완료된 5거래일 측정은 0건으로 표시됩니다. 따라서 기존 성적을 현재 강화 작업의 성과로 재사용하지 말고, 새 근거와 실측 결과를 연결해 별도로 평가해야 합니다."
+      },
+      {
+        "id": "returns_chart",
+        "type": "chart",
+        "chartId": "returns"
+      },
+      {
+        "id": "performance_table",
+        "type": "table",
+        "tableId": "performance"
+      },
+      {
+        "id": "actions",
+        "type": "markdown",
+        "body": "## 보완할 부분은 근거·가격 설정·성과 측정입니다\n\n1. DART 전체 재무 원계정으로 기간·통화·전년 비교와 현금흐름을 검증하고 제목 가점을 제거합니다.\n2. 기존 완료 일봉의 ATR·수익률·역사 변동성을 AI 입력에 연결하고 목표·손절의 변동성 근거를 확인합니다.\n3. AI 수치 주장을 원자료 식별자와 대조하고, 없는 수치와 출처·기간 치환은 해당 AI 판정에서 제외합니다.\n4. 당시 후보·확인된 근거·판정을 보존하고 이후 1/3/5거래일 결과 및 비용을 같은 기간 기준으로 비교합니다.\n5. 모드 간 반복 종목을 공개하고, 서로 다른 종목 수·근거 커버리지·실측 표본을 별도로 관리합니다."
+      },
+      {
+        "id": "questions",
+        "type": "markdown",
+        "body": "## 후속 평가에 필요한 확인\n\n- 목표·손절이 실제 완료 일봉의 변동성에 비해 적절한가?\n- 기존 규칙 단독과 AI 혼합 중 어느 경로가 같은 기간·표본에서 더 나은가?\n- 지분·기업관계·뉴스 원문 근거를 추가했을 때 결측과 중복은 줄고 비용·지연은 얼마나 늘어나는가?\n- 충분한 새 표본이 쌓였을 때 시장 상황과 비용을 반영한 결과도 유지되는가?"
+      },
+      {
+        "id": "caveats",
+        "type": "markdown",
+        "body": "## 평가 범위와 한계\n\n이 보고서는 2026년 10월 12일 운영 앱의 네 AI 모드 최신 저장 픽과 최근 30일 성적표를 확인한 스냅샷입니다. 단타·주도주의 별도 실시간 스캐너와 종가매매 전체 원신호를 모두 재분석한 결과는 아닙니다. 저장 조회 시각과 실제 체결·관측 시각은 다릅니다. 장 종료 후 저장 결과를 실시간 시장 결과로 취급하지 않습니다. 수수료·슬리피지·실제 체결 및 충분한 새 기준 표본이 확인되지 않아 수익성 개선은 아직 결론 내릴 수 없습니다. 특정 종목의 매수·매도 판단을 제공하는 보고서가 아닙니다."
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-10-12T09:12:00Z",
+    "status": "ready",
+    "datasets": {
+      "picks": [
+        {
+          "mode": "스윙",
+          "stock": "DB손해보험",
+          "code": "005830",
+          "current": 194400,
+          "target": 197600,
+          "stop": 186000,
+          "quoteSource": "NAVER_FINANCE",
+          "quoteCheckedAt": "2026-10-12T05:51:51.002736100Z",
+          "rewardRisk": 0.38
+        },
+        {
+          "mode": "스윙",
+          "stock": "팬오션",
+          "code": "028670",
+          "current": 6500,
+          "target": 6800,
+          "stop": 6080,
+          "quoteSource": "NAVER_FINANCE",
+          "quoteCheckedAt": "2026-10-12T05:51:51.002736100Z",
+          "rewardRisk": 0.71
+        },
+        {
+          "mode": "테마주",
+          "stock": "삼표시멘트",
+          "code": "038500",
+          "current": 7610,
+          "target": 8300,
+          "stop": 6800,
+          "quoteSource": "NAVER_FINANCE",
+          "quoteCheckedAt": "2026-10-12T05:53:43.601049300Z",
+          "rewardRisk": 0.85
+        },
+        {
+          "mode": "스윙",
+          "stock": "HMM",
+          "code": "011200",
+          "current": 21900,
+          "target": 22900,
+          "stop": 20800,
+          "quoteSource": "NAVER_FINANCE",
+          "quoteCheckedAt": "2026-10-12T05:51:51.002736100Z",
+          "rewardRisk": 0.91
+        },
+        {
+          "mode": "주도주",
+          "stock": "HMM",
+          "code": "011200",
+          "current": 21900,
+          "target": 23000,
+          "stop": 20850,
+          "quoteSource": "NAVER_FINANCE",
+          "quoteCheckedAt": "2026-10-12T05:52:56.196604900Z",
+          "rewardRisk": 1.05
+        },
+        {
+          "mode": "테마주",
+          "stock": "HMM",
+          "code": "011200",
+          "current": 21900,
+          "target": 23500,
+          "stop": 20500,
+          "quoteSource": "NAVER_FINANCE",
+          "quoteCheckedAt": "2026-10-12T05:53:43.601049300Z",
+          "rewardRisk": 1.14
+        },
+        {
+          "mode": "테마주",
+          "stock": "팬오션",
+          "code": "028670",
+          "current": 6490,
+          "target": 7100,
+          "stop": 6000,
+          "quoteSource": "NAVER_FINANCE",
+          "quoteCheckedAt": "2026-10-12T05:53:43.601049300Z",
+          "rewardRisk": 1.24
+        },
+        {
+          "mode": "주도주",
+          "stock": "팬오션",
+          "code": "028670",
+          "current": 6490,
+          "target": 7000,
+          "stop": 6090,
+          "quoteSource": "NAVER_FINANCE",
+          "quoteCheckedAt": "2026-10-12T05:52:56.196604900Z",
+          "rewardRisk": 1.27
+        },
+        {
+          "mode": "단타",
+          "stock": "팬오션",
+          "code": "028670",
+          "current": 6510,
+          "target": 6750,
+          "stop": 6420,
+          "quoteSource": "NAVER_FINANCE",
+          "quoteCheckedAt": "2026-10-12T08:32:29.037772Z",
+          "rewardRisk": 2.67
+        }
+      ],
+      "frequency": [
+        {
+          "stock": "팬오션",
+          "code": "028670",
+          "occurrences": 4
+        },
+        {
+          "stock": "HMM",
+          "code": "011200",
+          "occurrences": 3
+        },
+        {
+          "stock": "DB손해보험",
+          "code": "005830",
+          "occurrences": 1
+        },
+        {
+          "stock": "삼표시멘트",
+          "code": "038500",
+          "occurrences": 1
+        }
+      ],
+      "legacy": [
+        {
+          "mode": "단타",
+          "samples": 257,
+          "winRate": 39,
+          "avgReturnPct": -1.76,
+          "basis": "장중 포착가 → 당일 종가"
+        },
+        {
+          "mode": "테마주",
+          "samples": 333,
+          "winRate": 39,
+          "avgReturnPct": -1.3,
+          "basis": "추천가 → 1거래일 후 종가"
+        },
+        {
+          "mode": "주도주",
+          "samples": 296,
+          "winRate": 39,
+          "avgReturnPct": -1.17,
+          "basis": "추천가 → 1거래일 후 종가"
+        },
+        {
+          "mode": "종가매매",
+          "samples": 47,
+          "winRate": 36,
+          "avgReturnPct": -1.01,
+          "basis": "추천일 종가 → 익일 종가"
+        },
+        {
+          "mode": "스윙",
+          "samples": 270,
+          "winRate": 43,
+          "avgReturnPct": -0.98,
+          "basis": "추천가 → 1거래일 후 종가"
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "current_picks",
+      "label": "BitMan 운영 저장 픽 · 2026년 10월 12일",
+      "url": "https://bitman-justbuy.pages.dev/",
+      "path": "docs/DETECTED_STOCK_QUALITY_SNAPSHOT_2026_10_12.json",
+      "notes": "MiniPC 네 모드의 최신 공개 픽 9개만 읽음. 사용자 질문·회원·키 미포함. 오전/오후 저장 시각은 행별 상이함."
+    },
+    {
+      "id": "legacy_performance",
+      "label": "BitMan 성적표 · 최근 30일",
+      "url": "https://bitman-justbuy.pages.dev/performance",
+      "notes": "2026-09-12~2026-10-12 운영 화면을 10월12일 오후6시경 확인. 과거 계산 기준의 저장 성과가 섞임. 모드별 보유 구간이 다름. 비용 반영 실현손익 또는 새 시스템 성과로 해석 불가."
+    },
+    {
+      "id": "pipeline_audit",
+      "label": "BitMan 분석 파이프라인 코드 감사",
+      "path": "docs/ANALYSIS_STRENGTHENING_RND_2026_10_12.md",
+      "notes": "재무 기간·문자열 가점·AI 수치 근거·보존 구조를 실제 Spring 코드에서 확인."
+    },
+    {
+      "id": "picks_query",
+      "label": "저장 픽 목표·손절 계산",
+      "path": "docs/evaluate-detected-stock-quality.mjs",
+      "query": {
+        "engine": "sqlite",
+        "sql": "SELECT mode, stock, code, current, target, stop, quoteSource, quoteCheckedAt, CASE WHEN target > current AND current > stop THEN ROUND((target-current)/(current-stop),2) ELSE NULL END AS rewardRisk FROM main.stock_picks ORDER BY rewardRisk ASC, mode, code",
+        "description": "MiniPC 공개 저장 픽 스냅샷을 main.stock_picks에 적재하여 실제 실행한 SQL. 회원 DB·질문·키·API 조회 없음."
+      }
+    },
+    {
+      "id": "frequency_query",
+      "label": "모드 간 종목 중복 계산",
+      "path": "docs/evaluate-detected-stock-quality.mjs",
+      "query": {
+        "engine": "sqlite",
+        "sql": "SELECT stock, code, COUNT(*) AS occurrences FROM main.stock_picks GROUP BY code, stock ORDER BY occurrences DESC, code",
+        "description": "MiniPC 공개 저장 픽 스냅샷을 main.stock_picks에 적재하여 실제 실행한 SQL. 회원 DB·질문·키·API 조회 없음."
+      }
+    },
+    {
+      "id": "legacy_query",
+      "label": "기존 성적표 표시값",
+      "path": "docs/evaluate-detected-stock-quality.mjs",
+      "query": {
+        "engine": "sqlite",
+        "sql": "SELECT mode, samples, winRate, avgReturnPct, basis FROM main.legacy_performance ORDER BY avgReturnPct ASC",
+        "description": "운영 UI에서 확인해 보존한 성적표 표시값을 메모리 main.legacy_performance에 적재. 과거 기준이 섞이며 새 시스템 성과가 아님."
+      }
+    }
+  ]
+}

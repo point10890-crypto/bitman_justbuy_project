@@ -101,6 +101,20 @@ export interface SystemStatusResponse {
   responseTime?: number
   error?: string
   pipeline?: unknown
+  detectedStockQuality?: {
+    status: string
+    publishedSlots: number
+    uniqueStocks: number
+    scope: string
+    performanceConclusion: string
+    crossModeOverlap: { stockCode: string; occurrences: number }[]
+    modes: { mode: string; updatedAt: string | null; counts: Record<string, number>; limitations: string[]; stocks: {
+      stockCode: string; stockName: string; evidenceState: string; quoteVerified: boolean; quoteFresh: boolean
+      quoteSource: string | null; quoteCheckedAt: string | null; analystCount: number
+      financialEvidenceAvailable: boolean; issues: string[]
+    }[] }[]
+  }
+  evidenceJournal?: { status: string; completed?: number; failed?: number; rejected?: number; retentionDays?: number; fileLimit?: number }
   kiwoomReadiness?: {
     status?: string
     runtimeStatus?: string
@@ -351,6 +365,32 @@ export async function fetchSystemStatus(token: string): Promise<SystemStatusResp
   })
   if (!res.ok) await handleError(res)
   return res.json()
+}
+
+export interface DartFinancialProbe {
+  status: string
+  source: string
+  evidence?: { status: string; capturedAt: string; stocks: {
+    stockCode: string; status: string; issues: string[]
+    facts: { businessYear: number; reportCode: string; fsDiv: string; currency: string; receiptNo: string
+      period: string; cashFlowPeriod: string; operatingCashFlow: number | null; risks: string[]
+      revenue?: number | null; revenueYoYPct?: number | null; operatingMarginPct?: number | null
+    } | null
+  }[] }
+}
+
+export async function fetchDartFinancialEvidence(token: string, stockCode: string): Promise<DartFinancialProbe> {
+  if (!/^[0-9]{6}$/.test(stockCode)) throw new Error('6자리 종목코드를 입력해 주세요.')
+  const controller = new AbortController()
+  const deadline = setTimeout(() => controller.abort(), 20_000)
+  try {
+    const res = await apiFetch(`${API_BASE}/api/admin/analysis/financial-evidence/${stockCode}`, {
+      headers: authHeaders(token), signal: controller.signal,
+    })
+    if (!res.ok) await handleError(res)
+    // Keep the same deadline active until the entire response body has been read.
+    return await res.json()
+  } finally { clearTimeout(deadline) }
 }
 
 export interface SystemRefreshResponse {

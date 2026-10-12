@@ -12,10 +12,12 @@ import {
   fetchAllUsers,
   fetchPendingSubscriptions,
   fetchSystemStatus,
+  fetchDartFinancialEvidence,
   refreshAllAnalysis,
   rejectSubscription,
   revokeSubscription,
   type SystemStatusResponse,
+  type DartFinancialProbe,
   type UserDto,
 } from '../api/authApi'
 
@@ -243,6 +245,10 @@ export default function AdminPage() {
   const [users, setUsers] = useState<UserDto[]>([])
   const [pendingUsers, setPendingUsers] = useState<UserDto[]>([])
   const [systemStatus, setSystemStatus] = useState<SystemStatusResponse | null>(null)
+  const [financialProbeCode, setFinancialProbeCode] = useState('028670')
+  const [financialProbe, setFinancialProbe] = useState<DartFinancialProbe | null>(null)
+  const [financialProbeBusy, setFinancialProbeBusy] = useState(false)
+  const [financialProbeError, setFinancialProbeError] = useState('')
   const [refreshResults, setRefreshResults] = useState<Record<string, string>>({})
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -290,6 +296,18 @@ export default function AdminPage() {
       return false
     }
   }
+
+  const checkFinancialSource = async (event: FormEvent) => {
+    event.preventDefault()
+    const token = getStoredToken()
+    if (!token || financialProbeBusy) return
+    setFinancialProbeBusy(true); setFinancialProbeError(''); setFinancialProbe(null)
+    try { setFinancialProbe(await fetchDartFinancialEvidence(token, financialProbeCode.trim())) }
+    catch { setFinancialProbeError('재무 근거를 확인하지 못했습니다. 종목코드와 서버 설정을 확인해 주세요.') }
+    finally { setFinancialProbeBusy(false) }
+  }
+  const financialPeriodLabel = (value: string) => ({ HALF_YEAR_YTD: '반기 누적', QUARTER_1: '1분기', QUARTER_3: '3분기', FULL_YEAR: '연간' }[value]
+    || value.replace(/^[0-9]{4} 사업연도 /, '') || '기간 미확인')
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -982,6 +1000,53 @@ export default function AdminPage() {
                 {typeof systemStatus.kiwoomReadiness.queue?.workerActive === 'boolean'
                   && ` · ${systemStatus.kiwoomReadiness.queue.workerActive ? '작업 실행 중' : '작업 대기'}`}</p>}
               <p>확인된 근거부터 사용합니다. 대기 중인 값은 조건 판정에 포함하지 않습니다.</p>
+            </section>}
+            <section aria-label="DART 전체 재무 연결 점검">
+              <div className="admin-run-summary"><strong>DART 전체 재무 연결 점검</strong><span>버튼을 눌렀을 때 한 종목만 조회</span></div>
+              <form onSubmit={checkFinancialSource} className="admin-run-summary">
+                <label>점검할 6자리 종목코드 <input aria-label="재무 점검 종목코드" value={financialProbeCode} onChange={event => setFinancialProbeCode(event.target.value)} maxLength={6} pattern="[0-9]{6}" required /></label>
+                <button type="submit" disabled={financialProbeBusy}>{financialProbeBusy ? '재무 근거 확인 중' : 'DART 재무 연결 점검'}</button>
+              </form>
+              {financialProbeError && <p role="alert">{financialProbeError}</p>}
+              {financialProbe && <div role="status">
+                <p>{['COMPLETE', 'AVAILABLE', 'PARTIAL'].includes(financialProbe.status) ? '실제 재무 근거 조회 결과' : '재무 근거 미확인'} · {formatDateTime(financialProbe.evidence?.capturedAt)}</p>
+                {(financialProbe.evidence?.stocks ?? []).map(stock => <div key={stock.stockCode}>
+                  <strong>{stock.stockCode} · {stock.facts ? '원계정 근거 확인' : '원계정 미확인'}</strong>
+                  {stock.facts && <><p>{stock.facts.businessYear}년 · {financialPeriodLabel(stock.facts.period)} · {stock.facts.fsDiv === 'CFS' ? '연결' : '별도'} · {stock.facts.currency}</p>
+                    <p>영업 현금흐름 {stock.facts.operatingCashFlow != null && Number.isSafeInteger(stock.facts.operatingCashFlow)
+                      ? `${stock.facts.operatingCashFlow.toLocaleString('ko-KR')}원` : '미확인 또는 정밀 표시 불가'} · {financialPeriodLabel(stock.facts.cashFlowPeriod)}</p>
+                    <p>접수번호 {stock.facts.receiptNo} · 최신 보고서 여부와 실제 접수일은 별도 확인이 필요합니다.</p></>}
+                  {stock.issues.length > 0 && <p>확인 필요 항목 {stock.issues.length}개 · 일부 계정·기간·현금흐름은 미확인일 수 있습니다.</p>}
+                </div>)}
+              </div>}
+            </section>
+            {systemStatus?.detectedStockQuality && <section aria-label="검출 종목 근거 품질">
+              <div className="admin-run-summary"><strong>검출 종목 근거 품질</strong>
+                <span>표시 항목 {systemStatus.detectedStockQuality.publishedSlots}개 · 서로 다른 종목 {systemStatus.detectedStockQuality.uniqueStocks}개</span></div>
+              <p>{systemStatus.detectedStockQuality.scope}</p>
+              <p>{systemStatus.detectedStockQuality.performanceConclusion}</p>
+              {systemStatus.detectedStockQuality.crossModeOverlap.length > 0 && <p>
+                여러 모드에 반복된 종목: {systemStatus.detectedStockQuality.crossModeOverlap.map(item => `${item.stockCode} (${item.occurrences}회)`).join(' · ')}. 모드가 달라도 독립적인 선택지는 아닐 수 있습니다.
+              </p>}
+              <AdminTable columns={['모드', '종목', '근거 상태', '시세 검증', '분석 참여', '확인 사항']} emptyText="저장된 검출 종목 없음">
+                {systemStatus.detectedStockQuality.modes.flatMap(mode => mode.stocks.map((stock, index) => <tr key={`${mode.mode}-${stock.stockCode}-${index}`}>
+                  <td>{{ BREAKOUT: '단타', REVERSAL_EDGE: '스윙', FLOW_LEADER: '주도주', CATALYST_BURST: '테마주' }[mode.mode] || mode.mode}</td>
+                  <td>{stock.stockName} ({stock.stockCode})</td>
+                  <td>{{ LIMITED_EVIDENCE: '근거 보완 필요', STALE: '오래된 저장 근거', REVIEW_REQUIRED: '검증 필요' }[stock.evidenceState] || stock.evidenceState}</td>
+                  <td>{stock.quoteVerified ? '저장 시세 확인' : '출처 확인 필요'}<br />{stock.quoteFresh ? '허용시간 이내 조회' : '재조회 필요'}<br />{formatDateTime(stock.quoteCheckedAt)}</td>
+                  <td>{stock.analystCount}개 에이전트</td>
+                  <td>{stock.issues.map(issue => ({
+                    FINANCIAL_EVIDENCE_MISSING: '구조화 재무 근거 없음', CONSENSUS_UNAVAILABLE: '합의 근거 없음',
+                    SINGLE_ANALYST_SUPPORT: '복수 분석 참여 부족', PARTIAL_AGENT_FAILURE: '일부 에이전트 실패', AGENT_ACTION_DISAGREEMENT: '에이전트 판단에 이견 있음',
+                    STALE_QUOTE_OR_ANALYSIS: '저장 시세·분석 재확인 필요', QUOTE_PROVENANCE_INVALID: '시세 출처·시각 검증 실패',
+                    DUPLICATE_STOCK_CODE: '같은 모드 내 중복 종목', TECHNICAL_AND_FLOW_COVERAGE_REQUIRES_REVIEW: '기술·수급 근거 범위 확인 필요',
+                    MODEL_PRICE_LEVELS_UNVALIDATED: '목표·손절은 검증 전 AI 제시값', INVALID_TARGET_STOP_DIRECTION: '목표·손절 방향 확인 필요',
+                    REWARD_RISK_BELOW_ONE: '목표 상승폭보다 손절 하락폭이 큼',
+                  }[issue] || issue)).join(' · ')}</td>
+                </tr>))}
+              </AdminTable>
+              {systemStatus.evidenceJournal && <p>근거 감사 기록 {systemStatus.evidenceJournal.completed ?? 0}건 · 저장 실패 {systemStatus.evidenceJournal.failed ?? 0}건
+                {' · '}최대 {systemStatus.evidenceJournal.retentionDays ?? 30}일 · 최대 {systemStatus.evidenceJournal.fileLimit ?? 1000}건 보관</p>}
             </section>}
             <section aria-label="분석 실행 결과">
               <div className="admin-run-summary">
