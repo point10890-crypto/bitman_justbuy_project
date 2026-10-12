@@ -126,14 +126,24 @@ class KiwoomReadOnlyServiceTest {
         for(String name:List.of("quote","valuation","technical","investorDaily"))
             assertThat(part(result,name)).containsEntry("environment","MOCK").containsEntry("source","KIWOOM_REST_MOCK");
     }
-    @Test void mockEnvironmentDoesNotBypassEnablementOrPermissionGates() {
+    @Test void mockMarketQueriesNeedEnabledCredentialsButDoNotClaimRealRedistributionRights() {
         Fixture fixture=new Fixture();
         var disabled=new KiwoomReadOnlyService(fixture,mapper,fixture.clock,false,true,"fixture-key","fixture-secret","MOCK");
         var unlicensed=new KiwoomReadOnlyService(fixture,mapper,fixture.clock,true,false,"fixture-key","fixture-secret","MOCK");
         assertThat(disabled.fetchEvidence(List.of("005930")).get("status")).isEqualTo("DISABLED");
-        assertThat(unlicensed.fetchEvidence(List.of("005930")).get("status")).isEqualTo("RIGHTS_UNCONFIRMED");
-        assertThat(disabled.lookupAll(List.of("005930"))).isEmpty();assertThat(unlicensed.lookupAll(List.of("005930"))).isEmpty();
+        assertThat(unlicensed.isEnabled()).isTrue();
+        assertThat(unlicensed.readiness()).containsEntry("status","READY").containsEntry("licensed",false)
+            .containsEntry("environment","MOCK");
+        assertThat(disabled.lookupAll(List.of("005930"))).isEmpty();
         assertThat(fixture.calls).isEmpty();
+    }
+    @Test void technicalConditionsAreComputedFromOneConsecutiveProviderHistory() {
+        Fixture fixture=new Fixture();fixture.reply("ka10081",chartBody("005930",60));
+        Map<String,Object> facts=part(only(fixture,"technical"),"technical");
+        assertThat(facts).containsEntry("maAligned",true).containsEntry("coverageEnd","2026-10-08");
+        assertThat((java.math.BigDecimal)facts.get("volumeRatio20")).isEqualByComparingTo("1");
+        assertThat(facts.get("coverageStart")).isNotNull();
+        assertThat(facts.get("volumeRatioBasis")).isEqualTo("LATEST_COMPLETED_VOLUME_OVER_20_COMPLETED_AVERAGE");
     }
     @Test void mockRequestsRespectOnePerSecondWhileRealKeepsFivePerSecond() {
         Fixture fixture=new Fixture();fixture.reply("ka10001",basic("005930"));fixture.reply("ka10081",chartBody("005930",60));

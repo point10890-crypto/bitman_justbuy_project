@@ -56,6 +56,9 @@ public class LeaderConditionEngine {
 
     private final KisApiService kisApiService;
     private final DeepSeekConditionVerifier verifier;
+    private KiwoomConditionEnricher kiwoomEnricher;
+    @Autowired(required=false)
+    public void configureKiwoomEnricher(KiwoomConditionEnricher enricher) { this.kiwoomEnricher=enricher; }
     private record Capture(String capturedAt, String price) {}
     private final Map<String, Capture> firstSeenByCode = new ConcurrentHashMap<>();
     private volatile LocalDate firstSeenDate = LocalDate.MIN;
@@ -158,7 +161,13 @@ public class LeaderConditionEngine {
         scored.sort(Comparator.comparingInt((Scored s) -> s.breakdown.finalScore()).reversed());
         List<Scored> verifyPool = scored.size() > VERIFY_LIMIT ? scored.subList(0, VERIFY_LIMIT) : scored;
 
-        Map<String, EvidenceVerdict> verdicts = verifyVerdicts(verifyPool, now);
+        var independent=KiwoomConditionEnricher.empty("NOT_CONFIGURED");
+        if(kiwoomEnricher!=null) {
+            Map<String,String> names=new LinkedHashMap<>();
+            verifyPool.stream().limit(3).forEach(item->names.put(item.candidate.code(),item.candidate.name()));
+            try {independent=kiwoomEnricher.enrich(names);} catch(RuntimeException ignored) { /* Preserve measured KIS candidates. */ }
+        }
+        Map<String, EvidenceVerdict> verdicts = verifyVerdicts(verifyPool, now, independent);
 
         List<ConditionSignalDto> signals = new ArrayList<>();
         int signalRank = 1;
@@ -167,13 +176,13 @@ public class LeaderConditionEngine {
             if (verdict != null && verdict.rejected()) continue;
             Capture capture = firstSeenByCode.computeIfAbsent(s.candidate.code(),
                 ignored -> new Capture(nowKst(now), formatPrice(s.candidate.currentPrice())));
-            signals.add(toSignal(s, verdict, signalRank++, capture));
+            signals.add(independent.attach(toSignal(s, verdict, signalRank++, capture)));
             if (signals.size() >= SIGNAL_LIMIT) break;
         }
         return signals;
     }
 
-    private Map<String, EvidenceVerdict> verifyVerdicts(List<Scored> pool, ZonedDateTime now) {
+    private Map<String, EvidenceVerdict> verifyVerdicts(List<Scored> pool, ZonedDateTime now, KiwoomConditionEnricher.Result independent) {
         if (verifier == null || !verifier.isAvailable()) return Map.of();
         List<EvidencePacket> packets = new ArrayList<>();
         for (Scored s : pool) {
@@ -181,6 +190,12 @@ public class LeaderConditionEngine {
             metrics.put("foreignNet", s.candidate.foreignNet());
             metrics.put("institutionNet", s.candidate.institutionNet());
             metrics.put("totalSmartNet", s.candidate.totalSmartNet());
+            List<String> ruleEvidence=new ArrayList<>(s.breakdown.evidence());
+            if(!independent.forCode(s.candidate.code()).isEmpty()) {
+                metrics.put("kiwoomEvidence",independent.forCode(s.candidate.code()));
+                metrics.put("kiwoomCoverage",independent.coverage());
+                ruleEvidence.addAll(independent.evidence(s.candidate.code()));
+            }
             packets.add(new EvidencePacket(
                 ConditionSection.LEADERS.name(),
                 ConditionSection.LEADERS.legacyMode(),
@@ -190,7 +205,7 @@ public class LeaderConditionEngine {
                 s.candidate.currentPrice(),
                 s.candidate.changeRate(),
                 s.breakdown.ruleScore(),
-                s.breakdown.evidence(),
+                List.copyOf(ruleEvidence),
                 metrics
             ));
         }

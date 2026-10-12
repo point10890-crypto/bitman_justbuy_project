@@ -98,7 +98,7 @@ const viewMeta: Record<AdminView, { label: string; kicker: string; desc: string 
   approvals: { label: '구독 승인 / 해제', kicker: 'SUBSCRIPTION', desc: '입금 확인 후 구독 승인과 PRO 해제를 처리합니다.' },
   subscriptions: { label: '구독 관리', kicker: 'PRO PLAN', desc: '구독 만료일, 입금자명, 상태를 확인합니다.' },
   members: { label: '회원 관리', kicker: 'MEMBERS', desc: '전체 회원 목록과 권한 상태를 검색합니다.' },
-  system: { label: '시스템 관리', kicker: 'SYSTEM', desc: 'KIS, DART, DeepSeek, 분석 캐시 상태를 확인합니다.' },
+  system: { label: '시스템 관리', kicker: 'SYSTEM', desc: 'KIS, 키움 REST, DART, DeepSeek, 분석 캐시 상태를 확인합니다.' },
 }
 
 const adminViewSet = new Set<AdminView>(Object.keys(viewMeta) as AdminView[])
@@ -739,7 +739,7 @@ export default function AdminPage() {
                 </button>
                 <button type="button" onClick={() => goAdminView('system')}>
                   <strong>검색식 캐시 상태 확인</strong>
-                  <span>KIS, DART, DeepSeek 연동과 분석 캐시를 점검하세요.</span>
+                  <span>KIS, 키움 REST, DART, DeepSeek 연동과 분석 캐시를 점검하세요.</span>
                 </button>
                 <button type="button" onClick={() => goAdminView('members')}>
                   <strong>회원 목록 점검</strong>
@@ -933,7 +933,7 @@ export default function AdminPage() {
         )}
 
         {view === 'system' && (
-          <AdminPanel title="시스템 관리" description="KIS, DART, DeepSeek, 검색식 캐시 상태를 확인합니다.">
+          <AdminPanel title="시스템 관리" description="KIS, 키움 REST, DART, DeepSeek, 검색식 캐시 상태를 확인합니다.">
             <div className="system-grid">
               {systemCards.map(card => (
                 <div className={`system-card system-card-${card.tone}`} key={card.name}>

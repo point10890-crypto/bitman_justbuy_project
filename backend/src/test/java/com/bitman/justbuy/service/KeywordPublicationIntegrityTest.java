@@ -6,11 +6,31 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Map;
+import java.time.Instant;
+import java.math.BigDecimal;
+import com.bitman.justbuy.dto.KeywordSearchResponse;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class KeywordPublicationIntegrityTest {
+    @Test void sharedKeywordRouteUsesKiwoomFlowButRetainsActualPrimaryQuoteProvenance() {
+        var shared=mock(KeywordConditionSearchService.class);service.configureKeywordSearch(shared);
+        Instant at=Instant.now().minusSeconds(5);
+        var evidence=List.of(new KeywordSearchResponse.Evidence("외국인 순매수","300","주","KIWOOM_REST_MOCK","2026-10-06 ~ 2026-10-08","MOCK",at),
+            new KeywordSearchResponse.Evidence("기관 순매수","600","주","KIWOOM_REST_MOCK","2026-10-06 ~ 2026-10-08","MOCK",at));
+        var match=new KeywordSearchResponse.Match("005930","삼성전자","KOSPI",new BigDecimal("254000"),BigDecimal.ONE,
+            BigDecimal.TEN,new BigDecimal("2540000"),"NAVER_FINANCE",at,at,evidence,"REAL",List.of());
+        var providers=List.of(new KeywordSearchResponse.ProviderStatus("KIWOOM_REST_MOCK","MOCK","PARTIAL",at,"3거래일"));
+        when(shared.search(anyString())).thenReturn(new KeywordSearchResponse("query","COMPLETE",List.of(),List.of(),
+            new KeywordSearchResponse.Scope("검증 범위",1,1,1,false),at,"COMPLETE",List.of(),List.of(match),providers));
+        var result=service.analyze("쌍끌이 종목 검색","수급분석");
+        assertThat(result.stockPicks()).hasSize(1);var pick=result.stockPicks().getFirst();
+        assertThat(pick.quoteSource()).isEqualTo("NAVER_FINANCE");assertThat(pick.quoteCheckedAt()).isEqualTo(at.toString());
+        assertThat(pick.reason()).contains("KIWOOM_REST_MOCK","MOCK");
+        assertThat(result.metadata().sourceExpansion().get("providers")).isEqualTo(providers);
+        verifyNoInteractions(kis);verify(shared).search("쌍끌이 종목 검색");
+    }
     final KisApiService kis = mock(KisApiService.class);
     final DeepSeekAgent agent = mock(DeepSeekAgent.class);
     final ObjectMapper mapper = new ObjectMapper();

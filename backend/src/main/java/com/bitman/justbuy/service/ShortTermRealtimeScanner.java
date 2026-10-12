@@ -47,6 +47,9 @@ public class ShortTermRealtimeScanner {
     private final KisApiService kisApiService;
     private final TrackRecordService trackRecordService;
     private final DeepSeekConditionVerifier verifier;
+    private KiwoomConditionEnricher kiwoomEnricher;
+    @Autowired(required=false)
+    public void configureKiwoomEnricher(KiwoomConditionEnricher enricher) { this.kiwoomEnricher=enricher; }
     private record Capture(String capturedAt, String price) {}
     private final Map<String, Capture> firstSeenByCode = new ConcurrentHashMap<>();
     private volatile LocalDate firstSeenDate = LocalDate.MIN;
@@ -227,6 +230,17 @@ public class ShortTermRealtimeScanner {
      */
     List<ConditionSignalDto> verifyAndEnrich(List<ConditionSignalDto> signals, ZonedDateTime now) {
         if (signals == null || signals.isEmpty()) return signals;
+        var independent=KiwoomConditionEnricher.empty("NOT_CONFIGURED");
+        if(kiwoomEnricher!=null) {
+            Map<String,String> names=new LinkedHashMap<>();
+            signals.stream().limit(3).forEach(signal->names.put(signal.stockCode(),signal.stockName()));
+            try {independent=kiwoomEnricher.enrich(names);} catch(RuntimeException ignored) { /* Preserve measured KIS signals. */ }
+            if(!independent.facts().isEmpty()) {
+                List<ConditionSignalDto> observed=new ArrayList<>();
+                for(ConditionSignalDto signal:signals) observed.add(independent.attach(signal));
+                signals=List.copyOf(observed);
+            }
+        }
         if (verifier == null || !verifier.isAvailable()) return signals;
 
         try {
@@ -236,6 +250,10 @@ public class ShortTermRealtimeScanner {
                 metrics.put("rank", signal.rank());
                 metrics.put("maxReturnPct", signal.maxReturnPct());
                 metrics.put("currentPrice", signal.currentPrice());
+                if(!independent.forCode(signal.stockCode()).isEmpty()) {
+                    metrics.put("kiwoomEvidence",independent.forCode(signal.stockCode()));
+                    metrics.put("kiwoomCoverage",independent.coverage());
+                }
                 packets.add(new EvidencePacket(
                     ConditionSection.SHORT_TERM.name(),
                     ConditionSection.SHORT_TERM.legacyMode(),

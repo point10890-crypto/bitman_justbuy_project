@@ -13,6 +13,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -20,6 +21,37 @@ import static org.mockito.Mockito.*;
 
 /** Reflection permits the initial RED gate before the new source contract exists. */
 class KeywordSearchDataServiceTest {
+    @Test void boundedKisCrossQuotesPreserveProviderCaptureTimeWithoutInventingTradeTime() {
+        when(kis.isAvailable()).thenReturn(true);
+        Map<String,String> facts=Map.of("stockCode","005930","name","삼성전자","source","KIS OpenAPI","exchange","KRX",
+            "fetchedAt","2026-10-12T00:09:58Z","currentPrice","254000","changeRate","+2.5%","volume","1000","거래대금","254000000");
+        when(kis.fetchCurrentPrice("005930")).thenReturn(facts);
+        var source=new KeywordSearchDataService(http,mapper,kis,clock);
+        var quote=source.kisQuotes(List.of("005930","../../env","005930")).get("005930");
+        assertThat(quote.price()).isEqualByComparingTo("254000");assertThat(quote.changePct()).isEqualByComparingTo("2.5");
+        assertThat(quote.fetchedAt()).isEqualTo(Instant.parse("2026-10-12T00:09:58Z"));assertThat(quote.observedAt()).isNull();
+        assertThat(quote.market()).isEqualTo("UNKNOWN");verify(kis,times(1)).fetchCurrentPrice("005930");
+    }
+    @Test void kisCrossQuoteRejectsWrongSourceCodeStaleCaptureAndInvalidPrice() {
+        when(kis.isAvailable()).thenReturn(true);
+        var facts=new java.util.LinkedHashMap<String,String>(Map.of("stockCode","005930","name","삼성전자","source","KIS OpenAPI","exchange","KRX",
+            "fetchedAt","2026-10-12T00:09:58Z","currentPrice","254000"));
+        var source=new KeywordSearchDataService(http,mapper,kis,clock);
+        for(String field:List.of("source","stockCode","fetchedAt","currentPrice")) {
+            var invalid=new java.util.LinkedHashMap<>(facts);invalid.put(field,switch(field){case "source"->"fixture";case "stockCode"->"000660";case "fetchedAt"->"2026-10-12T00:00:00Z";default->"NaN";});
+            when(kis.fetchCurrentPrice("005930")).thenReturn(invalid);assertThat(source.kisQuotes(List.of("005930"))).isEmpty();
+        }
+    }
+    @Test void realKisCurrentPriceWithoutANameRetainsRequestCodeIdentityAndMissingName() {
+        when(kis.isAvailable()).thenReturn(true);
+        when(kis.fetchCurrentPrice("005930")).thenReturn(Map.of("stockCode","005930","source","KIS OpenAPI","exchange","KRX",
+            "fetchedAt","2026-10-12T00:09:58Z","currentPrice","252500","changeRate","-3.63%","volume","10096840","거래대금","2590501982500"));
+        var source=new KeywordSearchDataService(http,mapper,kis,clock);
+        var quote=source.kisQuotes(List.of("005930")).get("005930");
+        assertThat(quote).isNotNull();assertThat(quote.name()).isEmpty();assertThat(quote.code()).isEqualTo("005930");
+        assertThat(quote.price()).isEqualByComparingTo("252500");assertThat(quote.tradingValueKrw()).isEqualByComparingTo("2590501982500");
+        assertThat(quote.observedAt()).isNull();
+    }
     RestTemplate http;
     KisApiService kis;
     ObjectMapper mapper = new ObjectMapper().findAndRegisterModules()

@@ -1,6 +1,6 @@
 /** BitMan Service Worker - freshness-first app shell */
 
-const CACHE_NAME = 'bitman-v20261012-analysis-status-r8'
+const CACHE_NAME = 'bitman-v20261012-dual-market-sources-r9'
 const SHELL_ASSETS = [
   '/manifest.json',
 ]

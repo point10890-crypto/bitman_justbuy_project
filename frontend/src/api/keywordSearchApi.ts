@@ -7,6 +7,27 @@ export interface KeywordSearchEvidence {
   unit: string
   source: string
   observedAt: string | null
+  environment?: string | null
+  fetchedAt?: string | null
+}
+
+export interface KeywordSearchProvider {
+  source: string
+  environment: string
+  status: string
+  checkedAt: string | null
+  scope: string | null
+}
+
+export interface KeywordSearchSourceObservation {
+  source: string
+  environment: string
+  currentPrice: number | null
+  changePct: number | null
+  volume: number | null
+  tradingValueKrw: number | null
+  fetchedAt: string | null
+  observedAt: string | null
 }
 
 export interface KeywordSearchMatch {
@@ -21,6 +42,8 @@ export interface KeywordSearchMatch {
   quoteCheckedAt: string | null
   observedAt: string | null
   evidence: KeywordSearchEvidence[]
+  quoteEnvironment?: string | null
+  sourceObservations?: KeywordSearchSourceObservation[]
 }
 
 export interface KeywordSearchResponse {
@@ -39,6 +62,7 @@ export interface KeywordSearchResponse {
   sourceStatus: string
   warnings: string[]
   matches: KeywordSearchMatch[]
+  providers?: KeywordSearchProvider[]
 }
 
 /** Always query the data endpoint; neither AI output nor local analysis cache is a search source. */

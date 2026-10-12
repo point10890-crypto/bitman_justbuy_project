@@ -7,11 +7,28 @@ import java.util.List;
 /** Source observations and deterministic matches; no model-generated stock facts. */
 public record KeywordSearchResponse(
     String query, String outcome, List<String> appliedConditions, List<String> unsupportedTerms,
-    Scope scope, Instant fetchedAt, String sourceStatus, List<String> warnings, List<Match> matches
+    Scope scope, Instant fetchedAt, String sourceStatus, List<String> warnings, List<Match> matches,
+    List<ProviderStatus> providers
 ) {
+    public KeywordSearchResponse(String query,String outcome,List<String> appliedConditions,List<String> unsupportedTerms,
+        Scope scope,Instant fetchedAt,String sourceStatus,List<String> warnings,List<Match> matches) {
+        this(query,outcome,appliedConditions,unsupportedTerms,scope,fetchedAt,sourceStatus,warnings,matches,List.of());
+    }
+    public record ProviderStatus(String source,String environment,String status,Instant checkedAt,String scope) {}
+    public record QuoteObservation(String source,String environment,BigDecimal currentPrice,BigDecimal changePct,
+        BigDecimal volume,BigDecimal tradingValueKrw,Instant fetchedAt,Instant observedAt) {}
     public record Scope(String label, int examinedCount, int eligibleCount, int matchedCount, boolean truncated) {}
     public record Match(String code, String name, String market, BigDecimal currentPrice,
         BigDecimal changePct, BigDecimal volume, BigDecimal tradingValueKrw, String quoteSource,
-        Instant quoteCheckedAt, Instant observedAt, List<Evidence> evidence) {}
-    public record Evidence(String condition, String observedValue, String unit, String source, String observedAt) {}
+        Instant quoteCheckedAt, Instant observedAt, List<Evidence> evidence,String quoteEnvironment,List<QuoteObservation> sourceObservations) {
+        public Match(String code,String name,String market,BigDecimal currentPrice,BigDecimal changePct,BigDecimal volume,
+            BigDecimal tradingValueKrw,String quoteSource,Instant quoteCheckedAt,Instant observedAt,List<Evidence> evidence) {
+            this(code,name,market,currentPrice,changePct,volume,tradingValueKrw,quoteSource,quoteCheckedAt,observedAt,evidence,null,List.of());
+        }
+    }
+    public record Evidence(String condition,String observedValue,String unit,String source,String observedAt,String environment,Instant fetchedAt) {
+        public Evidence(String condition,String observedValue,String unit,String source,String observedAt) {
+            this(condition,observedValue,unit,source,observedAt,null,null);
+        }
+    }
 }

@@ -39,7 +39,7 @@ class AdminSourceReadinessTest {
         });
         assertThat(sources.get(0).get("message").toString()).contains("이용 권한");
         assertThat(sources.get(2).get("message").toString()).contains("인증키");
-        assertThat(sources.get(3)).containsEntry("id","KIWOOM").containsEntry("name","키움 보조 근거 (KIS 우선)");
+        assertThat(sources.get(3)).containsEntry("id","KIWOOM").containsEntry("name","키움 시장조회 (KIS 병행)");
         assertThat(sources.get(3).get("message").toString()).contains("키", "공인 출발 IP", "정보이용 범위");
     }
 
@@ -101,10 +101,9 @@ class AdminSourceReadinessTest {
             .withProperty("bitman.kiwoom.enabled", "false")
             .withProperty("bitman.kiwoom.licensed", "false"));
         var kiwoom = sources(body).stream().filter(source -> "KIWOOM".equals(source.get("id"))).findFirst().orElseThrow();
-        assertThat(kiwoom).containsEntry("name", "키움 보조 근거 (KIS 우선·모의)")
+        assertThat(kiwoom).containsEntry("name", "키움 시장조회 (KIS 병행·모의)")
             .containsEntry("enabled", false).containsEntry("credentialsConfigured", true).containsEntry("state", "DISABLED");
-        assertThat(kiwoom.get("message").toString()).startsWith("모의 서버 연결 점검용 설정입니다.")
-            .contains("실제 연결", "미검증");
+        assertThat(kiwoom.get("message").toString()).contains("시장 조회", "KIS", "관측일", "주문·계좌는 사용하지 않습니다");
         assertThat(sources(body)).allSatisfy(source -> assertThat(source.get("enabled")).isEqualTo(false));
         assertThat(new ObjectMapper().writeValueAsString(body)).doesNotContain("fixture-", "api-key", "app-secret");
         verify(kis).isAvailable();

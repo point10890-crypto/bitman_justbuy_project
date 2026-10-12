@@ -44,6 +44,53 @@ describe('keyword search evidence presentation', () => {
     expect(screen.getByText('시세 관측 시각 미확인')).toBeTruthy()
   })
 
+  it('shows both data providers and the Kiwoom server environment without labelling market observations as synthetic', () => {
+    show({ ...result, providers: [
+      { source: 'KIS', environment: 'REAL', status: 'AVAILABLE', checkedAt: '2026-10-12T10:00:00+09:00', scope: '주시세 30종목' },
+      { source: 'KIWOOM_REST_MOCK', environment: 'MOCK', status: 'AVAILABLE', checkedAt: '2026-10-12T10:00:02+09:00', scope: '상위 3종목 시세·일봉·수급 교차조회' },
+    ] })
+    const sources = within(screen.getByRole('region', { name: '조회 출처와 상태' }))
+    expect(sources.getByText('KIS · 실전 서버 시장조회 · 조건검색에 사용')).toBeTruthy()
+    expect(sources.getByText('키움 REST · 모의투자 서버 시장조회 · 조건검색에 사용')).toBeTruthy()
+    expect(sources.getByText('상위 3종목 시세·일봉·수급 교차조회')).toBeTruthy()
+    expect(sources.getByText(/조회 결과 확인.*10:00:02.*KST/)).toBeTruthy()
+    expect(screen.queryByText(/가상 데이터|모의 데이터/)).toBeNull()
+  })
+
+  it('does not imply a provider was used when its observation is unavailable or its state is unknown', () => {
+    show({ ...result, providers: [
+      { source: 'NAVER_FINANCE', environment: 'REAL', status: 'COMPLETE', checkedAt: result.fetchedAt, scope: '주시세 30종목' },
+      { source: 'KIWOOM_REST_MOCK', environment: 'MOCK', status: 'UNAVAILABLE', checkedAt: null, scope: null },
+      { source: 'KIS', environment: '', status: 'UNRECOGNIZED', checkedAt: 'invalid', scope: null },
+    ] })
+    const sources = within(screen.getByRole('region', { name: '조회 출처와 상태' }))
+    expect(sources.getByText('네이버 금융 · 실전 서버 시장조회 · 조건검색에 사용')).toBeTruthy()
+    expect(sources.getByText('키움 REST · 모의투자 서버 시장조회 · 조회 미확인')).toBeTruthy()
+    expect(sources.getByText('KIS · 환경 미확인 · 조회 상태 미확인')).toBeTruthy()
+    expect(sources.getAllByText('조회 결과 확인 미확인')).toHaveLength(2)
+    expect(screen.getByText('현재가 49,000원')).toBeTruthy()
+  })
+
+  it('keeps independently observed prices and times separate for each provider', () => {
+    show({ ...result, matches: [{ ...result.matches[0], quoteEnvironment: 'REAL', sourceObservations: [
+      { source: 'KIS', environment: 'REAL', currentPrice: 49000, changePct: 3.12, volume: 123456, tradingValueKrw: 9876543210,
+        fetchedAt: '2026-10-12T10:00:00+09:00', observedAt: '2026-10-12T09:59:58+09:00' },
+      { source: 'KIWOOM_REST_MOCK', environment: 'MOCK', currentPrice: 49100, changePct: 3.33, volume: null, tradingValueKrw: null,
+        fetchedAt: '2026-10-12T10:00:02+09:00', observedAt: '2026-10-12T10:00:01+09:00' },
+    ], evidence: [{ condition: '외국인 순매수', observedValue: '12000', unit: '주', source: 'KIWOOM_REST_MOCK',
+      environment: 'MOCK', fetchedAt: '2026-10-12T10:00:03+09:00', observedAt: '2026-10-06 ~ 2026-10-12' }] }] })
+    const observations = within(screen.getByRole('list', { name: '검증 종목 공급자별 조회값' }))
+    const rows = observations.getAllByRole('listitem')
+    expect(within(rows[0]).getByText('KIS · 실전 서버 시장조회')).toBeTruthy()
+    expect(within(rows[0]).getByText(/현재가 49,000원.*등락률 \+3.12%/)).toBeTruthy()
+    expect(within(rows[1]).getByText('키움 REST · 모의투자 서버 시장조회')).toBeTruthy()
+    expect(within(rows[1]).getByText(/현재가 49,100원.*등락률 \+3.33%.*거래량 미확인.*거래대금 미확인/)).toBeTruthy()
+    expect(within(rows[1]).getByText(/조회.*10:00:02.*관측.*10:00:01.*KST/)).toBeTruthy()
+    expect(screen.getByText('관측 기간 2026-10-06 ~ 2026-10-12')).toBeTruthy()
+    expect(screen.getByText(/근거 조회 시각.*10:00:03.*KST/)).toBeTruthy()
+    expect(screen.getByText(/실측 12000주.*출처 키움 REST.*모의투자 서버 시장조회/)).toBeTruthy()
+  })
+
   it.each([
     ['EMPTY', '조회한 범위에서 조건에 맞는 종목이 없습니다.'],
     ['UNAVAILABLE', '실데이터를 조회하지 못했습니다. 잠시 후 다시 검색해 주세요.'],

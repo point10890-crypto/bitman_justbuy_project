@@ -50,19 +50,24 @@ public class MultiAgentOrchestrator {
     private com.bitman.justbuy.service.KisExtendedEvidenceService kisExtendedEvidenceService;
     private com.bitman.justbuy.service.KisSourceExpansionService sourceExpansion;
     private com.bitman.justbuy.service.KiwoomReadOnlyService kiwoomSupplement;
+    private com.bitman.justbuy.service.KiwoomConditionEnricher kiwoomConditionEnricher;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     public void configureSourceExpansion(com.bitman.justbuy.service.KisSourceExpansionService expansion) { this.sourceExpansion=expansion; }
 
     @org.springframework.beans.factory.annotation.Autowired(required=false)
-    public void configureKiwoomSupplement(com.bitman.justbuy.service.KiwoomReadOnlyService supplement) { this.kiwoomSupplement = supplement; }
+    public void configureKiwoomSupplement(com.bitman.justbuy.service.KiwoomReadOnlyService supplement) {
+        this.kiwoomSupplement = supplement;
+        this.kiwoomConditionEnricher = new com.bitman.justbuy.service.KiwoomConditionEnricher(supplement);
+    }
 
-    private boolean isProductionSupplement() {
+    private String activeKiwoomSource() {
         try {
-            if (kiwoomSupplement == null || !kiwoomSupplement.isEnabled()) return false;
+            if (kiwoomSupplement == null || !kiwoomSupplement.isEnabled()) return "";
             var readiness = kiwoomSupplement.readiness();
-            return readiness != null && "REAL".equals(readiness.get("environment"));
+            return readiness == null ? "" : "MOCK".equals(readiness.get("environment")) ? "KIWOOM_REST_MOCK"
+                : "REAL".equals(readiness.get("environment")) ? "KIWOOM_REST" : "";
         } catch (RuntimeException ignored) {
-            return false;
+            return "";
         }
     }
 
@@ -398,16 +403,16 @@ public class MultiAgentOrchestrator {
             } catch(Exception ignored) { sourceExpansionMetadata=Map.of("status","UNAVAILABLE"); }
             checkBudget(deadline);
         }
-        if (isProductionSupplement()) {
-            var missing = com.bitman.justbuy.service.KiwoomSupplementPolicy.missingParts(boundedEvidenceCodes, sourceExpansionMetadata);
-            if (!missing.isEmpty()) {
+        if (kiwoomConditionEnricher != null && !activeKiwoomSource().isEmpty()) {
+            var names = new LinkedHashMap<String,String>();
+            for (String code : boundedEvidenceCodes) names.put(code,candidateNames.get(code));
+            if (!names.isEmpty()) {
                 checkBudget(deadline);
                 try {
-                    var evidence = kiwoomSupplement.fetchEvidence(new ArrayList<>(missing.keySet()), missing);
-                    marketDataText += "\n[키움 보조 조회 근거] KIS의 확인된 자료를 유지하고 미확인 그룹만 보완한다. 원 제공 날짜·기간·단위를 유지하며 날짜 미확인 자료를 실시간 확정 자료로 취급하지 않는다.\n"
-                        + objectMapper.writeValueAsString(evidence);
+                    var evidence = kiwoomConditionEnricher.enrich(names);
+                    marketDataText += evidence.prompt();
                     var metadata = new LinkedHashMap<String,Object>(sourceExpansionMetadata == null ? Map.of() : sourceExpansionMetadata);
-                    metadata.put("kiwoomSupplement", supplementCoverage(evidence, missing));
+                    metadata.put("kiwoomSupplement", evidence.coverage());
                     sourceExpansionMetadata = Map.copyOf(metadata);
                 } catch (Exception ignored) {
                     marketDataText += "\n[키움 보조 근거 확인 불가. KIS의 확인된 자료는 유지한다.]\n";
@@ -580,7 +585,8 @@ public class MultiAgentOrchestrator {
         quotes.entrySet().removeIf(entry -> parseKoreanPrice(entry.getValue()) <= 0);
         Map<String,String> quoteSources = new HashMap<>();
         quotes.keySet().forEach(code -> quoteSources.put(code, "NAVER_FINANCE"));
-        if (isProductionSupplement()) {
+        String kiwoomQuoteSource=activeKiwoomSource();
+        if (!kiwoomQuoteSource.isEmpty()) {
             List<String> missing = draftPicks.keySet().stream().filter(code -> !quotes.containsKey(code)).limit(3).toList();
             if (!missing.isEmpty()) {
                 checkBudget(deadline);
@@ -589,7 +595,7 @@ public class MultiAgentOrchestrator {
                     Instant receivedAt = Instant.now();
                     for (String code : missing) {
                         var quote = supplementaryQuotes.get(code);
-                        if (quote == null || !code.equals(quote.code()) || !"KIWOOM_REST".equals(quote.source())
+                        if (quote == null || !code.equals(quote.code()) || !kiwoomQuoteSource.equals(quote.source())
                             || !Objects.equals(candidateNames.get(code), quote.name()) || quote.fetchedAt() == null
                             || quote.fetchedAt().isAfter(receivedAt) || quote.fetchedAt().isBefore(receivedAt.minusSeconds(60))
                             || quote.price() == null || quote.price().signum() <= 0) continue;
@@ -597,7 +603,7 @@ public class MultiAgentOrchestrator {
                             long price = quote.price().toBigIntegerExact().longValueExact();
                             if (price <= 0) continue;
                             quotes.put(code, String.format("%,d", price));
-                            quoteSources.put(code, "KIWOOM_REST");
+                            quoteSources.put(code, quote.source());
                         } catch (ArithmeticException ignored) { /* A fractional or out-of-range won price is unavailable. */ }
                     }
                 } catch (Exception ignored) {
@@ -679,28 +685,6 @@ public class MultiAgentOrchestrator {
         return new AnalysisResponse(mode, query, publicResults, null, renderPublishedPicks(finalPicks), finalPicks, consensus,
             Instant.now().toString(), !finalPicks.isEmpty(),
             new AnalysisResponse.Metadata(totalDuration, availableAgents.size(), successResults.size(),null,sourceExpansionMetadata));
-    }
-
-    private static Map<String,Object> supplementCoverage(Map<String,Object> evidence, Map<String,List<String>> requested) {
-        Map<?,?> candidates = evidence != null && evidence.get("candidates") instanceof Map<?,?> rows ? rows : Map.of();
-        var states = new LinkedHashMap<String,Object>();
-        int confirmed = 0;
-        boolean complete = true;
-        for (String code : requested.keySet()) {
-            Map<?,?> groups = candidates.get(code) instanceof Map<?,?> row ? row : Map.of();
-            var sourceStates = new LinkedHashMap<String,String>();
-            for (String part : requested.get(code)) {
-                Object value = groups.get(part);
-                String status = value instanceof Map<?,?> fact ? Objects.toString(fact.get("status"), "UNAVAILABLE") : "UNAVAILABLE";
-                sourceStates.put(part, Set.of("AVAILABLE", "PARTIAL", "UNAVAILABLE", "EMPTY", "UNDATED", "DISABLED").contains(status) ? status : "UNAVAILABLE");
-                if (!"AVAILABLE".equals(status)) complete = false;
-            }
-            if (sourceStates.containsValue("AVAILABLE")) confirmed++;
-            states.put(code, sourceStates);
-        }
-        String status = complete && confirmed == requested.size() ? "AVAILABLE" : confirmed > 0 ? "PARTIAL" : "UNAVAILABLE";
-        return Map.of("status", status, "requestedCodes", requested.size(), "enrichedCodes", confirmed,
-            "sourceStates", states, "requestedParts", requested, "source", "KIWOOM_REST");
     }
 
     private static void collectCandidateRows(String text, String source, Map<String, String> out, Map<String, String> names) {

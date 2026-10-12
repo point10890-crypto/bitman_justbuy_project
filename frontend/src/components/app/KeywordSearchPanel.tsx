@@ -28,6 +28,31 @@ function formatNumber(value: number | null | undefined, unit: string, signed = f
   return `${signed && value > 0 ? '+' : ''}${formatted}${unit}`
 }
 
+function sourceLabel(source: string | null | undefined) {
+  if (source === 'NAVER_FINANCE') return '네이버 금융'
+  if (source === 'KIWOOM_REST' || source === 'KIWOOM_REST_MOCK') return '키움 REST'
+  return source || '미확인'
+}
+
+function environmentLabel(environment: string | null | undefined) {
+  if (environment === 'MOCK') return '모의투자 서버 시장조회'
+  if (environment === 'REAL') return '실전 서버 시장조회'
+  return '환경 미확인'
+}
+
+function providerStatusLabel(status: string) {
+  if (status === 'COMPLETE' || status === 'AVAILABLE') return '조건검색에 사용'
+  if (status === 'PARTIAL') return '일부 데이터 사용'
+  if (status === 'UNAVAILABLE' || status === 'FAILED') return '조회 미확인'
+  if (status === 'DISABLED') return '연결 꺼짐'
+  if (status === 'NOT_REQUESTED' || status === 'NOT_REQUIRED') return '미조회'
+  return '조회 상태 미확인'
+}
+
+function observationSourceLabel(source: string | null | undefined, environment: string | null | undefined) {
+  return `${sourceLabel(source)}${environment ? ` · ${environmentLabel(environment)}` : ''}`
+}
+
 function isCalendarDate(value: string) {
   const date = new Date(`${value}T00:00:00Z`)
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
@@ -88,6 +113,18 @@ export function KeywordSearchPanel({ query, loading, error, result, onClose }: K
                 <span>조회 시각 {formatKstTimestamp(result.fetchedAt)}</span>
               </div>
               {outcomeMessage[result.outcome] && <p className="keyword-search-empty">{outcomeMessage[result.outcome]}</p>}
+              {result.providers && result.providers.length > 0 && (
+                <section className="keyword-search-scope" aria-label="조회 출처와 상태">
+                  <h3>조건검색 데이터 출처</h3>
+                  {result.providers.map((provider, index) => (
+                    <div key={`${provider.source}-${index}`}>
+                      <p><strong>{sourceLabel(provider.source)} · {environmentLabel(provider.environment)} · {providerStatusLabel(provider.status)}</strong></p>
+                      {provider.scope && <p>{provider.scope}</p>}
+                      <p>조회 결과 확인 {formatKstTimestamp(provider.checkedAt)}</p>
+                    </div>
+                  ))}
+                </section>
+              )}
               <section className="keyword-search-scope" aria-label="검색 조건과 범위">
                 <h3>적용한 조건</h3>
                 {result.appliedConditions.length > 0
@@ -115,14 +152,26 @@ export function KeywordSearchPanel({ query, loading, error, result, onClose }: K
                         <span>거래량 {formatNumber(match.volume, '주')}</span>
                         <span>거래대금 {formatNumber(match.tradingValueKrw, '원')}</span>
                       </div>
-                      <p className="keyword-match-source">시세 출처 {match.quoteSource || '미확인'} · 확인 시각 {formatKstTimestamp(match.quoteCheckedAt)}</p>
+                      <p className="keyword-match-source">시세 출처 {observationSourceLabel(match.quoteSource, match.quoteEnvironment)} · 확인 시각 {formatKstTimestamp(match.quoteCheckedAt)}</p>
                       <p className="keyword-match-source">시세 관측 시각 {formatKstTimestamp(match.observedAt)}</p>
+                      {match.sourceObservations && match.sourceObservations.length > 0 && (
+                        <ul className="keyword-match-evidence" aria-label={`${match.name} 공급자별 조회값`}>
+                          {match.sourceObservations.map((observation, index) => (
+                            <li key={`${observation.source}-${index}`}>
+                              <strong>{sourceLabel(observation.source)} · {environmentLabel(observation.environment)}</strong>
+                              <span>현재가 {formatNumber(observation.currentPrice, '원')} · 등락률 {formatNumber(observation.changePct, '%', true)} · 거래량 {formatNumber(observation.volume, '주')} · 거래대금 {formatNumber(observation.tradingValueKrw, '원')}</span>
+                              <span>조회 {formatKstTimestamp(observation.fetchedAt)} · 관측 {formatKstTimestamp(observation.observedAt)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                       <ul className="keyword-match-evidence">
                         {match.evidence.map((evidence, index) => (
                           <li key={index}>
                             <strong>{evidence.condition}</strong>
-                            <span>실측 {evidence.observedValue || '미확인'}{evidence.unit} · 출처 {evidence.source || '미확인'}</span>
+                            <span>실측 {evidence.observedValue || '미확인'}{evidence.unit} · 출처 {observationSourceLabel(evidence.source, evidence.environment)}</span>
                             {evidence.observedAt && <span>{formatEvidenceObservation(evidence.observedAt)}</span>}
+                            {evidence.fetchedAt && <span>근거 조회 시각 {formatKstTimestamp(evidence.fetchedAt)}</span>}
                           </li>
                         ))}
                       </ul>

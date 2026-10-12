@@ -42,7 +42,11 @@ public class KeywordSearchDataService {
         public Snapshot { quotes = List.copyOf(quotes); warnings = List.copyOf(warnings); }
     }
     public record Flow(String code, long foreignNet, long institutionNet, int days,
-                       String fromDate, String toDate, Instant fetchedAt) {}
+                       String fromDate, String toDate, Instant fetchedAt,String source,String environment) {
+        public Flow(String code,long foreignNet,long institutionNet,int days,String fromDate,String toDate,Instant fetchedAt) {
+            this(code,foreignNet,institutionNet,days,fromDate,toDate,fetchedAt,"KIS OpenAPI","REAL");
+        }
+    }
     private record CachedSnapshot(Snapshot value, Instant expiresAt) {}
     private record CachedQuote(Quote value, Instant expiresAt) {}
 
@@ -55,6 +59,44 @@ public class KeywordSearchDataService {
     private volatile CachedSnapshot snapshotCache;
     private KisCandidateSourceService expandedCandidates;
     private KisSourceGateway sourceGateway;
+    private KiwoomReadOnlyService kiwoom;
+
+    @Autowired(required=false)
+    public void configureKiwoom(KiwoomReadOnlyService kiwoom) {this.kiwoom=kiwoom;}
+
+    public Map<String,Object> kiwoomReadiness() {
+        return kiwoom==null?Map.of("enabled",false,"status","NOT_CONFIGURED","source","KIWOOM_REST","environment","UNKNOWN"):kiwoom.readiness();
+    }
+    /** Both providers receive the same verified candidate codes; provider facts remain independent. */
+    public Map<String,Object> kiwoomEvidence(List<String> codes) {
+        if(kiwoom==null || !kiwoom.isEnabled()) return Map.of();
+        List<String> verified=codes==null?List.of():codes.stream().filter(c->c!=null&&c.matches("[0-9]{6}")).distinct().limit(3).toList();
+        return verified.isEmpty()?Map.of():kiwoom.fetchEvidence(verified);
+    }
+    /** Existing permitted KIS current-price API; independent observations never fill another quote's fields. */
+    public Map<String,Quote> kisQuotes(List<String> codes) {
+        if(kis==null || !kis.isAvailable() || codes==null || Thread.currentThread().isInterrupted()) return Map.of();
+        Map<String,Quote> observations=new LinkedHashMap<>();
+        for(String code:codes.stream().filter(c->c!=null&&c.matches("[0-9]{6}")).distinct().limit(3).toList()) {
+            if(Thread.currentThread().isInterrupted())break;
+            try {
+                Map<String,String> facts=kis.fetchCurrentPrice(code);
+                if(facts==null || !code.equals(facts.get("stockCode")) || !"KIS OpenAPI".equals(facts.get("source"))
+                    || !"KRX".equals(facts.get("exchange"))) continue;
+                Instant fetched=Instant.parse(facts.get("fetchedAt")),now=clock.instant();
+                if(fetched.isAfter(now) || fetched.isBefore(now.minusSeconds(180)))continue;
+                BigDecimal price=number(mapper.valueToTree(facts.get("currentPrice")),false,true);
+                if(price==null || price.signum()<=0)continue;
+                String rate=facts.get("changeRate");
+                BigDecimal change=number(mapper.valueToTree(rate==null?null:rate.replaceFirst("%$","")),true,false);
+                BigDecimal volume=number(mapper.valueToTree(facts.get("volume")),false,true);
+                BigDecimal value=number(mapper.valueToTree(facts.get("거래대금")),false,true);
+                // Some KIS price responses omit the name; preserve that absence, never invent a name.
+                observations.put(code,new Quote(code,facts.getOrDefault("name",""),"UNKNOWN",price,change,volume,value,"KIS OpenAPI",fetched,null));
+            }catch(RuntimeException ignored){/* Do not expose provider responses or credentials. */}
+        }
+        return Collections.unmodifiableMap(observations);
+    }
 
     @Autowired(required = false)
     public void configureExpandedSources(KisCandidateSourceService candidates, KisSourceGateway gateway) {

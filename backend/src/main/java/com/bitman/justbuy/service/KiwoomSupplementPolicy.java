@@ -9,13 +9,24 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * Pure policy for KIS-primary, Kiwoom-supplement source groups.
+ * Bounded independent Kiwoom requests alongside KIS, plus the legacy missing-group selector.
  * An AVAILABLE group is retained as primary. Individual missing MA/PER/PBR fields
  * inside that group are not inspected: this is group-level supplementation, not field-level merging.
  * Undated investor estimates never confirm daily flow. Quotes are handled by the caller separately.
  */
 public final class KiwoomSupplementPolicy {
     private KiwoomSupplementPolicy() {}
+    /** Query the same bounded deterministic candidates even when KIS already has complete facts. */
+    public static Map<String,List<String>> concurrentParts(List<String> codes) {
+        if(codes==null) return Map.of();
+        Map<String,List<String>> requested=new LinkedHashMap<>();
+        for(String code:codes) {
+            if(code!=null && code.matches("[0-9]{6}"))
+                requested.putIfAbsent(code,List.of("quote","valuation","technical","investorDaily"));
+            if(requested.size()==3) break;
+        }
+        return Collections.unmodifiableMap(requested);
+    }
     public static Map<String,List<String>> missingParts(List<String> codes,Map<String,Object> primaryMetadata) {
         if(codes==null || codes.isEmpty()) return Map.of();
         Set<String> selected=new LinkedHashSet<>();

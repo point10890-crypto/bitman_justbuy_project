@@ -4,6 +4,7 @@ import com.bitman.justbuy.ai.agent.DeepSeekAgent;
 import com.bitman.justbuy.dto.AgentResult;
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.StockPick;
+import com.bitman.justbuy.dto.KeywordSearchResponse;
 import com.bitman.justbuy.dto.condition.EvidencePacket;
 import com.bitman.justbuy.dto.condition.EvidenceVerdict;
 import com.bitman.justbuy.service.KisApiService.ConditionCandidate;
@@ -29,6 +30,9 @@ public class KeywordConditionAnalysisService {
     private final DeepSeekAgent deepSeekAgent;
     private final ObjectMapper mapper;
     private KisSourceExpansionService sourceExpansion;
+    private KeywordConditionSearchService keywordSearch;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void configureKeywordSearch(KeywordConditionSearchService keywordSearch) {this.keywordSearch=keywordSearch;}
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     public void configureSourceExpansion(KisSourceExpansionService expansion) { this.sourceExpansion=expansion; }
 
@@ -53,6 +57,7 @@ public class KeywordConditionAnalysisService {
 
     public AnalysisResponse analyze(String query, String requestedMode) {
         long start = System.currentTimeMillis();
+        if(keywordSearch!=null) return analyzeSharedSearch(query,start);
         List<ConditionCandidate> candidates = verifiedCandidates(kisApiService.fetchDoubleNetBuyCandidates(5, 3));
         String checkedAt = Instant.now().toString();
         String additionalEvidence="";
@@ -101,6 +106,47 @@ public class KeywordConditionAnalysisService {
         );
     }
 
+    /** The legacy AI route consumes the same verified dual-provider facts as the homepage search. */
+    private AnalysisResponse analyzeSharedSearch(String query,long start) {
+        // Preserve requested conditions and periods; an unsupported term must not silently become a three-day query.
+        KeywordSearchResponse search=keywordSearch.search(query);
+        var candidates=new ArrayList<ConditionCandidate>();
+        var matches=new LinkedHashMap<String,KeywordSearchResponse.Match>();
+        if(search!=null && search.matches()!=null) for(var match:search.matches()) {
+            if(match==null || match.code()==null || !match.code().matches("[0-9]{6}") || match.name()==null || match.name().isBlank()
+                || match.currentPrice()==null || match.currentPrice().signum()<=0 || match.currentPrice().stripTrailingZeros().scale()>0
+                || match.quoteCheckedAt()==null || match.evidence()==null) continue;
+            var foreign=match.evidence().stream().filter(e->"외국인 순매수".equals(e.condition())&&"주".equals(e.unit())).findFirst().orElse(null);
+            var institution=match.evidence().stream().filter(e->"기관 순매수".equals(e.condition())&&"주".equals(e.unit())).findFirst().orElse(null);
+            if(foreign==null || institution==null || !foreign.source().equals(institution.source())
+                || !java.util.Objects.equals(foreign.environment(),institution.environment()) || !java.util.Objects.equals(foreign.observedAt(),institution.observedAt())) continue;
+            try {
+                long foreignNet=Long.parseLong(foreign.observedValue()),institutionNet=Long.parseLong(institution.observedValue());
+                if(foreignNet<=0||institutionNet<=0)continue;
+                String reason="요청한 실제 거래일 외국인·기관 동시 순매수 · "+foreign.source()+" ("+foreign.environment()+") · "+foreign.observedAt();
+                long smart=Math.addExact(foreignNet,institutionNet);
+                if(matches.putIfAbsent(match.code(),match)!=null)continue;
+                candidates.add(new ConditionCandidate(match.name(),match.code(),match.currentPrice().toPlainString(),
+                    match.changePct()==null?"":match.changePct().toPlainString(),foreignNet,institutionNet,0,smart,foreign.source(),reason));
+                if(candidates.size()==5)break;
+            }catch(RuntimeException ignored){/* Never reconstruct unverified or overflowing flow values. */}
+        }
+        String checkedAt=Instant.now().toString();
+        String evidence=search==null?"":"\n[공급자별 독립 조회 근거: 시세와 수급 출처·환경·시각을 유지]\n"+toJson(search);
+        AgentResult detector=new AgentResult("condition-tools",buildDetectorContent(query,candidates),"KIS / Kiwoom REST verified condition detector",
+            0,0,candidates.isEmpty()?"skipped":"success",candidates.isEmpty()?"No verified double-net-buy matches":null,System.currentTimeMillis()-start);
+        AgentResult analyst=candidates.isEmpty()?AgentResult.skipped("deepseek","No verified candidates"):runDeepSeekAnalyst(query,candidates,checkedAt,evidence);
+        List<StockPick> picks=candidates.stream().map(candidate->{var match=matches.get(candidate.code());return new StockPick(candidate.name(),candidate.code(),
+            formatPriceText(candidate.currentPrice()),"","","주목",candidate.reason(),0,"","DUAL_PROVIDER_CONDITION_SEARCH",
+            match.quoteSource(),match.quoteCheckedAt().toString());}).toList();
+        Map<String,Object> coverage=new LinkedHashMap<>();coverage.put("status",search==null?"UNAVAILABLE":search.sourceStatus());
+        coverage.put("keywordOutcome",search==null?"UNAVAILABLE":search.outcome());coverage.put("providers",search==null?List.of():search.providers());
+        coverage.put("warnings",search==null?List.of():search.warnings());coverage.put("scoringEnabled",false);
+        var round1=List.of(detector,analyst);int succeeded=(int)round1.stream().filter(r->"success".equals(r.status())).count();
+        return new AnalysisResponse(MODE_DUAL_NET_BUY,query,round1,null,buildTextReport(query,candidates,analyst),picks,null,Instant.now().toString(),
+            !picks.isEmpty(),new AnalysisResponse.Metadata(System.currentTimeMillis()-start,round1.size(),succeeded,null,coverage));
+    }
+
     private List<ConditionCandidate> verifiedCandidates(List<ConditionCandidate> input) {
         Map<String, ConditionCandidate> verified = new LinkedHashMap<>();
         if (input != null) for (ConditionCandidate candidate : input) {
@@ -121,7 +167,7 @@ public class KeywordConditionAnalysisService {
 
         String system = """
             You are BitMan's Korean stock condition-search analyst.
-            Use only the provided KIS OpenAPI candidate data.
+            Use only the provided verified provider candidate data. Preserve each source, environment and observation period.
             Do not invent stock names, stock codes, foreign/institution values, targets, or news.
             Return one JSON object only. Do not use markdown or prose outside JSON.
             Use only candidate stockCode values. aiScore must be an integer from 0 to 99.
@@ -131,7 +177,7 @@ public class KeywordConditionAnalysisService {
             """;
         String user = "사용자 검색어: " + query + "\n"
             + "KST 기준일: " + DateTimeFormatter.ISO_LOCAL_DATE.format(Instant.now().atZone(KST)) + "\n"
-            + "KIS 후보 데이터:\n" + toJson(candidatePayload(candidates))
+            + "검증된 후보 데이터:\n" + toJson(candidatePayload(candidates))
             + (additionalEvidence==null?"":additionalEvidence);
         AgentResult result = deepSeekAgent.analyze(system, user);
         if (!"success".equals(result.status())) return safeAnalystResult(result, "", result.status(), result.error());
@@ -208,11 +254,11 @@ public class KeywordConditionAnalysisService {
         sb.append("검색식 해석\n");
         sb.append("'").append(query).append("'는 외국인과 기관이 동시에 순매수한 쌍끌이 매수 조건으로 해석했습니다.\n\n");
         if (candidates.isEmpty()) {
-            sb.append("KIS 검출 결과: 현재 확인한 KIS 후보군 안에서는 조건을 동시에 만족하는 종목을 찾지 못했습니다.\n");
+            sb.append("조건 검출 결과: 현재 확인한 후보군 안에서는 조건을 동시에 만족하는 종목을 찾지 못했습니다.\n");
             sb.append("확인 범위: 외국인 순매수, 거래량 상위, 상승률 상위 후보를 기준으로 최근 3일 외국인/기관 합산 수급을 재확인했습니다.\n");
             sb.append("다음 액션: 장중 데이터 갱신 후 다시 조회하거나, '외국인 기관 동시 순매수 거래대금 상위'처럼 범위를 좁혀 조회하세요.\n");
         } else {
-            sb.append("KIS 검출 종목\n");
+            sb.append("실데이터 조건 검출 종목\n");
             for (int i = 0; i < candidates.size(); i++) {
                 ConditionCandidate c = candidates.get(i);
                 sb.append(i + 1).append(". ").append(displayName(c)).append("\n")

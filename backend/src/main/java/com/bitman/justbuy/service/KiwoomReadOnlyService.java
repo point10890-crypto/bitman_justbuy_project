@@ -23,7 +23,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
 
-/** Independently implemented, bounded Kiwoom queries supplement verified primary sources. */
+/** Bounded Kiwoom market queries run alongside verified primary sources; trading is never exposed. */
 @Service
 public class KiwoomReadOnlyService {
     private static final ZoneId KST=ZoneId.of("Asia/Seoul");
@@ -90,13 +90,15 @@ public class KiwoomReadOnlyService {
     }
     public boolean isEnabled() { return "READY".equals(gate()); }
     private String gate() {
-        return environment==null?"INVALID_ENVIRONMENT":!requested?"DISABLED":!licensed?"RIGHTS_UNCONFIRMED":!credential(appKey)||!credential(appSecret)?"NOT_CONFIGURED":"READY";
+        return environment==null?"INVALID_ENVIRONMENT":!requested?"DISABLED":
+            environment==Environment.REAL&&!licensed?"RIGHTS_UNCONFIRMED":
+            !credential(appKey)||!credential(appSecret)?"NOT_CONFIGURED":"READY";
     }
     private String source() {return environment==null?"KIWOOM_REST":environment.source;}
     private String environmentName() {return environment==null?"INVALID":environment.name();}
     private String scope() {
-        return environment==Environment.MOCK?"모의 환경 검증용 자료이며 확정 실전 시세·재무·수급 근거로 사용하지 않음":
-            "KIS 등 1차 자료의 미확인 항목만, 최대 3종목·첫 응답 페이지. 날짜 미상 재무와 불완전 기간을 명시함";
+        return environment==Environment.MOCK?"모의투자 서버의 시장 조회 자료를 KIS와 함께 검증. 실전 이용 권한 확인 상태는 별도이며 주문·계좌는 사용하지 않음. 최대 3종목·첫 응답 페이지":
+            "KIS와 병행하는 시장 조회 자료, 최대 3종목·첫 응답 페이지. 날짜 미상 재무와 불완전 기간을 명시함";
     }
     public Map<String,Object> readiness() {
         return Map.ofEntries(Map.entry("status",gate()),Map.entry("requested",requested),Map.entry("licensed",licensed),
@@ -313,9 +315,17 @@ public class KiwoomReadOnlyService {
         Collections.reverse(bars);out.put("availableBars",Math.min(100,dated.size()));
         out.put("calendarCoverage","LATEST_CONSECUTIVE_COMPLETED_TRADING_DAYS");
         out.put("bars",bars.size());out.put("observedDate",completed.toString());out.put("fromDate",bars.getFirst().date().toString());out.put("observationTimeBasis","DATE_ONLY");
+        out.put("coverageStart",bars.getFirst().date().toString());out.put("coverageEnd",completed.toString());
         out.put("priceUnit","KRW");out.put("adjustmentBasis","PROVIDER_ADJUSTED_AT_REQUEST_BASE_DATE");out.put("historyLimit",100);
         out.put("close",bars.getLast().close());out.put("high",bars.getLast().high());
         for(int period:List.of(5,20,60)) if(bars.size()>=period) out.put("ma"+period,mean(bars,period));
+        if(bars.size()>=60) out.put("maAligned",mean(bars,5).compareTo(mean(bars,20))>0&&mean(bars,20).compareTo(mean(bars,60))>0);
+        if(bars.size()>=20) {
+            BigDecimal averageVolume=bars.subList(bars.size()-20,bars.size()).stream().map(Bar::volume)
+                .reduce(BigDecimal.ZERO,BigDecimal::add).divide(BigDecimal.valueOf(20),8,RoundingMode.HALF_UP);
+            if(averageVolume.signum()>0) out.put("volumeRatio20",bars.getLast().volume().divide(averageVolume,8,RoundingMode.HALF_UP));
+            out.put("volumeRatioBasis","LATEST_COMPLETED_VOLUME_OVER_20_COMPLETED_AVERAGE");
+        }
         if(bars.size()>=21) {
             BigDecimal prior=bars.subList(bars.size()-21,bars.size()-1).stream().map(Bar::high).max(BigDecimal::compareTo).orElseThrow();
             out.put("previous20High",prior);out.put("breakout20",bars.getLast().high().compareTo(prior)>0);out.put("breakoutBasis","LATEST_COMPLETED_HIGH_ABOVE_PREVIOUS_20_COMPLETED_HIGHS");

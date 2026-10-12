@@ -12,6 +12,9 @@ import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -84,23 +87,40 @@ class KiwoomSupplementConsumerTest {
             BigDecimal.ONE, BigDecimal.TEN, new BigDecimal("720000"), source, fetchedAt, null);
     }
 
-    @Test void completePrimaryFactsAndVerifiedNaverQuoteNeverCallSupplementalEndpoints() {
+    private Map<String,Object> fact(String part,String status,String marker) {
+        var value=new LinkedHashMap<String,Object>();
+        value.put("status",status);value.put("source","MOCK".equals(environment)?"KIWOOM_REST_MOCK":"KIWOOM_REST");
+        value.put("environment",environment);value.put("requestedStockCode",CODE);value.put("fetchedAt",Instant.now().toString());
+        value.put("fixtureEvidence",marker);
+        LocalDate today=LocalDate.now(ZoneId.of("Asia/Seoul"));
+        LocalDate completed=com.bitman.justbuy.util.KoreanMarketCalendar.previousTradingDay(today);
+        if("technical".equals(part) && com.bitman.justbuy.util.KoreanMarketCalendar.isTradingDay(today)
+            && LocalTime.now(ZoneId.of("Asia/Seoul")).isAfter(LocalTime.of(15,35))) completed=today;
+        value.put("observedDate",completed.toString());value.put("bars",60);value.put("days",5);
+        return value;
+    }
+    private Map<String,Object> evidence(Map<String,Object> groups) {
+        return Map.of("status","PARTIAL","source","MOCK".equals(environment)?"KIWOOM_REST_MOCK":"KIWOOM_REST",
+            "environment",environment,"candidates",Map.of(CODE,groups));
+    }
+
+    @Test void completePrimaryFactsStillRequestIndependentKiwoomEvidenceWithoutReplacingNaverQuote() {
         var result = run(List.of(CODE), List.of(CODE), Map.of(CODE, "71,000"),
             metadata(List.of(CODE), "AVAILABLE", "AVAILABLE", "AVAILABLE"));
         assertThat(result.stockPicks()).hasSize(1);
         assertThat(result.stockPicks().getFirst().quoteSource()).isEqualTo("NAVER_FINANCE");
-        verify(supplementary, never()).fetchEvidence(anyList(), anyMap());
+        verify(supplementary).fetchEvidence(eq(List.of(CODE)), eq(Map.of(CODE,
+            List.of("quote", "valuation", "technical", "investorDaily"))));
         verify(supplementary, never()).lookupAll(anyList());
     }
 
-    @Test void onlyMissingPartsAreRequestedAndPrimaryFactsRemainInPromptAndMetadata() {
+    @Test void bothProvidersAreRequestedAndPrimaryFactsRemainInPromptAndMetadata() {
         var original = metadata(List.of(CODE), "UNAVAILABLE", "AVAILABLE", "UNAVAILABLE");
-        when(supplementary.fetchEvidence(anyList(), anyMap())).thenReturn(Map.of("status", "AVAILABLE",
-            "candidates", Map.of(CODE, Map.of("technical", Map.of("status", "AVAILABLE", "source", "KIWOOM_REST",
-                "fixtureEvidence", "KIWOOM_TECHNICAL_ONLY"), "investorDaily", Map.of("status", "AVAILABLE",
-                "source", "KIWOOM_REST", "fixtureEvidence", "KIWOOM_DAILY_ONLY")))));
+        when(supplementary.fetchEvidence(anyList(), anyMap())).thenReturn(evidence(Map.of(
+            "technical",fact("technical","AVAILABLE","KIWOOM_TECHNICAL_ONLY"),
+            "investorDaily",fact("investorDaily","AVAILABLE","KIWOOM_DAILY_ONLY"))));
         var result = run(List.of(CODE), List.of(CODE), Map.of(CODE, "71,000"), original);
-        verify(supplementary).fetchEvidence(eq(List.of(CODE)), eq(Map.of(CODE, List.of("technical", "investorDaily"))));
+        verify(supplementary).fetchEvidence(eq(List.of(CODE)), eq(Map.of(CODE, List.of("quote", "valuation", "technical", "investorDaily"))));
         verify(supplementary, never()).lookupAll(anyList());
         assertThat(prompt.get()).contains("KIS_PRIMARY_VALUATION_FACT_KEEP", "KIWOOM_TECHNICAL_ONLY", "KIWOOM_DAILY_ONLY");
         assertThat(result.metadata().sourceExpansion().get("sourceStates")).isInstanceOf(Map.class);
@@ -110,9 +130,9 @@ class KiwoomSupplementConsumerTest {
     }
 
     @Test void partiallyConfirmedSupplementMustRemainPartialEvenWhenOneFactIsAvailableForEveryCandidate() {
-        when(supplementary.fetchEvidence(anyList(), anyMap())).thenReturn(Map.of("status", "PARTIAL",
-            "candidates", Map.of(CODE, Map.of("technical", Map.of("status", "AVAILABLE"),
-                "investorDaily", Map.of("status", "UNAVAILABLE")))));
+        when(supplementary.fetchEvidence(anyList(), anyMap())).thenReturn(evidence(Map.of(
+            "technical",fact("technical","AVAILABLE","KIWOOM_CHART"),
+            "investorDaily",Map.of("status","UNAVAILABLE"))));
         var result = run(List.of(CODE), List.of(CODE), Map.of(CODE, "71,000"),
             metadata(List.of(CODE), "UNAVAILABLE", "AVAILABLE", "UNAVAILABLE"));
         var coverage = (Map<?,?>) result.metadata().sourceExpansion().get("kiwoomSupplement");
@@ -170,42 +190,50 @@ class KiwoomSupplementConsumerTest {
         }
     }
 
-    @Test void enabledMockEnvironmentNeverAddsSupplementFactsAndKeepsVerifiedPrimaryPublication() {
+    @Test void enabledMockEnvironmentQueriesAlongsidePrimaryAndKeepsVerifiedPrimaryPublication() {
         environment = "MOCK";
-        when(supplementary.fetchEvidence(anyList(), anyMap())).thenReturn(Map.of("status", "AVAILABLE",
-            "source", "KIWOOM_REST_MOCK", "fixtureEvidence", "MOCK_HALLUCINATED_PER_999"));
+        when(supplementary.fetchEvidence(anyList(), anyMap())).thenReturn(evidence(Map.of(
+            "technical",fact("technical","AVAILABLE","MOCK_SERVER_VERIFIED_MARKET_CHART"))));
         when(supplementary.lookupAll(anyList())).thenReturn(Map.of(CODE,
             quote(CODE, NAMES.get(CODE), Instant.now(), "KIWOOM_REST")));
 
         var result = run(List.of(CODE), List.of(CODE), Map.of(CODE, "71,000"),
             metadata(List.of(CODE), "UNAVAILABLE", "AVAILABLE", "UNAVAILABLE"));
 
-        verify(supplementary, never()).fetchEvidence(anyList(), anyMap());
+        verify(supplementary).fetchEvidence(eq(List.of(CODE)), eq(Map.of(CODE,
+            List.of("quote", "valuation", "technical", "investorDaily"))));
         verify(supplementary, never()).lookupAll(anyList());
         assertThat(prompt.get()).contains("KIS_PRIMARY_VALUATION_FACT_KEEP")
-            .doesNotContain("MOCK_HALLUCINATED_PER_999", "KIWOOM_REST_MOCK", "키움 보조 조회 근거");
+            .contains("MOCK_SERVER_VERIFIED_MARKET_CHART", "KIWOOM_REST_MOCK", "KIS·키움 동시 조회 근거");
         assertThat(result.stockPicks()).hasSize(1);
         assertThat(result.stockPicks().getFirst().currentPrice()).isEqualTo("71,000");
         assertThat(result.stockPicks().getFirst().quoteSource()).isEqualTo("NAVER_FINANCE");
-        assertThat(result.metadata().sourceExpansion()).doesNotContainKey("kiwoomSupplement");
+        var coverage=(Map<?,?>)result.metadata().sourceExpansion().get("kiwoomSupplement");
+        assertThat(coverage.get("source")).isEqualTo("KIWOOM_REST_MOCK");
+        assertThat(coverage.get("environment")).isEqualTo("MOCK");
     }
 
-    @Test void enabledMockEnvironmentCannotSupplyAQuoteForAnUnquotedProductionCandidate() {
+    @Test void enabledMockEnvironmentCanSupplyVerifiedQuoteWhenPrimaryQuoteIsUnavailable() {
         environment = "MOCK";
-        when(supplementary.fetchEvidence(anyList(), anyMap())).thenReturn(Map.of("status", "AVAILABLE",
-            "source", "KIWOOM_REST_MOCK", "fixtureEvidence", "MOCK_HALLUCINATED_PER_999"));
-        // Even a wrongly labelled provider response must remain unused in a MOCK session.
         when(supplementary.lookupAll(anyList())).thenReturn(Map.of(CODE,
-            quote(CODE, NAMES.get(CODE), Instant.now(), "KIWOOM_REST")));
+            quote(CODE, NAMES.get(CODE), Instant.now(), "KIWOOM_REST_MOCK")));
 
         var result = run(List.of(CODE), List.of(CODE), Map.of(),
             metadata(List.of(CODE), "UNAVAILABLE", "AVAILABLE", "UNAVAILABLE"));
 
-        verify(supplementary, never()).fetchEvidence(anyList(), anyMap());
-        verify(supplementary, never()).lookupAll(anyList());
+        verify(supplementary).fetchEvidence(anyList(), anyMap());
+        verify(supplementary).lookupAll(eq(List.of(CODE)));
+        assertThat(result.stockPicks()).hasSize(1);
+        assertThat(result.stockPicks().getFirst().quoteSource()).isEqualTo("KIWOOM_REST_MOCK");
+        assertThat(result.stockPicks().getFirst().name()).isEqualTo(NAMES.get(CODE));
+        assertThat(result.stockPicks().getFirst().currentPrice()).isEqualTo("72,000");
+    }
+
+    @Test void mockSessionRejectsWronglyLabelledRealQuoteWithoutLosingPrimaryFacts() {
+        environment="MOCK";
+        when(supplementary.lookupAll(anyList())).thenReturn(Map.of(CODE,quote(CODE,NAMES.get(CODE),Instant.now(),"KIWOOM_REST")));
+        var result=run(List.of(CODE),List.of(CODE),Map.of(),metadata(List.of(CODE),"AVAILABLE","AVAILABLE","AVAILABLE"));
         assertThat(result.stockPicks()).isEmpty();
-        assertThat(prompt.get()).contains("KIS_PRIMARY_VALUATION_FACT_KEEP").doesNotContain("MOCK_HALLUCINATED_PER_999");
-        assertThat(result.finalContent()).doesNotContain(CODE);
-        assertThat(result.round1()).allSatisfy(agent -> assertThat(agent.content()).doesNotContain(CODE));
+        assertThat(prompt.get()).contains("KIS_PRIMARY_VALUATION_FACT_KEEP");
     }
 }

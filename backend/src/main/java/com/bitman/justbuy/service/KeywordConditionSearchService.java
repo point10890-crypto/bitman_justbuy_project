@@ -86,6 +86,44 @@ public class KeywordConditionSearchService {
         }
         eligible.sort(order(spec));
         int priceEligibleCount=eligible.size();
+        var providers=new ArrayList<ProviderStatus>();
+        distinct.values().stream().map(Quote::source).distinct().forEach(source->providers.add(new ProviderStatus(source,
+            environment(source),snapshot.status(),snapshot.fetchedAt(),snapshot.scope())));
+        Map<String,Object> secondary=Map.of();
+        Map<String,Quote> kisCrossQuotes=Map.of();
+        Map<String,Object> readiness=data.kiwoomReadiness();
+        boolean secondaryEnabled=readiness!=null && Boolean.TRUE.equals(readiness.get("enabled"));
+        if(secondaryEnabled && !eligible.isEmpty()) {
+            try {
+                Map<String,Quote> quotes=data.kisQuotes(eligible.stream().limit(3).map(Quote::code).toList());
+                if(quotes!=null)kisCrossQuotes=quotes;
+            }catch(RuntimeException ignored){/* Preserve primary and Kiwoom observations. */}
+            int checked=0,missingNames=0;Instant latest=null;
+            for(Quote primary:eligible.stream().limit(3).toList()) {
+                Quote cross=kisCrossQuotes.get(primary.code());
+                if(validCrossQuote(primary,cross) && "KIS OpenAPI".equals(cross.source())) {
+                    checked++;if(cross.name()==null||cross.name().isBlank())missingNames++;
+                    if(latest==null||cross.fetchedAt().isAfter(latest))latest=cross.fetchedAt();
+                }
+            }
+            if(checked==0)warnings.add("KIS 주시세 교차 조회 미확인: 확인된 다른 공급자의 결과를 유지합니다.");
+            else if(checked<Math.min(3,eligible.size()))warnings.add("KIS 주시세 교차 조회는 일부 후보만 확인했습니다.");
+            providers.add(new ProviderStatus("KIS OpenAPI","REAL",checked==0?"UNAVAILABLE":checked<Math.min(3,eligible.size())?"PARTIAL":"AVAILABLE",
+                latest,"검증된 동일 후보 최대 3종목의 기존 KIS 주시세"+(missingNames>0?" · 원응답 종목명 미제공 "+missingNames+"건은 일치하는 검증 종목코드·요청코드로 확인":"")));
+            try {
+                Map<String,Object> received=data.kiwoomEvidence(eligible.stream().limit(3).map(Quote::code).toList());
+                if(received!=null) secondary=received;
+            } catch(RuntimeException ignored) {warnings.add("키움 REST 교차 조회를 확인하지 못했습니다. 확인된 주시세 결과를 유지합니다.");}
+            boolean usable=false;
+            for(Quote quote:eligible.stream().limit(3).toList()) for(String part:List.of("quote","technical","valuation","investorDaily"))
+                if(part.equals("quote")?secondaryObservation(quote,secondaryGroup(secondary,quote.code(),part))!=null
+                    :!secondaryGroup(secondary,quote.code(),part).isEmpty()) usable=true;
+            if(!usable) warnings.add("키움 REST 교차 근거 미확인: 확인된 주시세와 조건 근거를 유지합니다.");
+            String providerSource=string(readiness.get("source")),providerEnvironment=string(readiness.get("environment"));
+            providers.add(new ProviderStatus(providerSource,providerEnvironment,usable?"PARTIAL":"UNAVAILABLE",
+                instant(secondary.get("fetchedAt")),"동일한 검증 후보 정렬 상위 최대 3종목의 시세·완료 일봉·PER/PBR·확정 일별 수급 교차 조회"));
+        } else if(readiness!=null && !readiness.isEmpty()) providers.add(new ProviderStatus(string(readiness.get("source")),
+            string(readiness.get("environment")),secondaryEnabled?"NOT_REQUESTED":string(readiness.get("status")),null,"키움 REST 최대 3종목"));
         boolean needsResearch=spec.filters().stream().anyMatch(f -> isResearch(f.field()));
         boolean researchLimited=needsResearch && eligible.size()>5;
         Map<String,KisResearchEvidenceService.CandidateEvidence> research=new LinkedHashMap<>();
@@ -108,16 +146,26 @@ public class KeywordConditionSearchService {
             try { var observed=data.flows(codes,spec.flowDays()); if(observed!=null) flows=observed; }
             catch (RuntimeException failure) { warnings.add("KIS 수급 조회 미확인: 순매수 값을 추정하지 않았습니다."); }
         }
+        if(needsFlow && !eligible.isEmpty()) {
+            var selectedFlows=new LinkedHashMap<String,Flow>();
+            for(Quote quote:eligible) {
+                Flow primary=flows.get(quote.code());
+                Flow selected=validFlow(primary,quote.code(),spec)?primary:secondaryFlow(quote.code(),secondaryGroup(secondary,quote.code(),"investorDaily"),spec.flowDays());
+                if(validFlow(selected,quote.code(),spec)) selectedFlows.put(quote.code(),selected);
+            }
+            flows=selectedFlows;
+            if(secondaryEnabled && spec.flowDays()>5) warnings.add("키움 확정 일별 수급은 최대 5거래일까지 확인합니다. 더 긴 요청 기간은 KIS의 확인된 수급만 사용합니다.");
+        }
         var matched=new ArrayList<Match>();
         int verifiedFlows=0;
         if(needsFlow) for(Quote q:eligible) if(validFlow(flows.get(q.code()),q.code(),spec)) verifiedFlows++;
         int verifiedResearch=0;
         for (Quote q:eligible) {
-            var researchCandidate=research.get(q.code());
+            var researchCandidate=selectResearch(q.code(),research.get(q.code()),secondary,spec.filters());
             boolean researchKnown=true,researchMatches=true;
             for(Filter filter:spec.filters()) if(isResearch(filter.field())) {
                 BigDecimal value=researchMetric(researchCandidate,filter.field());
-                if(value==null) {researchKnown=false;warnings.add("KIS "+filter.label()+" 실측 근거 미확인 종목은 제외했습니다. 이용 권한·자료 범위를 확인해 주세요.");}
+                if(value==null) {researchKnown=false;warnings.add("KIS·키움 "+filter.label()+" 실측 근거 미확인 종목은 제외했습니다. 이용 권한·자료 범위를 확인해 주세요.");}
                 else if(!compare(value,filter)) researchMatches=false;
             }
             if(needsResearch && !researchKnown) continue;
@@ -132,16 +180,24 @@ public class KeywordConditionSearchService {
             List<Evidence> evidence=new ArrayList<>();
             for (Filter f:spec.filters()) {
                 if (isFlow(f.field())) evidence.add(new Evidence(f.label(),Long.toString("FOREIGN_NET".equals(f.field()) ? flow.foreignNet():flow.institutionNet()),
-                    "주","KIS OpenAPI",flow.fromDate()+" ~ "+flow.toDate()));
+                    "주",flow.source(),flow.fromDate()+" ~ "+flow.toDate(),flow.environment(),flow.fetchedAt()));
                 else if(isResearch(f.field())) evidence.add(new Evidence(f.label(),researchMetric(researchCandidate,f.field()).stripTrailingZeros().toPlainString(),
-                    Set.of("PER","PBR","VOLUME_RATIO20").contains(f.field())?"배":"충족","KIS OpenAPI",researchPeriod(researchCandidate,f.field())));
+                    Set.of("PER","PBR","VOLUME_RATIO20").contains(f.field())?"배":"충족",string(researchSource(researchCandidate,f.field()).get("source")),researchPeriod(researchCandidate,f.field()),
+                    sourceEnvironment(researchSource(researchCandidate,f.field())),instant(researchSource(researchCandidate,f.field()).get("fetchedAt"))));
                 else evidence.add(new Evidence(f.label(),metric(q,f.field()).stripTrailingZeros().toPlainString(),unit(f.field()),q.source(),
-                    q.observedAt()==null ? null:q.observedAt().toString()));
+                    q.observedAt()==null ? null:q.observedAt().toString(),environment(q.source()),q.fetchedAt()));
             }
             if (evidence.isEmpty()) evidence.add(new Evidence("실제 종목 시세 확인",q.price().toPlainString(),"원",q.source(),
-                q.observedAt()==null ? null:q.observedAt().toString()));
+                q.observedAt()==null ? null:q.observedAt().toString(),environment(q.source()),q.fetchedAt()));
+            var observations=new ArrayList<QuoteObservation>();
+            observations.add(new QuoteObservation(q.source(),environment(q.source()),q.price(),q.changePct(),q.volume(),q.tradingValueKrw(),q.fetchedAt(),q.observedAt()));
+            Quote kisCross=kisCrossQuotes.get(q.code());
+            if(validCrossQuote(q,kisCross) && "KIS OpenAPI".equals(kisCross.source()) && !q.source().equals(kisCross.source()))
+                observations.add(new QuoteObservation(kisCross.source(),"REAL",kisCross.price(),kisCross.changePct(),kisCross.volume(),kisCross.tradingValueKrw(),kisCross.fetchedAt(),kisCross.observedAt()));
+            QuoteObservation crossQuote=secondaryObservation(q,secondaryGroup(secondary,q.code(),"quote"));
+            if(crossQuote!=null && !q.source().equals(crossQuote.source())) observations.add(crossQuote);
             matched.add(new Match(q.code(),q.name(),q.market(),q.price(),q.changePct(),q.volume(),q.tradingValueKrw(),
-                q.source(),q.fetchedAt(),q.observedAt(),List.copyOf(evidence)));
+                q.source(),q.fetchedAt(),q.observedAt(),List.copyOf(evidence),environment(q.source()),List.copyOf(observations)));
         }
         int count=matched.size();
         int limit=Math.max(1,Math.min(20,spec.limit()));
@@ -153,23 +209,26 @@ public class KeywordConditionSearchService {
         if ((eligible.isEmpty() && missingRank>0) || (needsFlow && !eligible.isEmpty() && verifiedFlows==0)) outcome="UNAVAILABLE";
         if(needsResearch && !eligible.isEmpty() && verifiedResearch==0) outcome="UNAVAILABLE";
         String scope=snapshot.scope()+(needsFlow ? " · 최근 "+spec.flowDays()+"개 실제 거래일 수급, 최대 20종목":"")
-            +(needsResearch ? " · KIS 완료 일봉·PER/PBR 검증 최대 5종목":"");
+            +(needsResearch ? " · KIS 완료 일봉·PER/PBR 검증 최대 5종목":"")
+            +(secondaryEnabled?" · 키움 REST 동일 후보 교차 근거 최대 3종목":"");
         String sourceStatus="UNAVAILABLE".equals(outcome) ? "UNAVAILABLE":partial ? "PARTIAL":"COMPLETE";
-        return response(query,outcome,spec,new Scope(scope,distinct.size(),priceEligibleCount,count,flowLimited || researchLimited || count>limit),
-            snapshot.fetchedAt(),sourceStatus,List.copyOf(warnings),picks);
+        return new KeywordSearchResponse(query,outcome,spec.appliedConditions(),spec.unsupportedTerms(),
+            new Scope(scope,distinct.size(),priceEligibleCount,count,flowLimited || researchLimited || count>limit),
+            snapshot.fetchedAt(),sourceStatus,List.copyOf(warnings),picks,List.copyOf(providers));
     }
 
     private static boolean validQuote(Quote q) {
         if (q==null || q.code()==null || !q.code().matches("[0-9]{6}") || q.name()==null || q.name().isBlank()
             || q.source()==null || q.source().isBlank() || q.price()==null || q.price().signum()<=0
-            || q.price().stripTrailingZeros().scale()>0 || q.fetchedAt()==null) return false;
+            || "UNKNOWN".equals(environment(q.source())) || q.price().stripTrailingZeros().scale()>0 || q.fetchedAt()==null) return false;
         Instant now=Instant.now();
         return !q.fetchedAt().isAfter(now.plusSeconds(1)) && !q.fetchedAt().isBefore(now.minusSeconds(180))
             && (q.observedAt()==null || !q.observedAt().isAfter(now.plusSeconds(60)));
     }
     private static boolean validFlow(Flow f,String code,Spec spec) {
         if (f==null || !code.equals(f.code()) || f.days()!=spec.flowDays() || f.fetchedAt()==null
-            || f.fetchedAt().isAfter(Instant.now().plusSeconds(1)) || f.fetchedAt().isBefore(Instant.now().minusSeconds(180))) return false;
+            || f.fetchedAt().isAfter(Instant.now().plusSeconds(1)) || f.fetchedAt().isBefore(Instant.now().minusSeconds(kiwoomProvider(f.source(),f.environment())?600:180))
+            || !("KIS OpenAPI".equals(f.source())&&"REAL".equals(f.environment()) || kiwoomProvider(f.source(),f.environment()))) return false;
         try {
             LocalDate from=LocalDate.parse(f.fromDate()),to=LocalDate.parse(f.toDate()),today=LocalDate.now(KST);
             return !from.isAfter(to) && java.time.temporal.ChronoUnit.DAYS.between(from,to)+1>=f.days()
@@ -186,7 +245,7 @@ public class KeywordConditionSearchService {
     }
     private static BigDecimal researchMetric(KisResearchEvidenceService.CandidateEvidence candidate,String field) {
         Map<String,Object> source=researchSource(candidate,field);
-        if(!Set.of("AVAILABLE","PARTIAL_COVERAGE").contains(String.valueOf(source.get("status"))) || !"KIS OpenAPI".equals(source.get("source"))) return null;
+        if(!Set.of("AVAILABLE","PARTIAL_COVERAGE").contains(String.valueOf(source.get("status"))) || !validResearchProvider(source)) return null;
         try {
             Instant fetched=Instant.parse(String.valueOf(source.get("fetchedAt")));Instant now=Instant.now();
             if(fetched.isAfter(now.plusSeconds(1)) || fetched.isBefore(now.minusSeconds(Set.of("PER","PBR").contains(field)?60:600))) return null;
@@ -209,6 +268,103 @@ public class KeywordConditionSearchService {
         if(Set.of("PER","PBR").contains(field)) return null;
         try {return LocalDate.parse(String.valueOf(source.get("coverageStart")))+" ~ "+LocalDate.parse(String.valueOf(source.get("coverageEnd")));}
         catch(RuntimeException ignored){return null;}
+    }
+    private static KisResearchEvidenceService.CandidateEvidence selectResearch(String code,KisResearchEvidenceService.CandidateEvidence primary,
+            Map<String,Object> secondary,List<Filter> filters) {
+        Map<String,Object> technical=primary==null?Map.of():primary.technical(),valuation=primary==null?Map.of():primary.valuation();
+        if(!groupKnown(code,technical,filters,false)) technical=secondaryGroup(secondary,code,"technical");
+        if(!groupKnown(code,valuation,filters,true)) valuation=secondaryGroup(secondary,code,"valuation");
+        return new KisResearchEvidenceService.CandidateEvidence(code,technical,valuation,Map.of(),Map.of(),Map.of(),Map.of());
+    }
+    private static boolean groupKnown(String code,Map<String,Object> group,List<Filter> filters,boolean valuation) {
+        var candidate=new KisResearchEvidenceService.CandidateEvidence(code,valuation?Map.of():group,valuation?group:Map.of(),Map.of(),Map.of(),Map.of(),Map.of());
+        return filters.stream().filter(f->isResearch(f.field())&&Set.of("PER","PBR").contains(f.field())==valuation)
+            .allMatch(f->researchMetric(candidate,f.field())!=null);
+    }
+    private static boolean validResearchProvider(Map<String,Object> facts) {
+        return "KIS OpenAPI".equals(facts.get("source")) || kiwoomProvider(string(facts.get("source")),string(facts.get("environment")));
+    }
+    private static boolean kiwoomProvider(String source,String environment) {
+        return "KIWOOM_REST".equals(source)&&"REAL".equals(environment) || "KIWOOM_REST_MOCK".equals(source)&&"MOCK".equals(environment);
+    }
+    private static String environment(String source) {
+        if("KIWOOM_REST_MOCK".equals(source))return "MOCK";
+        return Set.of("KIWOOM_REST","KIS OpenAPI","KIS_INTSTOCK_MULTPRICE_KRX","KIS","NAVER_FINANCE","Naver Finance").contains(source)?"REAL":"UNKNOWN";
+    }
+    private static String sourceEnvironment(Map<String,Object> source) {
+        return "KIS OpenAPI".equals(source.get("source"))?"REAL":string(source.get("environment"));
+    }
+    private static String string(Object value) {return value instanceof String text?text:"";}
+    private static Instant instant(Object value) {
+        try {return value instanceof Instant at?at:Instant.parse(string(value));}catch(RuntimeException ignored){return null;}
+    }
+    private static Map<?,?> secondaryCandidates(Map<String,Object> batch) {
+        return batch.get("candidates") instanceof Map<?,?> candidates?candidates:Map.of();
+    }
+    @SuppressWarnings("unchecked")
+    private static Map<String,Object> secondaryGroup(Map<String,Object> batch,String code,String group) {
+        if(!(secondaryCandidates(batch).get(code) instanceof Map<?,?> candidate) || !(candidate.get(group) instanceof Map<?,?> raw)) return Map.of();
+        Map<String,Object> facts=(Map<String,Object>)raw;
+        if(!kiwoomProvider(string(facts.get("source")),string(facts.get("environment")))
+            || !Set.of("AVAILABLE","PARTIAL_COVERAGE").contains(string(facts.get("status")))) return Map.of();
+        String returned=string(facts.get("requestedStockCode"));
+        if(group.equals("quote")) returned=string(facts.get("stockCode"));
+        Instant at=instant(facts.get("fetchedAt"));
+        long maxAge=switch(group){case "technical","investorDaily"->600;case "valuation"->60;default->180;};
+        if(!code.equals(returned) || at==null || at.isAfter(Instant.now().plusSeconds(1))
+            || at.isBefore(Instant.now().minusSeconds(maxAge))) return Map.of();
+        return facts;
+    }
+    private static Flow secondaryFlow(String code,Map<String,Object> facts,int days) {
+        if(days<1 || days>5 || facts.isEmpty() || !"shares".equals(facts.get("quantityUnit"))
+            || !"DAILY_NET_BUY_PREVIOUS_TRADING_DAYS".equals(facts.get("flowBasis")) || !(facts.get("observations") instanceof List<?> rows) || rows.size()>5) return null;
+        TreeMap<LocalDate,long[]> dated=new TreeMap<>(Comparator.reverseOrder());
+        try {
+            for(Object value:rows) {
+                if(!(value instanceof Map<?,?> row)) return null;
+                LocalDate date=LocalDate.parse(string(row.get("observedDate")));
+                if(!com.bitman.justbuy.util.KoreanMarketCalendar.isTradingDay(date) || dated.putIfAbsent(date,new long[]{
+                    new BigDecimal(String.valueOf(row.get("foreignNetBuyShares"))).longValueExact(),
+                    new BigDecimal(String.valueOf(row.get("institutionNetBuyShares"))).longValueExact()})!=null) return null;
+            }
+            if(dated.size()<days) return null;
+            LocalDate last=com.bitman.justbuy.util.KoreanMarketCalendar.previousTradingDay(LocalDate.now(KST)),cursor=last,first=last;
+            long foreign=0,institution=0;
+            for(int i=0;i<days;i++) {
+                long[] measured=dated.get(cursor);if(measured==null)return null;
+                foreign=Math.addExact(foreign,measured[0]);institution=Math.addExact(institution,measured[1]);first=cursor;
+                cursor=com.bitman.justbuy.util.KoreanMarketCalendar.previousTradingDay(cursor);
+            }
+            return new Flow(code,foreign,institution,days,first.toString(),last.toString(),instant(facts.get("fetchedAt")),string(facts.get("source")),string(facts.get("environment")));
+        }catch(RuntimeException ignored){return null;}
+    }
+    private static BigDecimal decimal(Object raw,boolean integer,boolean signed) {
+        if(!(raw instanceof Number)&&!(raw instanceof String))return null;
+        String value=raw.toString();if(value.length()>48||!value.matches((signed?"[+-]?":"")+"[0-9]+"+(integer?"":"(?:\\.[0-9]+)?")))return null;
+        try{return new BigDecimal(value);}catch(RuntimeException ignored){return null;}
+    }
+    private static QuoteObservation secondaryObservation(Quote primary,Map<String,Object> facts) {
+        if(facts.isEmpty() || !normalize(primary.name()).equals(normalize(string(facts.get("stockName"))))
+            || Set.of("KOSPI","KOSDAQ").contains(string(facts.get("market"))) && primary.market()!=null
+                && !primary.market().equals(string(facts.get("market"))))return null;
+        BigDecimal price=decimal(facts.get("currentPrice"),true,false);if(price==null||price.signum()<=0)return null;
+        Instant observed=instant(facts.get("observedAt")),fetched=instant(facts.get("fetchedAt"));
+        // Match the adapter's documented tolerance for provider/server clock differences.
+        if(observed!=null&&observed.isAfter(fetched.plusSeconds(5)))return null;
+        return new QuoteObservation(string(facts.get("source")),string(facts.get("environment")),price,decimal(facts.get("changePct"),false,true),
+            decimal(facts.get("volume"),true,false),decimal(facts.get("tradingValueKrw"),true,false),fetched,observed);
+    }
+    private static boolean validCrossQuote(Quote primary,Quote cross) {
+        if(cross==null || cross.code()==null || !primary.code().equals(cross.code()) || cross.source()==null
+            || "UNKNOWN".equals(environment(cross.source())) || cross.price()==null || cross.price().signum()<=0
+            || cross.price().stripTrailingZeros().scale()>0 || cross.fetchedAt()==null
+            || cross.fetchedAt().isAfter(Instant.now().plusSeconds(1)) || cross.fetchedAt().isBefore(Instant.now().minusSeconds(180))
+            || cross.observedAt()!=null && cross.observedAt().isAfter(Instant.now().plusSeconds(60))) return false;
+        // The KIS client binds its quote to the exact requested code. Missing names remain missing;
+        // provided names must agree with the independently verified primary candidate.
+        if(cross.name()==null || cross.name().isBlank()) {if(!"KIS OpenAPI".equals(cross.source()))return false;}
+        else if(!normalize(primary.name()).equals(normalize(cross.name())))return false;
+        return !(Set.of("KOSPI","KOSDAQ").contains(string(cross.market())) && primary.market()!=null && !primary.market().equals(cross.market()));
     }
     private static BigDecimal metric(Quote q,String field) {
         return switch(field) { case "PRICE" -> q.price(); case "CHANGE_PCT" -> q.changePct();
