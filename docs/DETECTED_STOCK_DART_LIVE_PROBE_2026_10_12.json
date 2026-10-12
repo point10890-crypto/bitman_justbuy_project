@@ -1,0 +1,35 @@
+{
+  "capturedAt": "2026-10-12T10:33:29.187322Z",
+  "status": "COMPLETE",
+  "stocks": [
+    {
+      "capturedAt": "2026-10-12T10:33:29.450162600Z",
+      "corpCode": "00122737",
+      "facts": {
+        "balancePeriod": "2026 사업연도 반기 보고서 기말(날짜 unknown)",
+        "businessYear": 2026,
+        "cashFlowPeriod": "2026 사업연도 반기 누적",
+        "currency": "KRW",
+        "debt": 6516519000000,
+        "debtRatioPct": 103.0836,
+        "equity": 6321587000000,
+        "fsDiv": "CFS",
+        "netIncome": 137448000000,
+        "operatingCashFlow": 420816000000,
+        "operatingMarginPct": 10.1217,
+        "operatingProfit": 193695000000,
+        "period": "2026 사업연도 반기 당분기(3개월)",
+        "previousRevenue": 1293649000000,
+        "receiptNo": "20260812000418",
+        "reportCode": "11012",
+        "revenue": 1913665000000,
+        "revenueYoYPct": 47.9277,
+        "risks": [],
+        "selectionBasis": "BOUNDED_REPORT_LOOKUP_LATEST_UNKNOWN;REQUEST_BOUND_STOCK_FS;INCOME_CIS"
+      },
+      "issues": [],
+      "status": "COMPLETE",
+      "stockCode": "028670"
+    }
+  ]
+}
