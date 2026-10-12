@@ -30,6 +30,7 @@ public class KiwoomConditionEnricher {
             for(String part:List.of("quote","valuation","technical","investorDaily")) {
                 if(!(groups.get(part) instanceof Map<?,?> fact)) continue;
                 String status=Objects.toString(fact.get("status"),"UNAVAILABLE");
+                if("PENDING".equals(status)) {lines.add(prefix+" "+label(part)+" 수집 대기 · KIS 확인 자료 유지");continue;}
                 if(!USABLE.contains(status)) { lines.add(prefix+" "+label(part)+" 미확인 ("+status+")");continue; }
                 String date=Objects.toString(fact.get("observedDate"),"");
                 String captured=Objects.toString(fact.get("fetchedAt"),"");
@@ -54,7 +55,7 @@ public class KiwoomConditionEnricher {
         public String prompt() {
             try {return "\n[KIS·키움 동시 조회 근거] 각 공급자의 원자료를 독립적으로 사용한다. 가격을 평균하거나 수급을 합산하지 않는다. "
                 +"조회 시각은 거래 시각이 아니며, 재무 기준 기간 미제공·부분 일봉/수급은 전체 기간 검증으로 간주하지 않는다. "
-                +"MOCK는 접속 서버 환경이며 응답에 확인된 시장자료의 원 출처·관측일·단위를 유지한다.\n"
+                +"MOCK는 접속 서버 환경이며 응답에 확인된 시장자료의 원 출처·관측일·단위를 유지한다. PENDING은 배경 수집 대기이며 수치 근거가 아니다.\n"
                 +new ObjectMapper().writeValueAsString(Map.of("coverage",coverage,"candidates",facts));}
             catch(Exception ignored) {return "\n[키움 근거 변환 미확인]\n";}
         }
@@ -85,31 +86,42 @@ public class KiwoomConditionEnricher {
             String source="MOCK".equals(environment)?"KIWOOM_REST_MOCK":"REAL".equals(environment)?"KIWOOM_REST":"";
             if(source.isEmpty()) return empty("INVALID_ENVIRONMENT");
             var selected=new LinkedHashMap<String,String>();
-            candidateNames.forEach((code,name)->{if(selected.size()<3 && code!=null && code.matches("[0-9]{6}") && name!=null && !name.isBlank()) selected.putIfAbsent(code,name);});
+            candidateNames.forEach((code,name)->{if(selected.size()<KiwoomSupplementPolicy.CANDIDATE_LIMIT && code!=null && code.matches("[0-9]{6}") && name!=null && !name.isBlank()) selected.putIfAbsent(code,name);});
             var requested=KiwoomSupplementPolicy.concurrentParts(new ArrayList<>(selected.keySet()));
             if(requested.isEmpty()) return empty("NOT_REQUESTED");
             Map<String,Object> batch=adapter.fetchEvidence(new ArrayList<>(requested.keySet()),requested);
-            Map<?,?> raw=batch!=null && source.equals(batch.get("source")) && environment.equals(batch.get("environment"))
+            boolean verifiedBatch=batch!=null && source.equals(batch.get("source")) && environment.equals(batch.get("environment"));
+            Map<?,?> raw=verifiedBatch
                 && batch.get("candidates") instanceof Map<?,?> rows?rows:Map.of();
             Map<String,Map<String,Object>> normalized=new LinkedHashMap<>();
             Map<String,Object> states=new LinkedHashMap<>();
-            int available=0,usable=0,enriched=0;
+            int available=0,usable=0,enriched=0,pendingCodes=0,pendingFacts=0;
             for(String code:requested.keySet()) {
                 Map<?,?> groups=raw.get(code) instanceof Map<?,?> row?row:Map.of();
-                Map<String,Object> facts=new LinkedHashMap<>();Map<String,String> partStates=new LinkedHashMap<>();int confirmed=0;
+                Map<String,Object> facts=new LinkedHashMap<>();Map<String,String> partStates=new LinkedHashMap<>();int confirmed=0,pending=0;
                 for(String part:requested.get(code)) {
                     var fact=normalize(groups.get(part),code,selected.get(code),part,source,environment);
                     facts.put(part,fact);String status=Objects.toString(fact.get("status"));partStates.put(part,status);
                     if("AVAILABLE".equals(status)) available++;
                     if(USABLE.contains(status)) {usable++;confirmed++;}
+                    if("PENDING".equals(status)) {pending++;pendingFacts++;}
                 }
                 if(confirmed>0) enriched++;
+                if(pending>0) pendingCodes++;
                 normalized.put(code,Collections.unmodifiableMap(facts));states.put(code,Collections.unmodifiableMap(partStates));
             }
-            String status=available==requested.size()*4?"AVAILABLE":usable>0?"PARTIAL":"UNAVAILABLE";
+            String status=available==requested.size()*4?"AVAILABLE":usable>0?"PARTIAL":pendingFacts>0?"PENDING":"UNAVAILABLE";
             Map<String,Object> coverage=new LinkedHashMap<>();coverage.put("status",status);coverage.put("source",source);coverage.put("environment",environment);
             coverage.put("requestedCodes",requested.size());coverage.put("enrichedCodes",enriched);coverage.put("availableFacts",available);coverage.put("usableFacts",usable);
-            coverage.put("sourceStates",Collections.unmodifiableMap(states));coverage.put("requestedParts",requested);coverage.put("candidateLimit",3);
+            coverage.put("sourceStates",Collections.unmodifiableMap(states));coverage.put("requestedParts",requested);coverage.put("candidateLimit",KiwoomSupplementPolicy.CANDIDATE_LIMIT);
+            coverage.put("pendingCodes",pendingCodes);coverage.put("pendingFacts",pendingFacts);
+            if(verifiedBatch) {
+                Integer queueDepth=integer(batch.get("queueDepth"));
+                if(queueDepth!=null && queueDepth>=0 && queueDepth<=128) coverage.put("queueDepth",queueDepth);
+                if(batch.get("backgroundRefreshEnabled") instanceof Boolean background) coverage.put("backgroundRefreshEnabled",background);
+                String queueStatus=Objects.toString(batch.get("queueStatus"),"");
+                if(Set.of("COLLECTING","READY","COOLDOWN","FULL","DISABLED").contains(queueStatus)) coverage.put("queueStatus",queueStatus);
+            }
             return new Result(Collections.unmodifiableMap(normalized),Collections.unmodifiableMap(coverage));
         } catch(RuntimeException ignored) {return empty("UNAVAILABLE");}
     }
@@ -141,7 +153,7 @@ public class KiwoomConditionEnricher {
     }
     public static Result empty(String status) {return new Result(Map.of(),Map.of("status",status));}
     private static Map<String,Object> rejected(String status,String source,String environment) {return Map.of("status",status,"source",source,"environment",environment);}
-    private static String safeStatus(String status) {return Set.of("EMPTY","UNAVAILABLE","UNDATED","DISABLED","BUDGET_EXCEEDED","NOT_REQUESTED","PROVIDER_UNAVAILABLE","AUTH_UNAVAILABLE","STALE_DATA","INVALID_DATA","INTERRUPTED").contains(status)?status:"UNAVAILABLE";}
+    private static String safeStatus(String status) {return Set.of("EMPTY","UNAVAILABLE","UNDATED","DISABLED","BUDGET_EXCEEDED","NOT_REQUESTED","PROVIDER_UNAVAILABLE","AUTH_UNAVAILABLE","STALE_DATA","INVALID_DATA","INTERRUPTED","PENDING").contains(status)?status:"UNAVAILABLE";}
     private static Instant instant(Object value) {try {return value==null?null:Instant.parse(value.toString());}catch(DateTimeException ignored) {return null;}}
     private static LocalDate date(Object value) {try {return value==null?null:LocalDate.parse(value.toString());}catch(DateTimeException ignored) {return null;}}
     private static Integer integer(Object value) {try {return value==null?null:new BigDecimal(value.toString()).intValueExact();}catch(ArithmeticException|NumberFormatException ignored) {return null;}}

@@ -222,7 +222,7 @@ class KiwoomReadOnlyServiceTest {
         Fixture fixture=new Fixture(); fixture.reply("ka10095",quoteBody("005930","20261012","095959"));
         assertThat(fixture.service(true,true).lookupAll(List.of("005930","005930","000660","035420","051910","BAD"))).containsOnlyKeys("005930");
         assertThat(fixture.calls.stream().filter(c->c.api().equals("ka10095")).findFirst().orElseThrow().params())
-            .containsEntry("stk_cd","005930|000660|035420");
+            .containsEntry("stk_cd","000660|005930|035420|051910");
     }
     @Test void verifiedQuotesKeepOriginalCaptureTimeWhenReadFromCache() {
         Fixture fixture=new Fixture(); fixture.reply("ka10095",quoteBody("005930","20261012","095959"));

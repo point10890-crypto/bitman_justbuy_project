@@ -101,6 +101,16 @@ export interface SystemStatusResponse {
   responseTime?: number
   error?: string
   pipeline?: unknown
+  kiwoomReadiness?: {
+    status?: string
+    runtimeStatus?: string
+    environment?: string
+    candidateLimit?: number
+    maxRequestsPerSecond?: number
+    queueStatus?: string
+    backgroundRefreshEnabled?: boolean
+    queue?: { queueDepth?: number; pendingJobs?: number; workerActive?: boolean; capacity?: number }
+  }
 }
 
 export interface AuthResponse {

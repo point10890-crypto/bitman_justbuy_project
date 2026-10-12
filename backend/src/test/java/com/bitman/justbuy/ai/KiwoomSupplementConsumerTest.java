@@ -48,7 +48,7 @@ class KiwoomSupplementConsumerTest {
     private AnalysisResponse run(List<String> candidates, List<String> aiCodes,
                                  Map<String, String> verifiedPrices, Map<String, Object> primaryMetadata) {
         StringBuilder marketText = new StringBuilder();
-        for (String code : candidates) marketText.append(NAMES.get(code)).append('(').append(code).append(")\n");
+        for (String code : candidates) marketText.append(NAMES.getOrDefault(code,"테스트종목"+code)).append('(').append(code).append(")\n");
         when(market.fetchFormattedMarketData()).thenReturn(marketText.toString());
         when(market.fetchStockPrices(anyList())).thenReturn(verifiedPrices);
         when(primary.candidateSnapshot()).thenReturn(new KeywordSearchDataService.Snapshot(
@@ -148,7 +148,7 @@ class KiwoomSupplementConsumerTest {
         assertThat(result.stockPicks().getFirst().currentPrice()).isEqualTo("71,000");
     }
 
-    @Test void naverFailureAllowsOnlyThreeExistingCandidatesAndKeepsActualProviderProvenance() {
+    @Test void naverFailureAllowsExistingCandidatesBeyondThreeAndKeepsActualProviderProvenance() {
         var candidates = List.of(CODE, "000660", "035420", "005380");
         when(supplementary.lookupAll(anyList())).thenAnswer(call -> {
             List<String> requested = call.getArgument(0);
@@ -160,8 +160,8 @@ class KiwoomSupplementConsumerTest {
         var result = run(candidates, aiCodes, Map.of(), metadata(candidates, "AVAILABLE", "AVAILABLE", "AVAILABLE"));
         @SuppressWarnings("unchecked") ArgumentCaptor<List<String>> requests = ArgumentCaptor.forClass(List.class);
         verify(supplementary).lookupAll(requests.capture());
-        assertThat(requests.getValue()).hasSize(3).allMatch(candidates::contains).doesNotContain("999999");
-        assertThat(result.stockPicks()).hasSize(3).allSatisfy(pick -> {
+        assertThat(requests.getValue()).hasSize(4).allMatch(candidates::contains).doesNotContain("999999");
+        assertThat(result.stockPicks()).hasSize(4).allSatisfy(pick -> {
             assertThat(pick.name()).isEqualTo(NAMES.get(pick.code()));
             assertThat(pick.currentPrice()).isEqualTo("72,000");
             assertThat(pick.quoteSource()).isEqualTo("KIWOOM_REST");
@@ -235,5 +235,15 @@ class KiwoomSupplementConsumerTest {
         var result=run(List.of(CODE),List.of(CODE),Map.of(),metadata(List.of(CODE),"AVAILABLE","AVAILABLE","AVAILABLE"));
         assertThat(result.stockPicks()).isEmpty();
         assertThat(prompt.get()).contains("KIS_PRIMARY_VALUATION_FACT_KEEP");
+    }
+    @Test void twentyOriginalCandidatesReachKiwoomWhileKisEvidenceRemainsBoundedToFive() {
+        var candidates=new ArrayList<String>();var prices=new LinkedHashMap<String,String>();
+        for(int i=0;i<21;i++) {String code=String.format("%06d",100000+i);candidates.add(code);prices.put(code,"71,000");}
+        run(candidates,candidates.subList(0,3),prices,metadata(candidates,"AVAILABLE","AVAILABLE","AVAILABLE"));
+        @SuppressWarnings("unchecked") ArgumentCaptor<List<String>> kiwoomCodes=ArgumentCaptor.forClass(List.class);
+        @SuppressWarnings("unchecked") ArgumentCaptor<List<String>> kisCodes=ArgumentCaptor.forClass(List.class);
+        verify(supplementary).fetchEvidence(kiwoomCodes.capture(),anyMap());verify(primary).enrich(kisCodes.capture());
+        assertThat(kiwoomCodes.getValue()).hasSize(20).contains("100019").doesNotContain("100020");
+        assertThat(kisCodes.getValue()).hasSize(5);
     }
 }

@@ -17,6 +17,9 @@ export interface KeywordSearchProvider {
   status: string
   checkedAt: string | null
   scope: string | null
+  requestedCount?: number | null
+  availableCount?: number | null
+  pendingCount?: number | null
 }
 
 export interface KeywordSearchSourceObservation {

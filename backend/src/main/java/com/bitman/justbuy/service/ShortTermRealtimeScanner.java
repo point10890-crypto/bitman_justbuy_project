@@ -125,8 +125,9 @@ public class ShortTermRealtimeScanner {
         List<KisApiService.RankedStock> gainers = kisApiService.fetchRealtimeGainersRankingStocks(RAW_SCAN_LIMIT);
         List<KisApiService.RankedStock> foreignNetBuy =
             kisApiService.fetchForeignNetBuyRankingStocks(FOREIGN_SCAN_LIMIT);
+        var independent=queryCandidateEvidence(volume,gainers,foreignNetBuy);
         List<ConditionSignalDto> signals = buildSignals(volume, gainers, foreignNetBuy, now);
-        signals = verifyAndEnrich(signals, now);
+        signals = verifyAndEnrich(signals, now, independent);
         latest = new ScanSnapshot(
             nowKst(now),
             now.toInstant(),
@@ -182,6 +183,32 @@ public class ShortTermRealtimeScanner {
                                           ZonedDateTime now) {
         resetDailySeen(now.toLocalDate());
 
+        List<Candidate> sorted=rankCandidates(volume,gainers,foreignNetBuy).stream()
+            .filter(candidate -> candidate.score >= 58).limit(3).toList();
+        List<ConditionSignalDto> signals = new ArrayList<>();
+        int signalRank = 1;
+        for (Candidate candidate : sorted) {
+            Capture capture = firstSeenByCode.computeIfAbsent(candidate.code,
+                ignored -> new Capture(nowKst(now), formatPrice(candidate.currentPrice)));
+            signals.add(candidate.toSignal(signalRank++, capture));
+        }
+        return signals;
+    }
+
+    /** Queue cross-provider facts for the ranked original pool, before the published TOP3 reduction. */
+    KiwoomConditionEnricher.Result queryCandidateEvidence(List<KisApiService.RankedStock> volume,
+            List<KisApiService.RankedStock> gainers,List<KisApiService.RankedStock> foreignNetBuy) {
+        if(kiwoomEnricher==null) return KiwoomConditionEnricher.empty("NOT_CONFIGURED");
+        Map<String,String> names=new LinkedHashMap<>();
+        rankCandidates(volume,gainers,foreignNetBuy).stream().limit(KiwoomSupplementPolicy.CANDIDATE_LIMIT)
+            .forEach(candidate->names.put(candidate.code,candidate.name));
+        try {return java.util.Objects.requireNonNullElse(kiwoomEnricher.enrich(names),KiwoomConditionEnricher.empty("UNAVAILABLE"));}
+        catch(RuntimeException ignored) {return KiwoomConditionEnricher.empty("UNAVAILABLE");}
+    }
+
+    private List<Candidate> rankCandidates(List<KisApiService.RankedStock> volume,
+            List<KisApiService.RankedStock> gainers,List<KisApiService.RankedStock> foreignNetBuy) {
+
         Map<String, Candidate> candidates = new LinkedHashMap<>();
         int rank = 1;
         for (KisApiService.RankedStock stock : safeList(volume)) {
@@ -200,31 +227,20 @@ public class ShortTermRealtimeScanner {
             candidate.foreignNetBuy = Math.max(candidate.foreignNetBuy, stock.foreignNetBuy());
         }
 
-        List<Candidate> sorted = candidates.values().stream()
+        return candidates.values().stream()
             .filter(Candidate::hasUsableCode)
             .filter(candidate -> StockUniverseFilters.isKoreanSpotEquity(candidate.name, candidate.code))
             .filter(candidate -> parsePrice(candidate.currentPrice) > 0)
             .filter(candidate -> candidate.changeRate > 0)
             .peek(Candidate::calculateScore)
-            .filter(candidate -> candidate.score >= 58)
             .sorted(Comparator.comparingInt((Candidate candidate) -> candidate.score).reversed())
-            .limit(3)
             .toList();
-
-        List<ConditionSignalDto> signals = new ArrayList<>();
-        int signalRank = 1;
-        for (Candidate candidate : sorted) {
-            Capture capture = firstSeenByCode.computeIfAbsent(candidate.code,
-                ignored -> new Capture(nowKst(now), formatPrice(candidate.currentPrice)));
-            signals.add(candidate.toSignal(signalRank++, capture));
-        }
-        return signals;
     }
 
     /**
      * 룰 기반 단타 신호에 DeepSeek AI 검증/보강을 선택적으로 덧붙인다 (fail-open).
      *
-     * <p>verifier 가 없거나 비활성이면 입력 신호를 그대로 반환한다. 활성 시 신호별 증거 패킷을 만들어
+     * <p>키움 원자료를 독립적으로 붙인 뒤 verifier 가 없거나 비활성이면 측정 신호를 반환한다. 활성 시 증거 패킷을 만들어
      * 한 번에 검증하고, REJECT 판정은 제외하며, 나머지는 룰/AI 점수를 0.6/0.4 로 블렌딩하고
      * 증거·리스크·요약·무효화 조건을 병합해 새 immutable DTO 로 재구성한다. 어떤 예외든 원본 신호로 폴백한다.
      */
@@ -233,13 +249,20 @@ public class ShortTermRealtimeScanner {
         var independent=KiwoomConditionEnricher.empty("NOT_CONFIGURED");
         if(kiwoomEnricher!=null) {
             Map<String,String> names=new LinkedHashMap<>();
-            signals.stream().limit(3).forEach(signal->names.put(signal.stockCode(),signal.stockName()));
-            try {independent=kiwoomEnricher.enrich(names);} catch(RuntimeException ignored) { /* Preserve measured KIS signals. */ }
-            if(!independent.facts().isEmpty()) {
-                List<ConditionSignalDto> observed=new ArrayList<>();
-                for(ConditionSignalDto signal:signals) observed.add(independent.attach(signal));
-                signals=List.copyOf(observed);
-            }
+            signals.stream().limit(KiwoomSupplementPolicy.CANDIDATE_LIMIT).forEach(signal->names.put(signal.stockCode(),signal.stockName()));
+            try {independent=java.util.Objects.requireNonNullElse(kiwoomEnricher.enrich(names),KiwoomConditionEnricher.empty("UNAVAILABLE"));}
+            catch(RuntimeException ignored) { /* Preserve measured KIS signals. */ }
+        }
+        return verifyAndEnrich(signals,now,independent);
+    }
+
+    List<ConditionSignalDto> verifyAndEnrich(List<ConditionSignalDto> signals,ZonedDateTime now,KiwoomConditionEnricher.Result independent) {
+        if(signals==null || signals.isEmpty()) return signals;
+        independent=java.util.Objects.requireNonNullElse(independent,KiwoomConditionEnricher.empty("UNAVAILABLE"));
+        if(!independent.facts().isEmpty()) {
+            List<ConditionSignalDto> observed=new ArrayList<>();
+            for(ConditionSignalDto signal:signals) observed.add(independent.attach(signal));
+            signals=List.copyOf(observed);
         }
         if (verifier == null || !verifier.isAvailable()) return signals;
 

@@ -6,9 +6,12 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class KiwoomSupplementPolicyTest {
-    @Test void concurrentRequestsAlwaysIncludeAllGroupsForTheFirstThreeValidDistinctCodes() {
-        var result=KiwoomSupplementPolicy.concurrentParts(List.of("bad","005930","005930","000660","035420","068270"));
-        assertThat(result.keySet()).containsExactly("005930","000660","035420");
+    @Test void concurrentRequestsAlwaysIncludeAllGroupsForTheFirstTwentyValidDistinctCodes() {
+        var codes=new java.util.ArrayList<>(List.of("bad","005930","005930"));
+        for(int i=0;i<21;i++) codes.add(String.format("%06d",100000+i));
+        var result=KiwoomSupplementPolicy.concurrentParts(codes);
+        assertThat(result).hasSize(20);
+        assertThat(result.keySet()).contains("005930","100000","100018").doesNotContain("bad","100019","100020");
         assertThat(result.values()).allSatisfy(parts->assertThat(parts).containsExactly("quote","valuation","technical","investorDaily"));
         assertThat(KiwoomSupplementPolicy.concurrentParts(null)).isEmpty();
     }
@@ -18,9 +21,9 @@ class KiwoomSupplementPolicyTest {
             .containsEntry("005930",List.of("technical","valuation","investorDaily"));
         assertThat(KiwoomSupplementPolicy.missingParts(null,null)).isEmpty();
     }
-    @Test void onlyFirstThreeValidDistinctNumericCodesAreConsidered() {
+    @Test void validDistinctNumericCodesBeyondThreeRemainAvailableWithinTwentyCandidateLimit() {
         var result=KiwoomSupplementPolicy.missingParts(List.of("ABCDEF","005930","005930","000660","035420","068270","12345","1234567"),Map.of());
-        assertThat(result.keySet()).containsExactly("005930","000660","035420");
+        assertThat(result.keySet()).containsExactly("005930","000660","035420","068270");
         assertThat(result.values()).allSatisfy(parts->assertThat(parts).containsExactly("technical","valuation","investorDaily"));
     }
     @Test void confirmedMainGroupsAreSkippedWhileUnavailableGroupsRemainMissing() {

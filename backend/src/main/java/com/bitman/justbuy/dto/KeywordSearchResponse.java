@@ -14,7 +14,12 @@ public record KeywordSearchResponse(
         Scope scope,Instant fetchedAt,String sourceStatus,List<String> warnings,List<Match> matches) {
         this(query,outcome,appliedConditions,unsupportedTerms,scope,fetchedAt,sourceStatus,warnings,matches,List.of());
     }
-    public record ProviderStatus(String source,String environment,String status,Instant checkedAt,String scope) {}
+    public record ProviderStatus(String source,String environment,String status,Instant checkedAt,String scope,
+        Integer requestedCount,Integer availableCount,Integer pendingCount) {
+        public ProviderStatus(String source,String environment,String status,Instant checkedAt,String scope) {
+            this(source,environment,status,checkedAt,scope,null,null,null);
+        }
+    }
     public record QuoteObservation(String source,String environment,BigDecimal currentPrice,BigDecimal changePct,
         BigDecimal volume,BigDecimal tradingValueKrw,Instant fetchedAt,Instant observedAt) {}
     public record Scope(String label, int examinedCount, int eligibleCount, int matchedCount, boolean truncated) {}

@@ -26,16 +26,19 @@ class KiwoomConditionEnricherTest {
         when(adapter.isEnabled()).thenReturn(true);when(adapter.readiness()).thenReturn(Map.of("environment","MOCK"));
         when(adapter.fetchEvidence(anyList(),anyMap())).thenReturn(Map.of("source","KIWOOM_REST_MOCK","environment","MOCK","candidates",Map.of("005930",groups)));
     }
-    @Test void bothProvidersCanBeUsedAndAllGroupsRequestedForThreeDeterministicCandidates() {
+    @Test void bothProvidersCanBeUsedAndAllGroupsRequestedForTwentyDeterministicCandidates() {
         ready(Map.of("quote",fact("quote"),"valuation",fact("valuation"),"technical",fact("technical"),"investorDaily",fact("investorDaily")));
         var candidates=new LinkedHashMap<String,String>();candidates.put("invalid","가상");candidates.put("005930","삼성전자");
-        candidates.put("000660","SK하이닉스");candidates.put("035420","NAVER");candidates.put("005380","현대차");
+        for(int i=0;i<21;i++) candidates.put(String.format("%06d",100000+i),"검증후보"+i);
         var result=enricher.enrich(candidates);
-        verify(adapter).fetchEvidence(eq(List.of("005930","000660","035420")),eq(Map.of(
-            "005930",List.of("quote","valuation","technical","investorDaily"),"000660",List.of("quote","valuation","technical","investorDaily"),
-            "035420",List.of("quote","valuation","technical","investorDaily"))));
+        @SuppressWarnings("unchecked") org.mockito.ArgumentCaptor<List<String>> codes=org.mockito.ArgumentCaptor.forClass(List.class);
+        @SuppressWarnings("unchecked") org.mockito.ArgumentCaptor<Map<String,List<String>>> parts=org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(adapter).fetchEvidence(codes.capture(),parts.capture());
+        assertThat(codes.getValue()).hasSize(20).contains("005930","100018").doesNotContain("invalid","100019","100020");
+        assertThat(parts.getValue().values()).allSatisfy(group->assertThat(group).containsExactly("quote","valuation","technical","investorDaily"));
         assertThat(result.coverage()).containsEntry("source","KIWOOM_REST_MOCK").containsEntry("environment","MOCK").containsEntry("status","PARTIAL");
-        assertThat(result.facts()).doesNotContainKey("invalid").doesNotContainKey("005380");
+        assertThat(result.facts()).hasSize(20).doesNotContainKey("invalid").doesNotContainKey("100019");
+        assertThat(result.coverage()).containsEntry("candidateLimit",20).containsEntry("requestedCodes",20);
     }
     @Test void completeActualMockMarketFactsRetainIndependentSourceAndPeriods() {
         ready(Map.of("quote",fact("quote"),"valuation",fact("valuation"),"technical",fact("technical"),"investorDaily",fact("investorDaily")));
@@ -91,6 +94,25 @@ class KiwoomConditionEnricherTest {
         when(adapter.fetchEvidence(anyList(),anyMap())).thenThrow(new IllegalStateException("private-provider-response"));
         var result=enricher.enrich(names);assertThat(result.facts()).isEmpty();assertThat(result.coverage()).containsEntry("status","UNAVAILABLE");
         assertThat(result.prompt()).doesNotContain("private-provider-response");
+    }
+    @Test void backgroundQueueMetadataPreservesPendingWithoutPromotingWaitingValuesToEvidence() {
+        ready(Map.of());
+        when(adapter.fetchEvidence(anyList(),anyMap())).thenReturn(Map.of("source","KIWOOM_REST_MOCK","environment","MOCK",
+            "queueDepth",17,"queueStatus","COLLECTING","backgroundRefreshEnabled",true,
+            "candidates",Map.of("005930",Map.of("quote",fact("quote"),"technical",Map.of("status","PENDING","ma20",999999),
+                "valuation",Map.of("status","PENDING","per",999),"investorDaily",Map.of("status","PENDING","foreignNetBuy5dShares",99999)))));
+        var result=enricher.enrich(names);
+        assertThat(result.coverage()).containsEntry("pendingCodes",1).containsEntry("pendingFacts",3).containsEntry("queueDepth",17)
+            .containsEntry("queueStatus","COLLECTING").containsEntry("backgroundRefreshEnabled",true).containsEntry("enrichedCodes",1).containsEntry("status","PARTIAL");
+        assertThat(result.prompt()).contains("PENDING","배경 수집 대기").doesNotContain("999999","99999");
+        assertThat(result.evidence("005930")).anyMatch(line->line.contains("수집 대기"));
+    }
+    @Test void invalidOrWrongProviderQueueMetadataIsNeverForwarded() {
+        ready(Map.of());when(adapter.fetchEvidence(anyList(),anyMap())).thenReturn(Map.of("source","KIWOOM_REST","environment","REAL",
+            "queueDepth",99999,"queueStatus","PRIVATE_PROVIDER_TEXT","backgroundRefreshEnabled",true,"candidates",Map.of()));
+        var result=enricher.enrich(names);
+        assertThat(result.coverage()).doesNotContainKey("queueDepth").doesNotContainKey("queueStatus").doesNotContainKey("backgroundRefreshEnabled");
+        assertThat(result.coverage()).containsEntry("pendingCodes",0).containsEntry("pendingFacts",0);
     }
     private ConditionSignalDto signal() {return new ConditionSignalDto("short_term","BREAKOUT",1,"삼성전자","005930","70,000","71,000","-","-","1.4%","포착",75,0,75,"KIS 원자료",List.of("KIS 원자료 외국인 300주"),List.of(),"",NOW.toString());}
 }

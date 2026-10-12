@@ -1,4 +1,4 @@
-import { Children, cloneElement, isValidElement, useEffect, useMemo, useState, type FormEvent, type ReactElement, type ReactNode } from 'react'
+import { Children, cloneElement, isValidElement, useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getStoredToken, useAuth } from '../contexts/AuthContext'
 import { getSubscriptionPlan } from '../lib/subscriptionPlans'
@@ -184,6 +184,15 @@ function publicationOutcomeLabel(outcome?: string, success?: boolean) {
   return labels[value] ?? value
 }
 
+function marketQueueLabel(status?: string) {
+  return ({ COLLECTING: '순차 조회 중', READY: '확인된 근거 준비됨', COOLDOWN: '호출 간격 대기', FULL: '조회 대기열 가득 참',
+    DISABLED: '조회 비활성', IDLE: '조회 요청 대기' } as Record<string, string>)[status || ''] || '진행 상태 미확인'
+}
+
+function boundedMarketCount(value?: number, maximum = 128) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= maximum ? value : null
+}
+
 function runStatusLabel(status?: string | null) {
   if (!status) return '-'
   return status.replaceAll('_', ' ')
@@ -290,7 +299,10 @@ export default function AdminPage() {
     bootstrap()
   }, [])
 
+  const previousView = useRef(view)
   useEffect(() => {
+    if (previousView.current === view) return
+    previousView.current = view
     if (view === 'system') loadSystem()
   }, [view])
 
@@ -946,7 +958,7 @@ export default function AdminPage() {
             <section aria-label="신규 데이터 소스 준비 상태">
               <div className="admin-run-summary">
                 <strong>신규 데이터 소스 준비 상태</strong>
-                <span>실제 연결 미검증</span>
+                <span>실제 조회 결과는 조건검색에서 확인</span>
               </div>
               <AdminTable columns={['데이터 소스', '기능 설정', '자격 정보', '준비 상태', '확인 사항']} emptyText="데이터 소스 준비 상태 대기">
                 {(systemStatus?.dataSources ?? []).map(source => <tr key={source.id}>
@@ -958,6 +970,19 @@ export default function AdminPage() {
                 </tr>)}
               </AdminTable>
             </section>
+            {systemStatus?.kiwoomReadiness && <section aria-label="키움 시장 근거 조회 진행">
+              <div className="admin-run-summary"><strong>키움 시장 근거 조회 진행</strong>
+                <span>{marketQueueLabel(systemStatus.kiwoomReadiness.queueStatus)}</span></div>
+              {boundedMarketCount(systemStatus.kiwoomReadiness.candidateLimit, 20) !== null && <p>
+                교차 조회 최대 {systemStatus.kiwoomReadiness.candidateLimit}종목
+                {boundedMarketCount(systemStatus.kiwoomReadiness.maxRequestsPerSecond, 5) !== null
+                  && ` · 초당 최대 ${systemStatus.kiwoomReadiness.maxRequestsPerSecond}회`}</p>}
+              {boundedMarketCount(systemStatus.kiwoomReadiness.queue?.pendingJobs) !== null && <p>
+                남은 조회 {systemStatus.kiwoomReadiness.queue?.pendingJobs}건
+                {typeof systemStatus.kiwoomReadiness.queue?.workerActive === 'boolean'
+                  && ` · ${systemStatus.kiwoomReadiness.queue.workerActive ? '작업 실행 중' : '작업 대기'}`}</p>}
+              <p>확인된 근거부터 사용합니다. 대기 중인 값은 조건 판정에 포함하지 않습니다.</p>
+            </section>}
             <section aria-label="분석 실행 결과">
               <div className="admin-run-summary">
                 <strong>분석 실행 결과</strong>

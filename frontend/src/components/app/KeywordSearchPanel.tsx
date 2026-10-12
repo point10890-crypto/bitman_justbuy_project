@@ -43,10 +43,22 @@ function environmentLabel(environment: string | null | undefined) {
 function providerStatusLabel(status: string) {
   if (status === 'COMPLETE' || status === 'AVAILABLE') return '조건검색에 사용'
   if (status === 'PARTIAL') return '일부 데이터 사용'
+  if (status === 'PENDING' || status === 'QUEUED') return '추가 조회 대기'
   if (status === 'UNAVAILABLE' || status === 'FAILED') return '조회 미확인'
   if (status === 'DISABLED') return '연결 꺼짐'
   if (status === 'NOT_REQUESTED' || status === 'NOT_REQUIRED') return '미조회'
   return '조회 상태 미확인'
+}
+
+function validCount(value: number | null | undefined) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 600
+}
+
+function providerCoverage(provider: NonNullable<KeywordSearchResponse['providers']>[number]) {
+  const { requestedCount, availableCount, pendingCount } = provider
+  if (!validCount(requestedCount) || !validCount(availableCount) || !validCount(pendingCount)
+    || availableCount! > requestedCount! || pendingCount! > requestedCount!) return null
+  return `근거 확인 ${availableCount} / 요청 ${requestedCount}종목 · 추가 확인 대기 ${pendingCount}종목`
 }
 
 function observationSourceLabel(source: string | null | undefined, environment: string | null | undefined) {
@@ -120,9 +132,14 @@ export function KeywordSearchPanel({ query, loading, error, result, onClose }: K
                     <div key={`${provider.source}-${index}`}>
                       <p><strong>{sourceLabel(provider.source)} · {environmentLabel(provider.environment)} · {providerStatusLabel(provider.status)}</strong></p>
                       {provider.scope && <p>{provider.scope}</p>}
+                      {providerCoverage(provider) && <p>{providerCoverage(provider)}</p>}
                       <p>조회 결과 확인 {formatKstTimestamp(provider.checkedAt)}</p>
                     </div>
                   ))}
+                  {result.providers.some(provider => provider.status === 'PENDING' || provider.status === 'QUEUED'
+                    || validCount(provider.pendingCount) && provider.pendingCount! > 0) && (
+                    <p>확인된 종목은 먼저 표시합니다. 추가 조회가 끝난 뒤 같은 조건으로 다시 검색해 주세요.</p>
+                  )}
                 </section>
               )}
               <section className="keyword-search-scope" aria-label="검색 조건과 범위">

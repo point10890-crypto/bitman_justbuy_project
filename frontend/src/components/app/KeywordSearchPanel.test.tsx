@@ -91,6 +91,28 @@ describe('keyword search evidence presentation', () => {
     expect(screen.getByText(/실측 12000주.*출처 키움 REST.*모의투자 서버 시장조회/)).toBeTruthy()
   })
 
+  it('distinguishes background enrichment from a failed provider while preserving measured matches', () => {
+    show({ ...result, providers: [{ source: 'KIWOOM_REST_MOCK', environment: 'MOCK', status: 'PENDING', checkedAt: null,
+      scope: '검증된 후보 최대 20종목', requestedCount: 20, availableCount: 0, pendingCount: 20 }] })
+    expect(screen.getByText('키움 REST · 모의투자 서버 시장조회 · 추가 조회 대기')).toBeTruthy()
+    expect(screen.getByText('근거 확인 0 / 요청 20종목 · 추가 확인 대기 20종목')).toBeTruthy()
+    expect(screen.getByText('확인된 종목은 먼저 표시합니다. 추가 조회가 끝난 뒤 같은 조건으로 다시 검색해 주세요.')).toBeTruthy()
+    expect(screen.getByText('현재가 49,000원')).toBeTruthy()
+    expect(screen.queryByText(/조회 미확인/)).toBeNull()
+  })
+
+  it('shows observed coverage and pending work separately without creating missing prices or a polling loop', () => {
+    vi.useFakeTimers()
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    show({ ...result, outcome: 'PARTIAL', providers: [{ source: 'KIWOOM_REST_MOCK', environment: 'MOCK', status: 'PARTIAL',
+      checkedAt: result.fetchedAt, scope: '동일 후보 교차 조회', requestedCount: 20, availableCount: 7, pendingCount: 16 }] })
+    expect(screen.getByText('근거 확인 7 / 요청 20종목 · 추가 확인 대기 16종목')).toBeTruthy()
+    vi.advanceTimersByTime(120_000)
+    expect(fetchSpy).not.toHaveBeenCalled()
+    fetchSpy.mockRestore()
+    vi.useRealTimers()
+  })
+
   it.each([
     ['EMPTY', '조회한 범위에서 조건에 맞는 종목이 없습니다.'],
     ['UNAVAILABLE', '실데이터를 조회하지 못했습니다. 잠시 후 다시 검색해 주세요.'],

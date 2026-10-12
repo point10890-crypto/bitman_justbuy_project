@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import jakarta.annotation.PreDestroy;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -24,7 +25,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
 
 /** Real, bounded source collection. This service never chooses or invents a stock. */
@@ -60,6 +64,17 @@ public class KeywordSearchDataService {
     private KisCandidateSourceService expandedCandidates;
     private KisSourceGateway sourceGateway;
     private KiwoomReadOnlyService kiwoom;
+    private static final int CROSS_CANDIDATE_LIMIT=20;
+    private static final int KIS_QUOTE_CACHE_LIMIT=512;
+    private static final long CROSS_WAIT_NANOS=TimeUnit.MILLISECONDS.toNanos(1500);
+    private final Map<String,CachedQuote> kisQuoteCache=new ConcurrentHashMap<>();
+    private final Map<String,Instant> kisQuoteFailures=new ConcurrentHashMap<>();
+    private final Map<String,CompletableFuture<Quote>> kisQuoteFlights=new ConcurrentHashMap<>();
+    private final ReentrantLock kisQuoteFetchLock=new ReentrantLock();
+    private volatile BoundedMarketRefreshQueue kisQuoteRefresh;
+    private volatile Instant kisQuoteCooldownUntil=Instant.MIN;
+    private int consecutiveKisQuoteFailures;
+    private boolean backgroundQuoteRefreshEnabled;
 
     @Autowired(required=false)
     public void configureKiwoom(KiwoomReadOnlyService kiwoom) {this.kiwoom=kiwoom;}
@@ -70,33 +85,112 @@ public class KeywordSearchDataService {
     /** Both providers receive the same verified candidate codes; provider facts remain independent. */
     public Map<String,Object> kiwoomEvidence(List<String> codes) {
         if(kiwoom==null || !kiwoom.isEnabled()) return Map.of();
-        List<String> verified=codes==null?List.of():codes.stream().filter(c->c!=null&&c.matches("[0-9]{6}")).distinct().limit(3).toList();
+        List<String> verified=codes==null?List.of():codes.stream().filter(c->c!=null&&c.matches("[0-9]{6}")).distinct().limit(CROSS_CANDIDATE_LIMIT).toList();
         return verified.isEmpty()?Map.of():kiwoom.fetchEvidence(verified);
     }
     /** Existing permitted KIS current-price API; independent observations never fill another quote's fields. */
     public Map<String,Quote> kisQuotes(List<String> codes) {
         if(kis==null || !kis.isAvailable() || codes==null || Thread.currentThread().isInterrupted()) return Map.of();
+        List<String> selected=verifiedCrossCodes(codes);
         Map<String,Quote> observations=new LinkedHashMap<>();
-        for(String code:codes.stream().filter(c->c!=null&&c.matches("[0-9]{6}")).distinct().limit(3).toList()) {
+        if(backgroundQuoteRefreshEnabled) {
+            List<CompletableFuture<Quote>> initial=new ArrayList<>();
+            long deadline=System.nanoTime()+CROSS_WAIT_NANOS;
+            for(int i=0;i<selected.size();i++) {
+                String code=selected.get(i);Quote quote=cachedKisQuote(code);
+                CompletableFuture<Quote> flight=quote==null?queueKisQuote(code):null;
+                if(i<3&&flight!=null)initial.add(flight);
+            }
+            for(CompletableFuture<Quote> flight:initial) {
+                long remaining=deadline-System.nanoTime();if(remaining<=0)break;
+                try{flight.get(remaining,TimeUnit.NANOSECONDS);}
+                catch(InterruptedException ignored){Thread.currentThread().interrupt();break;}
+                catch(ExecutionException|TimeoutException ignored){break;}
+            }
+            for(String code:selected){Quote quote=cachedKisQuote(code);if(quote!=null)observations.put(code,quote);}
+            return Collections.unmodifiableMap(observations);
+        }
+        int foregroundRemaining=3;
+        for(String code:selected) {
             if(Thread.currentThread().isInterrupted())break;
-            try {
-                Map<String,String> facts=kis.fetchCurrentPrice(code);
-                if(facts==null || !code.equals(facts.get("stockCode")) || !"KIS OpenAPI".equals(facts.get("source"))
-                    || !"KRX".equals(facts.get("exchange"))) continue;
-                Instant fetched=Instant.parse(facts.get("fetchedAt")),now=clock.instant();
-                if(fetched.isAfter(now) || fetched.isBefore(now.minusSeconds(180)))continue;
-                BigDecimal price=number(mapper.valueToTree(facts.get("currentPrice")),false,true);
-                if(price==null || price.signum()<=0)continue;
-                String rate=facts.get("changeRate");
-                BigDecimal change=number(mapper.valueToTree(rate==null?null:rate.replaceFirst("%$","")),true,false);
-                BigDecimal volume=number(mapper.valueToTree(facts.get("volume")),false,true);
-                BigDecimal value=number(mapper.valueToTree(facts.get("거래대금")),false,true);
-                // Some KIS price responses omit the name; preserve that absence, never invent a name.
-                observations.put(code,new Quote(code,facts.getOrDefault("name",""),"UNKNOWN",price,change,volume,value,"KIS OpenAPI",fetched,null));
-            }catch(RuntimeException ignored){/* Do not expose provider responses or credentials. */}
+            Quote quote=cachedKisQuote(code);
+            if(quote==null && foregroundRemaining>0) {foregroundRemaining--;quote=fetchKisQuote(code);}
+            if(quote!=null)observations.put(code,quote);
         }
         return Collections.unmodifiableMap(observations);
     }
+    private static List<String> verifiedCrossCodes(List<String> codes) {
+        return codes==null?List.of():codes.stream().filter(c->c!=null&&c.matches("[0-9]{6}")).distinct().limit(CROSS_CANDIDATE_LIMIT).toList();
+    }
+    private Quote cachedKisQuote(String code) {
+        CachedQuote cached=kisQuoteCache.get(code);Instant now=clock.instant();
+        return cached!=null&&!now.isBefore(cached.value().fetchedAt())&&now.isBefore(cached.expiresAt())?cached.value():null;
+    }
+    private Quote fetchKisQuote(String code) {
+        if(Thread.currentThread().isInterrupted()||!kisQuoteFetchLock.tryLock())return null;
+        try {
+            Quote cached=cachedKisQuote(code);if(cached!=null)return cached;
+            if(!canRefreshKisQuote(code))return null;
+            Map<String,String> facts=kis.fetchCurrentPrice(code);
+            if(facts==null || !code.equals(facts.get("stockCode")) || !"KIS OpenAPI".equals(facts.get("source")) || !"KRX".equals(facts.get("exchange")))return failedKisQuote(code);
+            Instant fetched=Instant.parse(facts.get("fetchedAt")),now=clock.instant();
+            if(fetched.isAfter(now)||!now.isBefore(fetched.plusSeconds(180)))return failedKisQuote(code);
+            BigDecimal price=number(mapper.valueToTree(facts.get("currentPrice")),false,true);if(price==null||price.signum()<=0)return failedKisQuote(code);
+            String rate=facts.get("changeRate");
+            Quote quote=new Quote(code,facts.getOrDefault("name",""),"UNKNOWN",price,
+                number(mapper.valueToTree(rate==null?null:rate.replaceFirst("%$","")),true,false),
+                number(mapper.valueToTree(facts.get("volume")),false,true),number(mapper.valueToTree(facts.get("거래대금")),false,true),"KIS OpenAPI",fetched,null);
+            kisQuoteCache.entrySet().removeIf(entry->!now.isBefore(entry.getValue().expiresAt()));
+            if(!kisQuoteCache.containsKey(code)&&kisQuoteCache.size()>=KIS_QUOTE_CACHE_LIMIT) {
+                kisQuoteCache.entrySet().stream().min(java.util.Comparator.comparing(entry->entry.getValue().value().fetchedAt()))
+                    .ifPresent(entry->kisQuoteCache.remove(entry.getKey(),entry.getValue()));
+            }
+            kisQuoteCache.put(code,new CachedQuote(quote,fetched.plusSeconds(180)));
+            kisQuoteFailures.remove(code);consecutiveKisQuoteFailures=0;kisQuoteCooldownUntil=Instant.MIN;
+            return quote;
+        }catch(RuntimeException ignored){return failedKisQuote(code);}
+        finally{kisQuoteFetchLock.unlock();}
+    }
+    private boolean canRefreshKisQuote(String code) {
+        Instant now=clock.instant();Instant failedUntil=kisQuoteFailures.get(code);
+        return !now.isBefore(kisQuoteCooldownUntil)&&(failedUntil==null||!now.isBefore(failedUntil));
+    }
+    private Quote failedKisQuote(String code) {
+        Instant now=clock.instant();kisQuoteFailures.entrySet().removeIf(entry->!now.isBefore(entry.getValue()));
+        if(!kisQuoteFailures.containsKey(code)&&kisQuoteFailures.size()>=KIS_QUOTE_CACHE_LIMIT)
+            kisQuoteFailures.entrySet().stream().min(Map.Entry.comparingByValue()).ifPresent(entry->kisQuoteFailures.remove(entry.getKey(),entry.getValue()));
+        kisQuoteFailures.put(code,now.plusSeconds(5));
+        if(++consecutiveKisQuoteFailures>=3){kisQuoteCooldownUntil=now.plusSeconds(30);consecutiveKisQuoteFailures=0;}
+        return null;
+    }
+    private synchronized CompletableFuture<Quote> queueKisQuote(String code) {
+        if(cachedKisQuote(code)!=null||!canRefreshKisQuote(code))return null;
+        BoundedMarketRefreshQueue queue=kisQuoteQueue();Set<String> active=queue.keys();
+        kisQuoteFlights.entrySet().removeIf(entry->{if(entry.getValue().isDone()||!active.contains(entry.getKey())){entry.getValue().complete(null);return true;}return false;});
+        CompletableFuture<Quote> existing=kisQuoteFlights.get(code);if(existing!=null)return existing;
+        CompletableFuture<Quote> flight=new CompletableFuture<>();kisQuoteFlights.put(code,flight);
+        boolean accepted=queue.offer(code,()->{
+            Quote quote=fetchKisQuote(code);flight.complete(quote);kisQuoteFlights.remove(code,flight);
+            if(quote==null)throw new IllegalStateException("Market query unavailable");
+        });
+        if(!accepted){kisQuoteFlights.remove(code,flight);flight.complete(null);return null;}
+        return flight;
+    }
+    private synchronized BoundedMarketRefreshQueue kisQuoteQueue() {
+        if(kisQuoteRefresh==null)kisQuoteRefresh=new BoundedMarketRefreshQueue("keyword-kis-quotes",40);
+        return kisQuoteRefresh;
+    }
+    public Map<String,Object> kisQuoteProgress(List<String> codes) {
+        List<String> requested=verifiedCrossCodes(codes);Set<String> pending=kisQuoteRefresh==null?Set.of():kisQuoteRefresh.keys();
+        long available=requested.stream().filter(code->cachedKisQuote(code)!=null).count();
+        long queued=requested.stream().filter(pending::contains).count();
+        boolean cooldown=clock.instant().isBefore(kisQuoteCooldownUntil)||requested.stream().anyMatch(code->!canRefreshKisQuote(code));
+        String status=queued>0?"COLLECTING":available==requested.size()?"READY":cooldown?"COOLDOWN":"IDLE";
+        if(available+queued<requested.size()&&pending.size()>=40)status="FULL";
+        return Map.of("requestedCodes",requested.size(),"enrichedCodes",available,"pendingCodes",queued,"queueDepth",pending.size(),
+            "queueStatus",status,"backgroundRefreshEnabled",backgroundQuoteRefreshEnabled);
+    }
+    @PreDestroy void closeQuoteRefresh() {if(kisQuoteRefresh!=null)kisQuoteRefresh.close();kisQuoteFlights.values().forEach(flight->flight.complete(null));kisQuoteFlights.clear();}
 
     @Autowired(required = false)
     public void configureExpandedSources(KisCandidateSourceService candidates, KisSourceGateway gateway) {
@@ -106,6 +200,7 @@ public class KeywordSearchDataService {
     @Autowired
     public KeywordSearchDataService(KisApiService kis, ObjectMapper mapper) {
         this(newClient(), mapper, kis, Clock.systemUTC());
+        backgroundQuoteRefreshEnabled=true;
     }
 
     KeywordSearchDataService(RestTemplate client, ObjectMapper mapper, KisApiService kis, Clock clock) {

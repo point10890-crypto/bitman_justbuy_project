@@ -68,4 +68,34 @@ class KiwoomScannerIntegrationTest {
         var engine=new LeaderConditionEngine(null);engine.configureKiwoomEnricher(enricher);
         assertThat(engine.buildSignals(leaders(),NOW)).hasSize(1).allSatisfy(signal->assertThat(signal.evidence()).noneMatch(line->line.contains("PRIVATE_PROVIDER_ERROR")));
     }
+    @Test void shortTermQueriesTwentyOriginalCandidatesBeforeTopThreeAndReusesPreparedEvidence() {
+        var scanner=new ShortTermRealtimeScanner(null);scanner.configureKiwoomEnricher(enricher);
+        when(enricher.enrich(anyMap())).thenReturn(independent());
+        var stocks=new ArrayList<KisApiService.RankedStock>();
+        stocks.add(new KisApiService.RankedStock("삼성전자","005930","71000","3.0","2500000",0));
+        for(int i=0;i<21;i++) stocks.add(new KisApiService.RankedStock("검증후보"+i,String.format("%06d",100000+i),"71000","3.0","2500000",0));
+        stocks.add(new KisApiService.RankedStock("KODEX ETF","122630","71000","3.0","2500000",0));
+        stocks.add(new KisApiService.RankedStock("무효코드","invalid","71000","3.0","2500000",0));
+        var prepared=scanner.queryCandidateEvidence(stocks,stocks,List.of());
+        var published=scanner.verifyAndEnrich(scanner.buildSignals(stocks,stocks,NOW),NOW,prepared);
+        @SuppressWarnings("unchecked") ArgumentCaptor<Map<String,String>> requested=ArgumentCaptor.forClass(Map.class);
+        verify(enricher,times(1)).enrich(requested.capture());
+        assertThat(requested.getValue()).hasSize(20).containsKey("005930").containsKey("100018")
+            .doesNotContainKey("100019").doesNotContainKey("122630").doesNotContainKey("invalid");
+        assertThat(published).hasSize(3);
+        assertThat(published.getFirst().evidence()).anyMatch(line->line.contains("KIWOOM_REST_MOCK"));
+    }
+    @Test void leaderQueriesTwentyOriginalCandidatesWhileAiRemainsSixAndPublishedResultsThree() {
+        var engine=new LeaderConditionEngine(null,verifier);engine.configureKiwoomEnricher(enricher);
+        when(enricher.enrich(anyMap())).thenReturn(independent());when(verifier.isAvailable()).thenReturn(true);when(verifier.verify(anyList())).thenReturn(Map.of());
+        var candidates=new ArrayList<>(leaders());
+        for(int i=0;i<21;i++) candidates.add(new KisApiService.ConditionCandidate("검증후보"+i,String.format("%06d",100000+i),"71000","3.0",300,500,-800,800,"KIS","KIS 원자료"));
+        var published=engine.buildSignals(candidates,NOW);
+        @SuppressWarnings("unchecked") ArgumentCaptor<Map<String,String>> requested=ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked") ArgumentCaptor<List<EvidencePacket>> packets=ArgumentCaptor.forClass(List.class);
+        verify(enricher,times(1)).enrich(requested.capture());verify(verifier).verify(packets.capture());
+        assertThat(requested.getValue()).hasSize(20).containsKey("005930").containsKey("100018").doesNotContainKey("100019");
+        assertThat(packets.getValue()).hasSize(6);assertThat(published).hasSize(3);
+        assertThat(published.getFirst().currentPrice()).isEqualTo("71,000");
+    }
 }

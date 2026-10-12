@@ -10,6 +10,7 @@ import com.bitman.justbuy.service.BackupService;
 import com.bitman.justbuy.service.ConditionSearchPipeline;
 import com.bitman.justbuy.service.DeepSeekEndpointService;
 import com.bitman.justbuy.service.KisApiService;
+import com.bitman.justbuy.service.KiwoomReadOnlyService;
 import com.bitman.justbuy.service.PrecomputeScheduler;
 import com.bitman.justbuy.service.RuntimeAiConfigService;
 import com.bitman.justbuy.service.SubscriptionService;
@@ -59,6 +60,9 @@ public class AdminController {
 
     @Autowired(required = false)
     private BackupService backupService;
+
+    @Autowired(required = false)
+    private KiwoomReadOnlyService kiwoomReadOnlyService;
 
     @Autowired
     private Environment environment;
@@ -206,6 +210,21 @@ public class AdminController {
 
         // Configuration presence only. Never probe providers or return credential values.
         result.put("dataSources", dataSourceReadiness());
+        if(kiwoomReadOnlyService!=null){
+            Map<String,Object> readiness=kiwoomReadOnlyService.readiness();
+            if(readiness!=null){
+                Map<String,Object> state=new LinkedHashMap<>();
+                for(String key:List.of("status","requested","licensed","configured","enabled","source","environment","scope","allowedApiIds","candidateLimit","maxRequestsPerSecond","runtimeStatus","backgroundRefreshEnabled"))
+                    if(readiness.get(key)!=null)state.put(key,readiness.get(key));
+                if(readiness.get("queue") instanceof Map<?,?> queue){
+                    Map<String,Object> safeQueue=new LinkedHashMap<>();
+                    for(String key:List.of("status","queueDepth","pendingJobs","workerActive","capacity","cachedCodes","maxRequestsPerSecond","lastFetchedAt","enqueued","completed","failed","expired","rejected"))
+                        if(queue.get(key)!=null)safeQueue.put(key,queue.get(key));
+                    state.put("queue",safeQueue);state.put("queueStatus",queue.get("status"));
+                }
+                result.put("kiwoomReadiness",state);
+            }
+        }
 
         // 메인 조건검색식 파이프라인
         try {
@@ -247,9 +266,23 @@ public class AdminController {
             sourceReadiness("ECOS", "한국은행 ECOS", configurationEnabled("bitman.ecos.enabled"),
                 ecosConfigured, false, ecosConfigured ? "일별 공표 통계 설정 확인. 실제 연결과 관측일 검증이 필요합니다."
                     : "ECOS 인증키 발급과 서버 설정이 필요합니다."),
-            sourceReadiness("KIWOOM", kiwoomName, configurationEnabled("bitman.kiwoom.enabled"),
+            kiwoomSourceReadiness(kiwoomName, configurationEnabled("bitman.kiwoom.enabled"),
                 kiwoomConfigured, !kiwoomMock && !configurationEnabled("bitman.kiwoom.licensed"), kiwoomMessage)
         );
+    }
+
+    private Map<String,Object> kiwoomSourceReadiness(String name,boolean enabled,boolean configured,boolean rights,String message) {
+        Map<String,Object> result=new LinkedHashMap<>(sourceReadiness("KIWOOM",name,enabled,configured,rights,message));
+        if(kiwoomReadOnlyService!=null){
+            Map<String,Object> readiness=kiwoomReadOnlyService.readiness();
+            if(readiness!=null&&readiness.get("queue") instanceof Map<?,?> queue){
+                Map<String,Object> runtime=new LinkedHashMap<>();
+                for(String key:List.of("status","queueDepth","pendingJobs","workerActive","capacity","cachedCodes","maxRequestsPerSecond","lastFetchedAt","enqueued","completed","failed","expired","rejected"))
+                    if(queue.get(key)!=null)runtime.put(key,queue.get(key));
+                runtime.put("candidateLimit",KiwoomReadOnlyService.CANDIDATE_LIMIT);result.put("runtime",runtime);
+            }
+        }
+        return result;
     }
 
     private boolean hasConfiguration(String property) {

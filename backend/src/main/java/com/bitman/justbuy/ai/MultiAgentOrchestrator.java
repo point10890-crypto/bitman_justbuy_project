@@ -405,7 +405,11 @@ public class MultiAgentOrchestrator {
         }
         if (kiwoomConditionEnricher != null && !activeKiwoomSource().isEmpty()) {
             var names = new LinkedHashMap<String,String>();
-            for (String code : boundedEvidenceCodes) names.put(code,candidateNames.get(code));
+            for (String code : evidenceCodes) {
+                if(code.matches("[0-9]{6}") && candidateNames.get(code)!=null && !candidateNames.get(code).isBlank())
+                    names.put(code,candidateNames.get(code));
+                if(names.size()==com.bitman.justbuy.service.KiwoomSupplementPolicy.CANDIDATE_LIMIT) break;
+            }
             if (!names.isEmpty()) {
                 checkBudget(deadline);
                 try {
@@ -587,7 +591,8 @@ public class MultiAgentOrchestrator {
         quotes.keySet().forEach(code -> quoteSources.put(code, "NAVER_FINANCE"));
         String kiwoomQuoteSource=activeKiwoomSource();
         if (!kiwoomQuoteSource.isEmpty()) {
-            List<String> missing = draftPicks.keySet().stream().filter(code -> !quotes.containsKey(code)).limit(3).toList();
+            List<String> missing = draftPicks.keySet().stream().filter(code -> !quotes.containsKey(code))
+                .limit(com.bitman.justbuy.service.KiwoomSupplementPolicy.CANDIDATE_LIMIT).toList();
             if (!missing.isEmpty()) {
                 checkBudget(deadline);
                 try {

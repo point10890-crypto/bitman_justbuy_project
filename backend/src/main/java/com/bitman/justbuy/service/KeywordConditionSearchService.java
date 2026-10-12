@@ -93,45 +93,63 @@ public class KeywordConditionSearchService {
         Map<String,Quote> kisCrossQuotes=Map.of();
         Map<String,Object> readiness=data.kiwoomReadiness();
         boolean secondaryEnabled=readiness!=null && Boolean.TRUE.equals(readiness.get("enabled"));
+        int crossLimit=readiness==null?20:positiveLimit(readiness.get("candidateLimit"));
+        List<String> crossCodes=eligible.stream().limit(crossLimit).map(Quote::code).toList();
+        int secondaryPending=0;
         if(secondaryEnabled && !eligible.isEmpty()) {
             try {
-                Map<String,Quote> quotes=data.kisQuotes(eligible.stream().limit(3).map(Quote::code).toList());
+                Map<String,Quote> quotes=data.kisQuotes(crossCodes);
                 if(quotes!=null)kisCrossQuotes=quotes;
             }catch(RuntimeException ignored){/* Preserve primary and Kiwoom observations. */}
             int checked=0,missingNames=0;Instant latest=null;
-            for(Quote primary:eligible.stream().limit(3).toList()) {
+            for(Quote primary:eligible.stream().limit(crossLimit).toList()) {
                 Quote cross=kisCrossQuotes.get(primary.code());
                 if(validCrossQuote(primary,cross) && "KIS OpenAPI".equals(cross.source())) {
                     checked++;if(cross.name()==null||cross.name().isBlank())missingNames++;
                     if(latest==null||cross.fetchedAt().isAfter(latest))latest=cross.fetchedAt();
                 }
             }
-            if(checked==0)warnings.add("KIS 주시세 교차 조회 미확인: 확인된 다른 공급자의 결과를 유지합니다.");
-            else if(checked<Math.min(3,eligible.size()))warnings.add("KIS 주시세 교차 조회는 일부 후보만 확인했습니다.");
-            providers.add(new ProviderStatus("KIS OpenAPI","REAL",checked==0?"UNAVAILABLE":checked<Math.min(3,eligible.size())?"PARTIAL":"AVAILABLE",
-                latest,"검증된 동일 후보 최대 3종목의 기존 KIS 주시세"+(missingNames>0?" · 원응답 종목명 미제공 "+missingNames+"건은 일치하는 검증 종목코드·요청코드로 확인":"")));
+            Map<String,Object> kisProgress=data.kisQuoteProgress(crossCodes);
+            int kisPending=kisProgress==null?0:count(kisProgress.get("pendingCodes"),crossCodes.size());
+            if(kisPending>0)warnings.add("KIS 주시세 추가 교차 조회가 진행 중입니다. 확인된 결과를 먼저 표시합니다.");
+            else if(checked==0)warnings.add("KIS 주시세 교차 조회 미확인: 확인된 다른 공급자의 결과를 유지합니다.");
+            else if(checked<crossCodes.size())warnings.add("KIS 주시세 교차 조회는 일부 후보만 확인했습니다.");
+            String kisStatus=checked==0?kisPending>0?"PENDING":"UNAVAILABLE":checked<crossCodes.size()||kisPending>0?"PARTIAL":"AVAILABLE";
+            providers.add(new ProviderStatus("KIS OpenAPI","REAL",kisStatus,
+                latest,"검증된 동일 후보 최대 "+crossLimit+"종목의 기존 KIS 주시세 · 확인되지 않은 나머지는 순차 조회"
+                    +(missingNames>0?" · 원응답 종목명 미제공 "+missingNames+"건은 일치하는 검증 종목코드·요청코드로 확인":""),crossCodes.size(),checked,kisPending));
             try {
-                Map<String,Object> received=data.kiwoomEvidence(eligible.stream().limit(3).map(Quote::code).toList());
+                Map<String,Object> received=data.kiwoomEvidence(crossCodes);
                 if(received!=null) secondary=received;
             } catch(RuntimeException ignored) {warnings.add("키움 REST 교차 조회를 확인하지 못했습니다. 확인된 주시세 결과를 유지합니다.");}
-            boolean usable=false;
-            for(Quote quote:eligible.stream().limit(3).toList()) for(String part:List.of("quote","technical","valuation","investorDaily"))
-                if(part.equals("quote")?secondaryObservation(quote,secondaryGroup(secondary,quote.code(),part))!=null
-                    :!secondaryGroup(secondary,quote.code(),part).isEmpty()) usable=true;
-            if(!usable) warnings.add("키움 REST 교차 근거 미확인: 확인된 주시세와 조건 근거를 유지합니다.");
+            int usable=0;
+            for(Quote quote:eligible.stream().limit(crossLimit).toList()) {
+                boolean verified=false;
+                for(String part:List.of("quote","technical","valuation","investorDaily"))
+                    if(part.equals("quote")?secondaryObservation(quote,secondaryGroup(secondary,quote.code(),part))!=null
+                        :!secondaryGroup(secondary,quote.code(),part).isEmpty())verified=true;
+                if(verified)usable++;
+            }
+            secondaryPending=count(secondary.get("pendingCodes"),crossCodes.size());
+            if(secondaryPending>0)warnings.add("키움 REST 추가 근거를 순차 확인하고 있습니다. 확인된 결과를 먼저 표시하며 대기 중인 값을 조건에 사용하지 않습니다.");
+            else if(usable==0)warnings.add("키움 REST 교차 근거 미확인: 확인된 주시세와 조건 근거를 유지합니다.");
             String providerSource=string(readiness.get("source")),providerEnvironment=string(readiness.get("environment"));
-            providers.add(new ProviderStatus(providerSource,providerEnvironment,usable?"PARTIAL":"UNAVAILABLE",
-                instant(secondary.get("fetchedAt")),"동일한 검증 후보 정렬 상위 최대 3종목의 시세·완료 일봉·PER/PBR·확정 일별 수급 교차 조회"));
+            String secondaryStatus=usable==0?secondaryPending>0?"PENDING":"UNAVAILABLE":secondaryPending>0||usable<crossCodes.size()
+                ||!Set.of("AVAILABLE","COMPLETE").contains(string(secondary.get("status")))?"PARTIAL":"AVAILABLE";
+            providers.add(new ProviderStatus(providerSource,providerEnvironment,secondaryStatus,
+                instant(secondary.get("fetchedAt")),"동일한 검증 후보 정렬 상위 최대 "+crossLimit+"종목의 시세·완료 일봉·PER/PBR·확정 일별 수급 교차 조회",
+                crossCodes.size(),usable,secondaryPending));
         } else if(readiness!=null && !readiness.isEmpty()) providers.add(new ProviderStatus(string(readiness.get("source")),
-            string(readiness.get("environment")),secondaryEnabled?"NOT_REQUESTED":string(readiness.get("status")),null,"키움 REST 최대 3종목"));
+            string(readiness.get("environment")),secondaryEnabled?"NOT_REQUESTED":string(readiness.get("status")),null,"키움 REST 최대 "+crossLimit+"종목"));
         boolean needsResearch=spec.filters().stream().anyMatch(f -> isResearch(f.field()));
-        boolean researchLimited=needsResearch && eligible.size()>5;
+        int researchLimit=secondaryEnabled?Math.max(5,crossLimit):5;
+        boolean researchLimited=needsResearch && eligible.size()>researchLimit;
         Map<String,KisResearchEvidenceService.CandidateEvidence> research=new LinkedHashMap<>();
         if(needsResearch && !eligible.isEmpty()) {
-            if(researchLimited) warnings.add("KIS 기술·PER/PBR 조건은 시세 조건을 통과한 정렬 상위 5종목까지만 검증합니다. 전체 시장 기술 검색이 아닙니다.");
-            eligible=new ArrayList<>(eligible.subList(0,Math.min(5,eligible.size())));
+            if(researchLimited) warnings.add("기술·PER/PBR 조건은 시세 조건을 통과한 정렬 상위 "+researchLimit+"종목까지만 검증합니다. KIS 최대 5종목, 키움 최대 "+crossLimit+"종목이며 전체 시장 기술 검색이 아닙니다.");
+            eligible=new ArrayList<>(eligible.subList(0,Math.min(researchLimit,eligible.size())));
             if(researchEvidence!=null) try {
-                var batch=researchEvidence.fetchEvidence(eligible.stream().map(Quote::code).toList());
+                var batch=researchEvidence.fetchEvidence(eligible.stream().limit(5).map(Quote::code).toList());
                 if(batch!=null && batch.candidates()!=null) for(var candidate:batch.candidates()) {
                     if(candidate!=null && eligible.stream().anyMatch(q -> q.code().equals(candidate.stockCode()))) research.putIfAbsent(candidate.stockCode(),candidate);
                 }
@@ -206,11 +224,11 @@ public class KeywordConditionSearchService {
         String outcome=partial ? "PARTIAL":count==0 ? "EMPTY":"COMPLETE";
         if (!raw.isEmpty() && distinct.isEmpty()) outcome="UNAVAILABLE";
         if (raw.isEmpty() && !warnings.isEmpty()) outcome="UNAVAILABLE";
-        if ((eligible.isEmpty() && missingRank>0) || (needsFlow && !eligible.isEmpty() && verifiedFlows==0)) outcome="UNAVAILABLE";
-        if(needsResearch && !eligible.isEmpty() && verifiedResearch==0) outcome="UNAVAILABLE";
+        if ((eligible.isEmpty() && missingRank>0) || (needsFlow && !eligible.isEmpty() && verifiedFlows==0)) outcome=secondaryPending>0?"PARTIAL":"UNAVAILABLE";
+        if(needsResearch && !eligible.isEmpty() && verifiedResearch==0) outcome=secondaryPending>0?"PARTIAL":"UNAVAILABLE";
         String scope=snapshot.scope()+(needsFlow ? " · 최근 "+spec.flowDays()+"개 실제 거래일 수급, 최대 20종목":"")
             +(needsResearch ? " · KIS 완료 일봉·PER/PBR 검증 최대 5종목":"")
-            +(secondaryEnabled?" · 키움 REST 동일 후보 교차 근거 최대 3종목":"");
+            +(secondaryEnabled?" · 키움 REST 동일 후보 교차 근거 최대 "+crossLimit+"종목":"");
         String sourceStatus="UNAVAILABLE".equals(outcome) ? "UNAVAILABLE":partial ? "PARTIAL":"COMPLETE";
         return new KeywordSearchResponse(query,outcome,spec.appliedConditions(),spec.unsupportedTerms(),
             new Scope(scope,distinct.size(),priceEligibleCount,count,flowLimited || researchLimited || count>limit),
@@ -295,6 +313,11 @@ public class KeywordConditionSearchService {
         return "KIS OpenAPI".equals(source.get("source"))?"REAL":string(source.get("environment"));
     }
     private static String string(Object value) {return value instanceof String text?text:"";}
+    private static int positiveLimit(Object value) {int limit=count(value,20);return limit>0?limit:20;}
+    private static int count(Object value,int maximum) {
+        if(!(value instanceof Number number))return 0;
+        double raw=number.doubleValue();return Double.isFinite(raw)&&raw==Math.floor(raw)&&raw>=0&&raw<=maximum?(int)raw:0;
+    }
     private static Instant instant(Object value) {
         try {return value instanceof Instant at?at:Instant.parse(string(value));}catch(RuntimeException ignored){return null;}
     }

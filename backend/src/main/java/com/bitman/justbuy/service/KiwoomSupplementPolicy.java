@@ -15,6 +15,7 @@ import java.util.Set;
  * Undated investor estimates never confirm daily flow. Quotes are handled by the caller separately.
  */
 public final class KiwoomSupplementPolicy {
+    public static final int CANDIDATE_LIMIT=KiwoomReadOnlyService.CANDIDATE_LIMIT;
     private KiwoomSupplementPolicy() {}
     /** Query the same bounded deterministic candidates even when KIS already has complete facts. */
     public static Map<String,List<String>> concurrentParts(List<String> codes) {
@@ -23,7 +24,7 @@ public final class KiwoomSupplementPolicy {
         for(String code:codes) {
             if(code!=null && code.matches("[0-9]{6}"))
                 requested.putIfAbsent(code,List.of("quote","valuation","technical","investorDaily"));
-            if(requested.size()==3) break;
+            if(requested.size()==CANDIDATE_LIMIT) break;
         }
         return Collections.unmodifiableMap(requested);
     }
@@ -32,7 +33,7 @@ public final class KiwoomSupplementPolicy {
         Set<String> selected=new LinkedHashSet<>();
         for(String code:codes) {
             if(code!=null && code.matches("[0-9]{6}")) selected.add(code);
-            if(selected.size()==3) break;
+            if(selected.size()==CANDIDATE_LIMIT) break;
         }
         Map<?,?> states=Map.of();
         if(primaryMetadata!=null && !"DISABLED".equals(primaryMetadata.get("status")) && !"UNAVAILABLE".equals(primaryMetadata.get("status"))

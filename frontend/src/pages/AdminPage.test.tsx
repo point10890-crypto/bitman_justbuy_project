@@ -231,7 +231,7 @@ describe('admin data source readiness', () => {
     expect(within(sources).getByText(/KIS 이용 권한 확인/)).toBeTruthy()
     expect(within(sources).getByText(/ECOS 인증키 발급/)).toBeTruthy()
     expect(within(sources).getAllByText('비활성')).toHaveLength(3)
-    expect(within(sources).getByText('실제 연결 미검증')).toBeTruthy()
+    expect(within(sources).getByText('실제 조회 결과는 조건검색에서 확인')).toBeTruthy()
     expect(within(sources).queryByRole('button')).toBeNull()
     expect(refreshAllAnalysis).not.toHaveBeenCalled()
   })
@@ -279,5 +279,26 @@ describe('admin member editor preserves concurrent subscription requests', () =>
     await waitFor(() => expect(adminUpdateUser).toHaveBeenCalledWith('admin-upgrade-fixture-token', activeMember.id, {
       name: activeMember.name, email: activeMember.email, subscription: 'FREE',
     }))
+  })
+})
+
+describe('admin market evidence queue visibility', () => {
+  afterEach(cleanup)
+  it('shows bounded actual queue progress without starting analysis or automatic retries', async () => {
+    vi.clearAllMocks()
+    vi.mocked(fetchAllUsers).mockResolvedValue([])
+    vi.mocked(fetchPendingSubscriptions).mockResolvedValue([])
+    vi.mocked(fetchSystemStatus).mockResolvedValue({ kiwoomReadiness: {
+      candidateLimit: 20, maxRequestsPerSecond: 1, queueStatus: 'COLLECTING', backgroundRefreshEnabled: true,
+      queue: { queueDepth: 15, pendingJobs: 16, workerActive: true, capacity: 128 },
+    } })
+    render(<MemoryRouter initialEntries={['/admin?view=system']}><AdminPage /></MemoryRouter>)
+    const progress = within(await screen.findByRole('region', { name: '키움 시장 근거 조회 진행' }))
+    expect(progress.getByText('순차 조회 중')).toBeTruthy()
+    expect(progress.getByText('교차 조회 최대 20종목 · 초당 최대 1회')).toBeTruthy()
+    expect(progress.getByText('남은 조회 16건 · 작업 실행 중')).toBeTruthy()
+    expect(progress.getByText('확인된 근거부터 사용합니다. 대기 중인 값은 조건 판정에 포함하지 않습니다.')).toBeTruthy()
+    expect(refreshAllAnalysis).not.toHaveBeenCalled()
+    expect(fetchSystemStatus).toHaveBeenCalledTimes(1)
   })
 })

@@ -39,7 +39,7 @@ class KeywordSearchDataServiceTest {
         var source=new KeywordSearchDataService(http,mapper,kis,clock);
         for(String field:List.of("source","stockCode","fetchedAt","currentPrice")) {
             var invalid=new java.util.LinkedHashMap<>(facts);invalid.put(field,switch(field){case "source"->"fixture";case "stockCode"->"000660";case "fetchedAt"->"2026-10-12T00:00:00Z";default->"NaN";});
-            when(kis.fetchCurrentPrice("005930")).thenReturn(invalid);assertThat(source.kisQuotes(List.of("005930"))).isEmpty();
+            when(kis.fetchCurrentPrice("005930")).thenReturn(invalid);assertThat(new KeywordSearchDataService(http,mapper,kis,clock).kisQuotes(List.of("005930"))).isEmpty();
         }
     }
     @Test void realKisCurrentPriceWithoutANameRetainsRequestCodeIdentityAndMissingName() {
@@ -51,6 +51,80 @@ class KeywordSearchDataServiceTest {
         assertThat(quote).isNotNull();assertThat(quote.name()).isEmpty();assertThat(quote.code()).isEqualTo("005930");
         assertThat(quote.price()).isEqualByComparingTo("252500");assertThat(quote.tradingValueKrw()).isEqualByComparingTo("2590501982500");
         assertThat(quote.observedAt()).isNull();
+    }
+    @Test void legacyConstructionDoesNotStartBackgroundWorkAndForegroundRequestsRemainBounded() {
+        when(kis.isAvailable()).thenReturn(true);
+        var source=new KeywordSearchDataService(http,mapper,kis,clock);
+        var codes=java.util.stream.IntStream.rangeClosed(1,25).mapToObj(i->String.format("%06d",i)).toList();
+        assertThat(source.kisQuotes(codes)).isEmpty();verify(kis,times(3)).fetchCurrentPrice(anyString());
+        assertThat(source.kisQuoteProgress(codes)).containsEntry("requestedCodes",20).containsEntry("pendingCodes",0L);
+        source.closeQuoteRefresh();
+    }
+    @Test void productionConstructionQueuesTheRemainingCandidatesAndRetainsActualCaptureTimes() throws Exception {
+        when(kis.isAvailable()).thenReturn(true);
+        var entered=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);
+        Instant captured=Instant.now().minusSeconds(10);
+        when(kis.fetchCurrentPrice(anyString())).thenAnswer(call->{String code=call.getArgument(0);
+            if(code.equals("000004")){entered.countDown();release.await(2,java.util.concurrent.TimeUnit.SECONDS);}
+            return Map.of("stockCode",code,"source","KIS OpenAPI","exchange","KRX","fetchedAt",captured.toString(),"currentPrice","252500");
+        });
+        var source=new KeywordSearchDataService(kis,mapper);
+        var codes=java.util.stream.IntStream.rangeClosed(1,20).mapToObj(i->String.format("%06d",i)).toList();
+        try {
+            assertThat(source.kisQuotes(codes)).hasSize(3);assertThat(entered.await(1,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            assertThat(source.kisQuoteProgress(codes)).containsEntry("pendingCodes",17L);
+            release.countDown();
+            long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+            while(((Number)source.kisQuoteProgress(codes).get("pendingCodes")).longValue()>0 && System.nanoTime()<deadline)Thread.sleep(5);
+            var refreshed=source.kisQuotes(codes);assertThat(refreshed).hasSize(20);assertThat(refreshed.values()).allSatisfy(q->assertThat(q.fetchedAt()).isEqualTo(captured));
+            verify(kis,times(20)).fetchCurrentPrice(anyString());
+        }finally{release.countDown();source.closeQuoteRefresh();}
+    }
+    @Test void productionSlowProviderCannotHoldUiAndConcurrentRequestsShareThePendingQuery() throws Exception {
+        when(kis.isAvailable()).thenReturn(true);
+        var entered=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);
+        Instant captured=Instant.now().minusSeconds(1);
+        when(kis.fetchCurrentPrice("005930")).thenAnswer(call->{entered.countDown();release.await(4,java.util.concurrent.TimeUnit.SECONDS);
+            return Map.of("stockCode","005930","source","KIS OpenAPI","exchange","KRX","fetchedAt",captured.toString(),"currentPrice","252500");});
+        var source=new KeywordSearchDataService(kis,mapper);var callers=java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            long started=System.nanoTime();var first=callers.submit(()->source.kisQuotes(List.of("005930")));
+            assertThat(entered.await(1,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            var second=callers.submit(()->source.kisQuotes(List.of("005930")));
+            assertThat(first.get(2,java.util.concurrent.TimeUnit.SECONDS)).isEmpty();assertThat(second.get(2,java.util.concurrent.TimeUnit.SECONDS)).isEmpty();
+            assertThat(java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started)).isLessThan(2300);
+            assertThat(source.kisQuoteProgress(List.of("005930"))).containsEntry("pendingCodes",1L).containsEntry("enrichedCodes",0L);
+            verify(kis,times(1)).fetchCurrentPrice("005930");release.countDown();
+            long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(1);
+            while(((Number)source.kisQuoteProgress(List.of("005930")).get("pendingCodes")).longValue()>0&&System.nanoTime()<deadline)Thread.sleep(5);
+            assertThat(source.kisQuotes(List.of("005930")).get("005930").fetchedAt()).isEqualTo(captured);
+            verify(kis,times(1)).fetchCurrentPrice("005930");
+        }finally{release.countDown();source.closeQuoteRefresh();callers.shutdownNow();}
+    }
+    @Test void failedQuoteHasShortNegativeCacheAndThreeFailuresPauseFurtherCalls() {
+        when(kis.isAvailable()).thenReturn(true);var moving=new TestClock(clock.instant());
+        var source=new KeywordSearchDataService(http,mapper,kis,moving);
+        source.kisQuotes(List.of("000001"));source.kisQuotes(List.of("000001"));verify(kis,times(1)).fetchCurrentPrice("000001");
+        moving.now=moving.now.plusSeconds(6);source.kisQuotes(List.of("000001"));source.kisQuotes(List.of("000002"));
+        source.kisQuotes(List.of("000003"));verify(kis,never()).fetchCurrentPrice("000003");
+        assertThat(source.kisQuoteProgress(List.of("000003"))).containsEntry("queueStatus","COOLDOWN").containsEntry("pendingCodes",0L);
+        moving.now=moving.now.plusSeconds(31);source.kisQuotes(List.of("000003"));verify(kis,times(1)).fetchCurrentPrice("000003");
+    }
+    @Test void kisQuoteCacheHasAnExactBoundAndEvictsOldestCaptureForNewDemand() throws Exception {
+        when(kis.isAvailable()).thenReturn(true);var moving=new TestClock(clock.instant());
+        when(kis.fetchCurrentPrice(anyString())).thenAnswer(call->Map.of("stockCode",call.<String>getArgument(0),"source","KIS OpenAPI","exchange","KRX",
+            "fetchedAt",moving.instant().toString(),"currentPrice","252500"));
+        var source=new KeywordSearchDataService(http,mapper,kis,moving);
+        for(int i=1;i<=513;i++) {moving.now=moving.now.plusMillis(1);assertThat(source.kisQuotes(List.of(String.format("%06d",i)))).hasSize(1);}
+        var field=KeywordSearchDataService.class.getDeclaredField("kisQuoteCache");field.setAccessible(true);
+        assertThat((Map<?,?>)field.get(source)).hasSize(512);source.kisQuotes(List.of("000513"));verify(kis,times(1)).fetchCurrentPrice("000513");
+        source.kisQuotes(List.of("000001"));verify(kis,times(2)).fetchCurrentPrice("000001");assertThat((Map<?,?>)field.get(source)).hasSize(512);
+    }
+    static final class TestClock extends Clock {
+        Instant now;TestClock(Instant now){this.now=now;}
+        @Override public java.time.ZoneId getZone(){return ZoneOffset.UTC;}
+        @Override public Clock withZone(java.time.ZoneId zone){return this;}
+        @Override public Instant instant(){return now;}
     }
     RestTemplate http;
     KisApiService kis;

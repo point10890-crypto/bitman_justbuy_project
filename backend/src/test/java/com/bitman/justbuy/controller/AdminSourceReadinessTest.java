@@ -4,6 +4,7 @@ import com.bitman.justbuy.condition.run.ConditionRunService;
 import com.bitman.justbuy.service.AnalysisService;
 import com.bitman.justbuy.service.ConditionSearchPipeline;
 import com.bitman.justbuy.service.KisApiService;
+import com.bitman.justbuy.service.KiwoomReadOnlyService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -25,6 +26,21 @@ class AdminSourceReadinessTest {
     private final AnalysisService analysis = mock(AnalysisService.class);
     private final ConditionSearchPipeline pipeline = mock(ConditionSearchPipeline.class);
     private final KisApiService kis = mock(KisApiService.class);
+
+    @Test
+    void runtimeQueueStatusIsVisibleButUnexpectedPrivateFieldsAreNeverExposed() throws Exception {
+        var adapter=mock(KiwoomReadOnlyService.class);
+        when(adapter.readiness()).thenReturn(Map.of("source","KIWOOM_REST_MOCK","environment","MOCK","candidateLimit",20,
+            "privateToken","fixture-private-token", "queue",Map.of("status","COLLECTING","pendingJobs",17,"workerActive",true,
+                "capacity",128,"privateResponse","fixture-private-response")));
+        var body=status(new MockEnvironment(),adapter);
+        var ready=(Map<?,?>)body.get("kiwoomReadiness");
+        assertThat(ready.get("queueStatus")).isEqualTo("COLLECTING");assertThat(ready.get("candidateLimit")).isEqualTo(20);
+        assertThat(((Map<?,?>)ready.get("queue")).get("pendingJobs")).isEqualTo(17);
+        var source=sources(body).stream().filter(value->"KIWOOM".equals(value.get("id"))).findFirst().orElseThrow();
+        assertThat(((Map<?,?>)source.get("runtime")).get("workerActive")).isEqualTo(true);
+        assertThat(new ObjectMapper().writeValueAsString(body)).doesNotContain("fixture-private","privateToken","privateResponse");
+    }
 
     @Test
     void absentConfigurationKeepsNewSourcesDisabledAndCredentialsExplicitlyMissing() {
@@ -150,13 +166,19 @@ class AdminSourceReadinessTest {
     }
 
     private Map<String, Object> status(MockEnvironment environment) {
+        return status(environment,null);
+    }
+    private Map<String, Object> status(MockEnvironment environment,KiwoomReadOnlyService adapter) {
         when(analysis.getCacheStatus()).thenReturn(Map.of());
         when(pipeline.describe()).thenReturn(Map.of("status", "configured"));
         // Only this controller is registered: no startup hooks, DB, providers or application configuration.
         try (var context = new AnnotationConfigApplicationContext()) {
             context.setEnvironment(environment);
-            context.registerBean(AdminController.class, () -> new AdminController(null, analysis, pipeline,
-                List.of(), kis, null, null, new ConditionRunService()));
+            context.registerBean(AdminController.class, () -> {
+                var controller=new AdminController(null,analysis,pipeline,List.of(),kis,null,null,new ConditionRunService());
+                if(adapter!=null)ReflectionTestUtils.setField(controller,"kiwoomReadOnlyService",adapter);
+                return controller;
+            });
             context.refresh();
             return context.getBean(AdminController.class).getSystemStatus().getBody();
         }

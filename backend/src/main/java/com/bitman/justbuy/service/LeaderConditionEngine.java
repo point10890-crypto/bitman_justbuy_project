@@ -49,7 +49,7 @@ public class LeaderConditionEngine {
     private static final DateTimeFormatter KST_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(KST);
     private static final LocalTime SESSION_START = LocalTime.of(9, 0);
     private static final LocalTime SESSION_END = LocalTime.of(15, 30);
-    private static final int CANDIDATE_LIMIT = 12;
+    private static final int CANDIDATE_LIMIT = KiwoomSupplementPolicy.CANDIDATE_LIMIT;
     private static final int FLOW_DAYS = 5;
     private static final int VERIFY_LIMIT = 6;
     private static final int SIGNAL_LIMIT = 3;
@@ -164,8 +164,12 @@ public class LeaderConditionEngine {
         var independent=KiwoomConditionEnricher.empty("NOT_CONFIGURED");
         if(kiwoomEnricher!=null) {
             Map<String,String> names=new LinkedHashMap<>();
-            verifyPool.stream().limit(3).forEach(item->names.put(item.candidate.code(),item.candidate.name()));
-            try {independent=kiwoomEnricher.enrich(names);} catch(RuntimeException ignored) { /* Preserve measured KIS candidates. */ }
+            for(Scored item:scored) {
+                names.putIfAbsent(item.candidate.code(),item.candidate.name());
+                if(names.size()==KiwoomSupplementPolicy.CANDIDATE_LIMIT) break;
+            }
+            try {independent=java.util.Objects.requireNonNullElse(kiwoomEnricher.enrich(names),KiwoomConditionEnricher.empty("UNAVAILABLE"));}
+            catch(RuntimeException ignored) { /* Preserve measured KIS candidates. */ }
         }
         Map<String, EvidenceVerdict> verdicts = verifyVerdicts(verifyPool, now, independent);
 

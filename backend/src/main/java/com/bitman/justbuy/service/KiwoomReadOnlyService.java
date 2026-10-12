@@ -26,6 +26,7 @@ import java.util.concurrent.locks.ReentrantLock;
 /** Bounded Kiwoom market queries run alongside verified primary sources; trading is never exposed. */
 @Service
 public class KiwoomReadOnlyService {
+    public static final int CANDIDATE_LIMIT=20;
     private static final ZoneId KST=ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter DATE=DateTimeFormatter.BASIC_ISO_DATE;
     private static final DateTimeFormatter STAMP=DateTimeFormatter.ofPattern("uuuuMMddHHmmss").withResolverStyle(ResolverStyle.STRICT);
@@ -56,14 +57,19 @@ public class KiwoomReadOnlyService {
     }
     private record Read(String status,Instant fetchedAt,JsonNode body,boolean hasMore) {}
     private record Cached(Read value,Instant expiresAt) {}
+    private record CachedQuote(JsonNode row,Instant fetchedAt,Instant expiresAt) {}
     private record Bar(LocalDate date,BigDecimal open,BigDecimal high,BigDecimal low,BigDecimal close,BigDecimal volume) {}
     private final Transport transport;
     private final Clock clock;
     private final boolean requested,licensed;
     private final String appKey,appSecret;
     private final Environment environment;
-    private final ReentrantLock requestLock=new ReentrantLock();
+    private final ReentrantLock requestLock=new ReentrantLock(true);
     private final Map<String,Cached> cache=new ConcurrentHashMap<>();
+    private final Map<String,CachedQuote> quoteCache=new ConcurrentHashMap<>();
+    private BoundedMarketRefreshQueue refreshQueue;
+    private volatile Instant providerCooldownUntil=Instant.EPOCH,lastFetchedAt;
+    private int consecutiveFailures;
     private String token;
     private Instant tokenExpiresAt=Instant.EPOCH,authCooldownUntil=Instant.EPOCH;
     private long nextRequestNanos;
@@ -79,6 +85,7 @@ public class KiwoomReadOnlyService {
             @Value("${bitman.kiwoom.app-secret:}") String appSecret,
             @Value("${bitman.kiwoom.environment:REAL}") String environment) {
         this(new HttpTransport(mapper,Environment.parse(environment)),mapper,Clock.systemUTC(),enabled,licensed,appKey,appSecret,environment);
+        refreshQueue=new BoundedMarketRefreshQueue("bitman-kiwoom-refresh",128);
     }
     KiwoomReadOnlyService(Transport transport,ObjectMapper mapper,Clock clock,boolean enabled,boolean licensed,String appKey,String appSecret) {
         this(transport,mapper,clock,enabled,licensed,appKey,appSecret,"REAL");
@@ -97,15 +104,25 @@ public class KiwoomReadOnlyService {
     private String source() {return environment==null?"KIWOOM_REST":environment.source;}
     private String environmentName() {return environment==null?"INVALID":environment.name();}
     private String scope() {
-        return environment==Environment.MOCK?"모의투자 서버의 시장 조회 자료를 KIS와 함께 검증. 실전 이용 권한 확인 상태는 별도이며 주문·계좌는 사용하지 않음. 최대 3종목·첫 응답 페이지":
-            "KIS와 병행하는 시장 조회 자료, 최대 3종목·첫 응답 페이지. 날짜 미상 재무와 불완전 기간을 명시함";
+        return environment==Environment.MOCK?"모의투자 서버의 시장 조회 자료를 KIS와 함께 검증. 실전 이용 권한 확인 상태는 별도이며 주문·계좌는 사용하지 않음. 최대 20종목·묶음 시세·순차 수집·공유 캐시·첫 응답 페이지":
+            "KIS와 병행하는 시장 조회 자료, 최대 20종목·묶음 시세·순차 수집·공유 캐시·첫 응답 페이지. 날짜 미상 재무와 불완전 기간을 명시함";
     }
     public Map<String,Object> readiness() {
         return Map.ofEntries(Map.entry("status",gate()),Map.entry("requested",requested),Map.entry("licensed",licensed),
             Map.entry("configured",credential(appKey)&&credential(appSecret)),Map.entry("enabled",isEnabled()),Map.entry("source",source()),
             Map.entry("environment",environmentName()),Map.entry("scope",scope()),Map.entry("allowedApiIds",List.of("ka10001","ka10095","ka10081","ka10059")),
-            Map.entry("candidateLimit",3),Map.entry("maxRequestsPerSecond",environment==null?0:environment.requestsPerSecond),Map.entry("runtimeStatus",lastStatus));
+            Map.entry("candidateLimit",CANDIDATE_LIMIT),Map.entry("maxRequestsPerSecond",environment==null?0:environment.requestsPerSecond),Map.entry("runtimeStatus",lastStatus),
+            Map.entry("backgroundRefreshEnabled",refreshQueue!=null),Map.entry("queue",queueSnapshot()));
     }
+    private Map<String,Object> queueSnapshot() {
+        Map<String,Object> state=new LinkedHashMap<>(refreshQueue==null?Map.of("queueDepth",0,"pendingJobs",0,"workerActive",false,"capacity",0):refreshQueue.snapshot());
+        state.put("status",!clock.instant().isBefore(providerCooldownUntil)?Integer.valueOf(0).equals(state.get("pendingJobs"))?"READY":"COLLECTING":"COOLDOWN");
+        if(!isEnabled())state.put("status","DISABLED");
+        state.put("cachedCodes",quoteCache.size());state.put("maxRequestsPerSecond",environment==null?0:environment.requestsPerSecond);
+        if(lastFetchedAt!=null)state.put("lastFetchedAt",lastFetchedAt.toString());
+        return Collections.unmodifiableMap(state);
+    }
+    @jakarta.annotation.PreDestroy public void close(){if(refreshQueue!=null)refreshQueue.close();}
     public KeywordSearchDataService.Quote lookup(String code) {
         if(!isEnabled()||code==null||!code.matches("[0-9]{6}")) return null;
         long deadline=System.nanoTime()+BUDGET;
@@ -117,19 +134,46 @@ public class KiwoomReadOnlyService {
         return quotes(codes(codes),System.nanoTime()+BUDGET);
     }
     private Map<String,KeywordSearchDataService.Quote> quotes(List<String> codes,long deadline) {
+        Map<String,KeywordSearchDataService.Quote> cached=cachedQuotes(codes);
+        if(cached.size()==codes.size()||deadline-System.nanoTime()<HTTP_BOUND||Thread.currentThread().isInterrupted())return cached;
+        boolean locked=false;
+        try{
+            locked=requestLock.tryLock(Math.max(1,deadline-System.nanoTime()),TimeUnit.NANOSECONDS);
+            return locked?refreshQuotes(codes,deadline):cached;
+        }catch(InterruptedException ignored){Thread.currentThread().interrupt();return cached;}
+        finally{if(locked)requestLock.unlock();}
+    }
+    private Map<String,KeywordSearchDataService.Quote> cachedQuotes(List<String> codes){
+        Map<String,KeywordSearchDataService.Quote> result=new LinkedHashMap<>();
+        for(String code:codes){CachedQuote cached=quoteCache.get(code);if(cached!=null&&clock.instant().isBefore(cached.expiresAt())){
+            var quote=parseQuote(cached.row(),code,cached.fetchedAt(),true);if(quote!=null)result.put(code,quote);
+        }}return Collections.unmodifiableMap(result);
+    }
+    private Map<String,KeywordSearchDataService.Quote> refreshQuotes(List<String> codes,long deadline) {
         if(codes.isEmpty()) return Map.of();
-        Read response=read("ka10095",Map.of("stk_cd",String.join("|",codes)),deadline);
-        if(!"AVAILABLE".equals(response.status())) return Map.of();
+        Map<String,KeywordSearchDataService.Quote> result=new LinkedHashMap<>(cachedQuotes(codes));
+        List<String> missing=codes.stream().filter(code->!result.containsKey(code)).sorted().toList();
+        if(missing.isEmpty())return Collections.unmodifiableMap(result);
+        Read response=read("ka10095",Map.of("stk_cd",String.join("|",missing)),deadline);
+        if(!"AVAILABLE".equals(response.status())) return Collections.unmodifiableMap(result);
         JsonNode rows=response.body().path("atn_stk_infr");
-        if(!rows.isArray()||rows.size()>100) return Map.of();
-        Map<String,KeywordSearchDataService.Quote> result=new LinkedHashMap<>();Set<String> seen=new HashSet<>();
+        if(!rows.isArray()||rows.size()>100) return Collections.unmodifiableMap(result);
+        Map<String,KeywordSearchDataService.Quote> received=new LinkedHashMap<>();Map<String,JsonNode> validRows=new LinkedHashMap<>();Set<String> seen=new HashSet<>();
         for(JsonNode row:rows) {
             String code=row.path("stk_cd").asText("");
-            if(!codes.contains(code)) continue;
-            if(!seen.add(code)) return Map.of();
+            if(!missing.contains(code)) continue;
+            if(!seen.add(code)) return Collections.unmodifiableMap(result);
             var quote=parseQuote(row,code,response.fetchedAt(),true);
-            if(quote!=null) result.put(code,quote);
+            if(quote!=null){received.put(code,quote);validRows.put(code,row);}
         }
+        synchronized(quoteCache){
+            if(quoteCache.size()>=256)quoteCache.entrySet().removeIf(entry->!clock.instant().isBefore(entry.getValue().expiresAt()));
+            validRows.forEach((code,row)->{
+                if(!quoteCache.containsKey(code)&&quoteCache.size()>=256)quoteCache.entrySet().stream().min(Comparator.comparing(entry->entry.getValue().fetchedAt())).map(Map.Entry::getKey).ifPresent(quoteCache::remove);
+                quoteCache.put(code,new CachedQuote(row,response.fetchedAt(),response.fetchedAt().plusSeconds(20)));
+            });
+        }
+        result.putAll(received);
         return Collections.unmodifiableMap(result);
     }
     public Map<String,Object> fetchEvidence(List<String> codes) {
@@ -138,7 +182,7 @@ public class KiwoomReadOnlyService {
     }
     public Map<String,Object> fetchEvidence(List<String> requestedCodes,Map<String,List<String>> missingPartsByCode) {
         Map<String,Object> batch=new LinkedHashMap<>();batch.put("source",source());batch.put("environment",environmentName());batch.put("scope",scope());batch.put("fetchedAt",clock.instant().toString());
-        batch.put("candidateLimit",3);batch.put("budgetSeconds",12);batch.put("scoringEnabled",false);
+        batch.put("candidateLimit",CANDIDATE_LIMIT);batch.put("budgetSeconds",12);batch.put("scoringEnabled",false);
         Map<String,Object> candidates=new LinkedHashMap<>();batch.put("candidates",candidates);
         if(!isEnabled()) {batch.put("status",gate());return batch;}
         var codes=codes(requestedCodes);
@@ -169,38 +213,94 @@ public class KiwoomReadOnlyService {
             if(needed.contains("technical")) facts.put("technical",technical(code,completed,read("ka10081",Map.of("stk_cd",code,"base_dt",completed.format(DATE),"upd_stkpc_tp","1"),deadline)));
             if(needed.contains("investorDaily")) facts.put("investorDaily",investors(code,investorDate,read("ka10059",Map.of("dt",investorDate.format(DATE),"stk_cd",code,"amt_qty_tp","2","trde_tp","0","unit_tp","1"),deadline)));
         }
+        if(refreshQueue!=null&&!clock.instant().isBefore(providerCooldownUntil)){
+            var missingQuotes=codes.stream().filter(code->missing.get(code).contains("quote")&&!usable(((Map<?,?>)candidates.get(code)).get("quote"))).sorted().toList();
+            if(!missingQuotes.isEmpty())refreshQueue.offer("quote/"+String.join("|",missingQuotes),()->quotes(missingQuotes,System.nanoTime()+Duration.ofSeconds(8).toNanos()));
+            for(String code:codes){
+                @SuppressWarnings("unchecked") Map<String,Object> facts=(Map<String,Object>)candidates.get(code);
+                for(String part:missing.get(code))if(!"quote".equals(part)&&facts.get(part) instanceof Map<?,?> fact&&"BUDGET_EXCEEDED".equals(fact.get("status"))){
+                    Map<String,String> params=partParams(code,part,completed,investorDate);String api=partApi(part);
+                    if(refreshQueue.offer(partJobKey(code,part,completed,investorDate),()->{
+                        LocalDate currentDay=LocalDate.now(clock.withZone(KST));
+                        if("technical".equals(part)&&!completed.equals(completed(clock.instant()))||"investorDaily".equals(part)&&!investorDate.equals(KoreanMarketCalendar.previousTradingDay(currentDay)))return;
+                        Read refreshed=read(api,params,System.nanoTime()+Duration.ofSeconds(8).toNanos());
+                        if(!"AVAILABLE".equals(refreshed.status()))throw new IllegalStateException("Market refresh unavailable");
+                    }))facts.put(part,status("PENDING"));
+                }
+            }
+        }
+        Set<String> pending=refreshQueue==null?Set.of():refreshQueue.keys();int pendingCodes=0,pendingFacts=0,enrichedCodes=0;
+        for(String code:codes){
+            @SuppressWarnings("unchecked") Map<String,Object> facts=(Map<String,Object>)candidates.get(code);boolean waiting=false;
+            if(facts.values().stream().anyMatch(KiwoomReadOnlyService::usable))enrichedCodes++;
+            for(String part:missing.get(code))if(!usable(facts.get(part))&&(pending.contains(partJobKey(code,part,completed,investorDate))||"quote".equals(part)&&pending.stream().anyMatch(key->key.startsWith("quote/")&&Arrays.asList(key.substring(6).split("\\|")).contains(code)))){
+                waiting=true;pendingFacts++;if(!usable(facts.get(part)))facts.put(part,status("PENDING"));
+            }
+            if(waiting)pendingCodes++;
+        }
+        Map<String,Object> queue=queueSnapshot();batch.put("requestedCodes",codes.size());batch.put("enrichedCodes",enrichedCodes);batch.put("pendingCodes",pendingCodes);
+        batch.put("pendingFacts",pendingFacts);batch.put("queueDepth",queue.get("queueDepth"));batch.put("queueStatus",queue.get("status"));batch.put("backgroundRefreshEnabled",refreshQueue!=null);
         long usable=candidates.values().stream().flatMap(value->((Map<?,?>)value).values().stream())
             .filter(value->value instanceof Map<?,?> facts&&Set.of("AVAILABLE","PARTIAL_COVERAGE").contains(facts.get("status"))).count();
-        batch.put("availableFacts",usable);batch.put("status",usable>0?"PARTIAL":"UNAVAILABLE");
+        batch.put("availableFacts",usable);batch.put("status",usable>0?"PARTIAL":pendingCodes>0?"PENDING":"UNAVAILABLE");
         return batch;
     }
+    private static boolean usable(Object value){return value instanceof Map<?,?> fact&&Set.of("AVAILABLE","PARTIAL_COVERAGE").contains(fact.get("status"));}
+    private static String partJobKey(String code,String part,LocalDate completed,LocalDate investorDate){return part+"/"+code+("technical".equals(part)?"/"+completed:"investorDaily".equals(part)?"/"+investorDate:"");}
+    private static String partApi(String part){return switch(part){case "valuation"->"ka10001";case "technical"->"ka10081";default->"ka10059";};}
+    private static Map<String,String> partParams(String code,String part,LocalDate completed,LocalDate investorDate){return switch(part){
+        case "valuation"->Map.of("stk_cd",code);
+        case "technical"->Map.of("stk_cd",code,"base_dt",completed.format(DATE),"upd_stkpc_tp","1");
+        default->Map.of("dt",investorDate.format(DATE),"stk_cd",code,"amt_qty_tp","2","trde_tp","0","unit_tp","1");};}
     private Read read(String api,Map<String,String> params,long deadline) {
         if(!isEnabled()) return failed(gate());
         String path=ENDPOINTS.get(api);if(path==null) return failed("NOT_ALLOWED");
+        String key=api+new TreeMap<>(params);Cached existing=freshCached(key);if(existing!=null)return existing.value();
         if(Thread.currentThread().isInterrupted()||deadline-System.nanoTime()<HTTP_BOUND) return failed("BUDGET_EXCEEDED");
-        String key=api+new TreeMap<>(params);boolean locked=false;
+        if(clock.instant().isBefore(providerCooldownUntil))return failed("PROVIDER_COOLDOWN");
+        boolean locked=false;
         try {
             locked=requestLock.tryLock(Math.max(1,deadline-System.nanoTime()),TimeUnit.NANOSECONDS);
             if(!locked) return failed("BUDGET_EXCEEDED");
-            Instant now=clock.instant();Cached cached=cache.get(key);
-            if(cached!=null&&!now.isBefore(cached.value().fetchedAt())&&now.isBefore(cached.expiresAt())) return cached.value();
+            Cached cached=freshCached(key);if(cached!=null)return cached.value();
+            if(clock.instant().isBefore(providerCooldownUntil))return failed("PROVIDER_COOLDOWN");
             if(!authenticate(deadline)) return failed("AUTH_UNAVAILABLE");
             if(!reserve(deadline)) return failed("BUDGET_EXCEEDED");
             Response response=transport.send(path,api,token,params,deadline);
             Instant received=clock.instant();Read value;
             if(System.nanoTime()>deadline) value=failed("BUDGET_EXCEEDED");
-            else if(response==null||response.body()==null||!response.body().isObject()) value=failed("INVALID_RESPONSE");
+            else if(response!=null&&throttled(response)) {providerCooldownUntil=received.plusSeconds(30);value=failed("PROVIDER_COOLDOWN");}
+            else if(response==null) value=failed("INVALID_RESPONSE");
             else if(response.httpStatus()!=200) {
                 if(response.httpStatus()==401||response.httpStatus()==403) {token=null;authCooldownUntil=received.plusSeconds(30);}
                 value=failed("PROVIDER_UNAVAILABLE");
-            } else if(!"0".equals(response.body().path("return_code").asText(""))) value=failed("PROVIDER_UNAVAILABLE");
+            } else if(response.body()==null||!response.body().isObject()) value=failed("INVALID_RESPONSE");
+            else if(!"0".equals(response.body().path("return_code").asText(""))) {
+                if(recoverableAuthError(response.body())){token=null;authCooldownUntil=received.plusSeconds(30);}
+                value=failed("PROVIDER_UNAVAILABLE");
+            }
             else value=new Read("AVAILABLE",received,response.body(),response.hasMore());
+            if("AVAILABLE".equals(value.status())){consecutiveFailures=0;lastFetchedAt=received;}
+            else if(!"BUDGET_EXCEEDED".equals(value.status())&&++consecutiveFailures>=3)providerCooldownUntil=received.plusSeconds(30);
             long seconds=!"AVAILABLE".equals(value.status())?5:"ka10095".equals(api)?20:"ka10001".equals(api)?60:600;
-            if(cache.size()>=256) cache.clear();cache.put(key,new Cached(value,received.plusSeconds(seconds)));
+            if(cache.size()>=1024){cache.entrySet().removeIf(entry->!received.isBefore(entry.getValue().expiresAt()));if(cache.size()>=1024)cache.keySet().stream().findFirst().ifPresent(cache::remove);}
+            cache.put(key,new Cached(value,received.plusSeconds(seconds)));
             lastStatus=value.status();return value;
         } catch(InterruptedException ignored) {Thread.currentThread().interrupt();return failed("INTERRUPTED");}
-        catch(Exception ignored) {lastStatus="PROVIDER_UNAVAILABLE";return failed("PROVIDER_UNAVAILABLE");}
+        catch(Exception ignored) {if(++consecutiveFailures>=3)providerCooldownUntil=clock.instant().plusSeconds(30);lastStatus="PROVIDER_UNAVAILABLE";return failed("PROVIDER_UNAVAILABLE");}
         finally {if(locked) requestLock.unlock();}
+    }
+    private Cached freshCached(String key){Cached cached=cache.get(key);Instant now=clock.instant();return cached!=null&&!now.isBefore(cached.value().fetchedAt())&&now.isBefore(cached.expiresAt())?cached:null;}
+    private static boolean throttled(Response response){
+        if(response.httpStatus()==429)return true;
+        if(response.body()==null)return false;
+        String code=response.body().path("return_code").asText("");if(Set.of("1700","1701","1702").contains(code))return true;
+        String message=response.body().path("return_msg").asText("");return message.matches("(?s).*(?<![0-9])170[012](?![0-9]).*");
+    }
+    private static boolean recoverableAuthError(JsonNode body){
+        // Official SDK recovery codes; key/mode/IP configuration errors require correction instead.
+        if(Set.of("8005","8031","8103").contains(body.path("return_code").asText("")))return true;
+        return body.path("return_msg").asText("").matches("(?s).*(?:\\[(?:8005|8031|8103):|CODE=(?:8005|8031|8103)(?![0-9])).*");
     }
     private boolean authenticate(long deadline) throws Exception {
         Instant now=clock.instant();
@@ -228,7 +328,7 @@ public class KiwoomReadOnlyService {
     }
     private Read failed(String status) {return new Read(status,clock.instant(),MissingNode.getInstance(),false);}
     private static List<String> codes(List<String> codes) {
-        return codes==null?List.of():codes.stream().filter(Objects::nonNull).filter(c->c.matches("[0-9]{6}")).distinct().limit(3).toList();
+        return codes==null?List.of():codes.stream().filter(Objects::nonNull).filter(c->c.matches("[0-9]{6}")).distinct().limit(CANDIDATE_LIMIT).toList();
     }
     private static boolean credential(String value) {return !value.isBlank()&&value.length()<=512&&value.chars().noneMatch(Character::isISOControl);}
     private Map<String,Object> status(String status) {return Map.of("status",status,"source",source(),"environment",environmentName());}
