@@ -30,6 +30,7 @@ class KiwoomSupplementConsumerTest {
     private final KisSourceExpansionService primary = mock(KisSourceExpansionService.class);
     private final KiwoomReadOnlyService supplementary = mock(KiwoomReadOnlyService.class);
     private final AtomicReference<String> prompt = new AtomicReference<>();
+    private String environment = "REAL";
 
     private Map<String, Object> metadata(List<String> codes, String technical, String valuation, String daily) {
         var states = new LinkedHashMap<String, Object>();
@@ -52,6 +53,7 @@ class KiwoomSupplementConsumerTest {
         when(primary.enrich(anyList())).thenReturn(new KisSourceExpansionService.Enrichment(
             "KIS_PRIMARY_VALUATION_FACT_KEEP", primaryMetadata));
         when(supplementary.isEnabled()).thenReturn(true);
+        when(supplementary.readiness()).thenReturn(Map.of("environment", environment));
         StringBuilder stocks = new StringBuilder();
         for (String code : aiCodes) {
             if (!stocks.isEmpty()) stocks.append(',');
@@ -166,5 +168,44 @@ class KiwoomSupplementConsumerTest {
             assertThat(result.finalContent()).doesNotContain(CODE);
             assertThat(result.round1()).allSatisfy(agent -> assertThat(agent.content()).doesNotContain(CODE));
         }
+    }
+
+    @Test void enabledMockEnvironmentNeverAddsSupplementFactsAndKeepsVerifiedPrimaryPublication() {
+        environment = "MOCK";
+        when(supplementary.fetchEvidence(anyList(), anyMap())).thenReturn(Map.of("status", "AVAILABLE",
+            "source", "KIWOOM_REST_MOCK", "fixtureEvidence", "MOCK_HALLUCINATED_PER_999"));
+        when(supplementary.lookupAll(anyList())).thenReturn(Map.of(CODE,
+            quote(CODE, NAMES.get(CODE), Instant.now(), "KIWOOM_REST")));
+
+        var result = run(List.of(CODE), List.of(CODE), Map.of(CODE, "71,000"),
+            metadata(List.of(CODE), "UNAVAILABLE", "AVAILABLE", "UNAVAILABLE"));
+
+        verify(supplementary, never()).fetchEvidence(anyList(), anyMap());
+        verify(supplementary, never()).lookupAll(anyList());
+        assertThat(prompt.get()).contains("KIS_PRIMARY_VALUATION_FACT_KEEP")
+            .doesNotContain("MOCK_HALLUCINATED_PER_999", "KIWOOM_REST_MOCK", "키움 보조 조회 근거");
+        assertThat(result.stockPicks()).hasSize(1);
+        assertThat(result.stockPicks().getFirst().currentPrice()).isEqualTo("71,000");
+        assertThat(result.stockPicks().getFirst().quoteSource()).isEqualTo("NAVER_FINANCE");
+        assertThat(result.metadata().sourceExpansion()).doesNotContainKey("kiwoomSupplement");
+    }
+
+    @Test void enabledMockEnvironmentCannotSupplyAQuoteForAnUnquotedProductionCandidate() {
+        environment = "MOCK";
+        when(supplementary.fetchEvidence(anyList(), anyMap())).thenReturn(Map.of("status", "AVAILABLE",
+            "source", "KIWOOM_REST_MOCK", "fixtureEvidence", "MOCK_HALLUCINATED_PER_999"));
+        // Even a wrongly labelled provider response must remain unused in a MOCK session.
+        when(supplementary.lookupAll(anyList())).thenReturn(Map.of(CODE,
+            quote(CODE, NAMES.get(CODE), Instant.now(), "KIWOOM_REST")));
+
+        var result = run(List.of(CODE), List.of(CODE), Map.of(),
+            metadata(List.of(CODE), "UNAVAILABLE", "AVAILABLE", "UNAVAILABLE"));
+
+        verify(supplementary, never()).fetchEvidence(anyList(), anyMap());
+        verify(supplementary, never()).lookupAll(anyList());
+        assertThat(result.stockPicks()).isEmpty();
+        assertThat(prompt.get()).contains("KIS_PRIMARY_VALUATION_FACT_KEEP").doesNotContain("MOCK_HALLUCINATED_PER_999");
+        assertThat(result.finalContent()).doesNotContain(CODE);
+        assertThat(result.round1()).allSatisfy(agent -> assertThat(agent.content()).doesNotContain(CODE));
     }
 }

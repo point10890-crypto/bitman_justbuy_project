@@ -138,7 +138,7 @@ public class PrecomputeScheduler {
         }
         log.info("[Scheduler] 🚀 서버 시작 — 캐시 확인 중...");
         int success = 0, total = 0;
-        Set<String> seenCodes = new HashSet<>();  // ★ cross-mode dedup (cached 도 포함)
+        Set<String> seenCodes = new HashSet<>();  // Notification dedup includes cached publications.
         Map<String, String> scheduledModes = formulaCatalog.scheduledQueries();
         for (var entry : scheduledModes.entrySet()) {
             String mode = entry.getKey();
@@ -150,9 +150,8 @@ public class PrecomputeScheduler {
                     var run = conditionRunService.create(ConditionRunTrigger.SCHEDULER_STARTUP, mode, query);
                     try {
                         log.info("[Scheduler] ✅ {} — 캐시 유효, 건너뜀", mode);
-                        // ★ v2.8.7 (2026-04-29): 캐시된 결과도 dedup + name disambiguation 적용
-                        //   — 옛 캐시(중복 포함) 그대로 재발송 방지
-                        cached = postProcessPicks(mode, cached, seenCodes);
+                        // Retain each mode's verified cache; startup cache messages stay suppressed.
+                        cached = postProcessPicks(mode, cached);
                         AnalysisOutcome.requireSuccessfulAgents(cached);
                         if (AnalysisOutcome.classify(cached) != AnalysisOutcome.EMPTY) {
                             analysisService.saveAnalysis(mode, cached);
@@ -234,7 +233,7 @@ public class PrecomputeScheduler {
         log.info("[Scheduler] ⏰ {}:50 {} 컨셉 모드 4종 분석 시작", hour, round);
 
         int success = 0;
-        Set<String> seenCodes = new HashSet<>();  // ★ cross-mode dedup
+        Set<String> seenCodes = new HashSet<>();  // Notification dedup only.
         Map<String, String> scheduledModes = formulaCatalog.scheduledQueries();
         for (var entry : scheduledModes.entrySet()) {
             try {
@@ -262,12 +261,12 @@ public class PrecomputeScheduler {
     }
 
     /**
-     * picks 후처리 — cross-mode dedup + 같은 모드 내 동일 이름 disambiguation.
+     * Publication post-processing: verified identities, spot stocks and unique names within a mode.
      *
      * @return 후처리된 새 AnalysisResponse (picks 변경 없으면 원본 그대로 반환).
      *         picks 변경된 경우 캐시 파일도 다시 저장.
      */
-    private AnalysisResponse postProcessPicks(String mode, AnalysisResponse result, Set<String> seenCodes) {
+    private AnalysisResponse postProcessPicks(String mode, AnalysisResponse result) {
         List<StockPick> picks = result.stockPicks();
         if (picks == null || picks.isEmpty()) return result;
 
@@ -367,19 +366,8 @@ public class PrecomputeScheduler {
             log.info("[Scheduler] {} 같은 이름 dedup: {} 종목 제거", mode, sameNameDropped);
         }
 
-        // 1) Cross-mode dedup (code 매치)
-        //    ★ v2.8.9 (2026-04-29): dedup 결과 picks=0 이면 dedup 스킵 (앱에서 빈 모드 방지)
+        // A stock can satisfy several strategies; prior modes never erase a publication.
         List<StockPick> filtered = intraDedup;
-        if (seenCodes != null && !seenCodes.isEmpty()) {
-            List<StockPick> candidate = intraDedup.stream()
-                .filter(p -> p.code() == null || !seenCodes.contains(p.code()))
-                .toList();
-            int removed = intraDedup.size() - candidate.size();
-            if (removed > 0) {
-                filtered = candidate;
-                log.info("[Scheduler] {} cross-mode dedup: {} 종목 제거 (이전 모드 중복)", mode, removed);
-            }
-        }
 
         // ★ v2.8.12 (2026-04-29): changed 검사 — 개수 OR 내용(이름/코드) 중 하나라도 다르면 재저장
         //   기존: filtered.size() != picks.size() 만 체크 → 이름만 바뀐 경우 재저장 안 됨 → 캐시에 옛 이름 남음
@@ -426,9 +414,9 @@ public class PrecomputeScheduler {
     }
 
     /**
-     * 모드 분석 실행 + cross-mode dedup + name disambiguation.
+     * Publish a validated mode result and deduplicate its separate notification.
      *
-     * @param seenCodes — 이전 모드들에서 이미 추천된 종목 코드 집합. null 이면 dedup 안함.
+     * @param seenCodes — 이전 모드들에서 게시된 종목 코드 집합. null 이면 알림 dedup 안함.
      *                   분석 후 이 set 에 본 모드의 코드들이 추가됨 (다음 모드용).
      */
     private void execute(String mode, String query, Set<String> seenCodes) {
@@ -449,10 +437,7 @@ public class PrecomputeScheduler {
             AnalysisResponse result = analysisService.runAnalysisForPublication(query, mode);
             AnalysisOutcome.requireSuccessfulAgents(result);
 
-            // ★ v2.8.7 (2026-04-29): Cross-mode dedup + name disambiguation
-            //   1) seenCodes 에 있는 코드는 이번 모드 picks 에서 제거 (이전 모드 중복 방지)
-            //   2) 같은 모드 내 동일 이름 + 다른 코드는 "이름(code)" 로 disambiguate
-            result = postProcessPicks(mode, result, seenCodes);
+            result = postProcessPicks(mode, result);
             AnalysisOutcome outcome = AnalysisOutcome.classify(result);
             if (outcome == AnalysisOutcome.EMPTY) {
                 log.info("[Scheduler] {} outcome=EMPTY agents={}/{} picks=0 cachePreserved=true", mode,
@@ -468,6 +453,10 @@ public class PrecomputeScheduler {
             conditionRunService.recordEvent(run.runId(), ConditionRunEventType.SAVED,
                 "final publication saved", Map.of("pickCount", result.stockPicks().size(), "outcome", outcome.name()));
             analysisService.recordPublishedAnalysis(result);
+            // Build the delivery view before registering this mode in the shared set.
+            List<StockPick> notificationPicks = result.stockPicks().stream()
+                .filter(pick -> seenCodes == null || !seenCodes.contains(pick.code())).toList();
+            AnalysisResponse notificationResult = AnalysisPublicationView.finalizePicks(result, notificationPicks);
             updateSeen(seenCodes, result.stockPicks());
             if (result.updatedAt() != null) lastRunTimes.put(mode, result.updatedAt());
 
@@ -498,8 +487,14 @@ public class PrecomputeScheduler {
             //    v2.8.5 (2026-04-27): 08:50 1차 cron 결과 발송 허용 위해 08시 포함
             int kstHour = nowKst().getHour();
             boolean isMarketHours = isTradingDay() && kstHour >= 8 && kstHour < 16;
-            if (trigger != ConditionRunTrigger.ADMIN_REFRESH && telegramNotifier != null && picks > 0 && agentsSucceeded > 0 && isMarketHours) {
-                recordDelivery(run.runId(), telegramNotifier.sendAnalysisResult(mode, result), picks);
+            int notificationCount = notificationPicks.size();
+            if (trigger != ConditionRunTrigger.ADMIN_REFRESH && notificationCount == 0) {
+                log.info("[Scheduler] {} duplicate notification skipped; {} published picks retained", mode, picks);
+                conditionRunService.recordEvent(run.runId(), ConditionRunEventType.NOTIFICATION_SKIPPED,
+                    "duplicate notification skipped; mode publication retained", Map.of(
+                        "reason", "CROSS_MODE_DUPLICATE", "pickCount", 0, "publishedCount", picks));
+            } else if (trigger != ConditionRunTrigger.ADMIN_REFRESH && telegramNotifier != null && notificationCount > 0 && agentsSucceeded > 0 && isMarketHours) {
+                recordDelivery(run.runId(), telegramNotifier.sendAnalysisResult(mode, notificationResult), notificationCount);
             } else {
                 log.info("[Scheduler] {} 텔레그램 Skip — picks={}, agents={}/{}, marketHours={}({}시), trigger={}",
                     mode, picks, agentsSucceeded, agentsUsed, isMarketHours, kstHour, trigger);

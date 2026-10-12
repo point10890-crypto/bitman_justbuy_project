@@ -64,6 +64,7 @@ bitman:
     extended-evidence:
       enabled: ${BITMAN_KIS_EXTENDED_EVIDENCE_ENABLED:false}
   kiwoom:
+    environment: ${KIWOOM_ENVIRONMENT:REAL}
     app-key: ${KIWOOM_APP_KEY:}
     app-secret: ${KIWOOM_APP_SECRET:}
     enabled: ${BITMAN_KIWOOM_SUPPLEMENT_ENABLED:false}

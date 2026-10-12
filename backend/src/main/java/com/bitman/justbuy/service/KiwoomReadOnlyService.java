@@ -26,13 +26,27 @@ import java.util.concurrent.locks.ReentrantLock;
 /** Independently implemented, bounded Kiwoom queries supplement verified primary sources. */
 @Service
 public class KiwoomReadOnlyService {
-    private static final String SOURCE="KIWOOM_REST";
     private static final ZoneId KST=ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter DATE=DateTimeFormatter.BASIC_ISO_DATE;
     private static final DateTimeFormatter STAMP=DateTimeFormatter.ofPattern("uuuuMMddHHmmss").withResolverStyle(ResolverStyle.STRICT);
     private static final long BUDGET=Duration.ofSeconds(12).toNanos();
     private static final long HTTP_BOUND=Duration.ofSeconds(3).toNanos();
     private static final long SPACING=Duration.ofMillis(210).toNanos();
+    private enum Environment {
+        REAL("https://api.kiwoom.com","KIWOOM_REST",SPACING,5),
+        MOCK("https://mockapi.kiwoom.com","KIWOOM_REST_MOCK",Duration.ofMillis(1010).toNanos(),1);
+        final String baseUrl,source;
+        final long spacingNanos;
+        final int requestsPerSecond;
+        Environment(String baseUrl,String source,long spacingNanos,int requestsPerSecond) {
+            this.baseUrl=baseUrl;this.source=source;this.spacingNanos=spacingNanos;this.requestsPerSecond=requestsPerSecond;
+        }
+        static Environment parse(String value) {
+            if(value==null) return null;
+            try {return valueOf(value.trim().toUpperCase(Locale.ROOT));}
+            catch(IllegalArgumentException ignored) {return null;}
+        }
+    }
     private static final List<String> PARTS=List.of("quote","valuation","technical","investorDaily");
     private static final Map<String,String> ENDPOINTS=Map.of("ka10001","/api/dostk/stkinfo",
         "ka10095","/api/dostk/stkinfo","ka10081","/api/dostk/chart","ka10059","/api/dostk/stkinfo");
@@ -47,6 +61,7 @@ public class KiwoomReadOnlyService {
     private final Clock clock;
     private final boolean requested,licensed;
     private final String appKey,appSecret;
+    private final Environment environment;
     private final ReentrantLock requestLock=new ReentrantLock();
     private final Map<String,Cached> cache=new ConcurrentHashMap<>();
     private String token;
@@ -54,25 +69,40 @@ public class KiwoomReadOnlyService {
     private long nextRequestNanos;
     private volatile String lastStatus="NOT_REQUESTED";
 
+    public KiwoomReadOnlyService(ObjectMapper mapper,boolean enabled,boolean licensed,String appKey,String appSecret) {
+        this(mapper,enabled,licensed,appKey,appSecret,"REAL");
+    }
     @Autowired public KiwoomReadOnlyService(ObjectMapper mapper,
             @Value("${bitman.kiwoom.enabled:false}") boolean enabled,
             @Value("${bitman.kiwoom.licensed:false}") boolean licensed,
             @Value("${bitman.kiwoom.app-key:}") String appKey,
-            @Value("${bitman.kiwoom.app-secret:}") String appSecret) {
-        this(new HttpTransport(mapper),mapper,Clock.systemUTC(),enabled,licensed,appKey,appSecret);
+            @Value("${bitman.kiwoom.app-secret:}") String appSecret,
+            @Value("${bitman.kiwoom.environment:REAL}") String environment) {
+        this(new HttpTransport(mapper,Environment.parse(environment)),mapper,Clock.systemUTC(),enabled,licensed,appKey,appSecret,environment);
     }
     KiwoomReadOnlyService(Transport transport,ObjectMapper mapper,Clock clock,boolean enabled,boolean licensed,String appKey,String appSecret) {
+        this(transport,mapper,clock,enabled,licensed,appKey,appSecret,"REAL");
+    }
+    KiwoomReadOnlyService(Transport transport,ObjectMapper mapper,Clock clock,boolean enabled,boolean licensed,String appKey,String appSecret,String environment) {
         this.transport=transport;this.clock=clock;this.requested=enabled;this.licensed=licensed;
         this.appKey=appKey==null?"":appKey.trim();this.appSecret=appSecret==null?"":appSecret.trim();
+        this.environment=Environment.parse(environment);
     }
     public boolean isEnabled() { return "READY".equals(gate()); }
     private String gate() {
-        return !requested?"DISABLED":!licensed?"RIGHTS_UNCONFIRMED":!credential(appKey)||!credential(appSecret)?"NOT_CONFIGURED":"READY";
+        return environment==null?"INVALID_ENVIRONMENT":!requested?"DISABLED":!licensed?"RIGHTS_UNCONFIRMED":!credential(appKey)||!credential(appSecret)?"NOT_CONFIGURED":"READY";
+    }
+    private String source() {return environment==null?"KIWOOM_REST":environment.source;}
+    private String environmentName() {return environment==null?"INVALID":environment.name();}
+    private String scope() {
+        return environment==Environment.MOCK?"모의 환경 검증용 자료이며 확정 실전 시세·재무·수급 근거로 사용하지 않음":
+            "KIS 등 1차 자료의 미확인 항목만, 최대 3종목·첫 응답 페이지. 날짜 미상 재무와 불완전 기간을 명시함";
     }
     public Map<String,Object> readiness() {
-        return Map.of("status",gate(),"requested",requested,"licensed",licensed,"configured",credential(appKey)&&credential(appSecret),
-            "enabled",isEnabled(),"source",SOURCE,"allowedApiIds",List.of("ka10001","ka10095","ka10081","ka10059"),
-            "candidateLimit",3,"maxRequestsPerSecond",5,"runtimeStatus",lastStatus);
+        return Map.ofEntries(Map.entry("status",gate()),Map.entry("requested",requested),Map.entry("licensed",licensed),
+            Map.entry("configured",credential(appKey)&&credential(appSecret)),Map.entry("enabled",isEnabled()),Map.entry("source",source()),
+            Map.entry("environment",environmentName()),Map.entry("scope",scope()),Map.entry("allowedApiIds",List.of("ka10001","ka10095","ka10081","ka10059")),
+            Map.entry("candidateLimit",3),Map.entry("maxRequestsPerSecond",environment==null?0:environment.requestsPerSecond),Map.entry("runtimeStatus",lastStatus));
     }
     public KeywordSearchDataService.Quote lookup(String code) {
         if(!isEnabled()||code==null||!code.matches("[0-9]{6}")) return null;
@@ -105,7 +135,7 @@ public class KiwoomReadOnlyService {
         return fetchEvidence(codes,missing);
     }
     public Map<String,Object> fetchEvidence(List<String> requestedCodes,Map<String,List<String>> missingPartsByCode) {
-        Map<String,Object> batch=new LinkedHashMap<>();batch.put("source",SOURCE);batch.put("fetchedAt",clock.instant().toString());
+        Map<String,Object> batch=new LinkedHashMap<>();batch.put("source",source());batch.put("environment",environmentName());batch.put("scope",scope());batch.put("fetchedAt",clock.instant().toString());
         batch.put("candidateLimit",3);batch.put("budgetSeconds",12);batch.put("scoringEnabled",false);
         Map<String,Object> candidates=new LinkedHashMap<>();batch.put("candidates",candidates);
         if(!isEnabled()) {batch.put("status",gate());return batch;}
@@ -140,7 +170,6 @@ public class KiwoomReadOnlyService {
         long usable=candidates.values().stream().flatMap(value->((Map<?,?>)value).values().stream())
             .filter(value->value instanceof Map<?,?> facts&&Set.of("AVAILABLE","PARTIAL_COVERAGE").contains(facts.get("status"))).count();
         batch.put("availableFacts",usable);batch.put("status",usable>0?"PARTIAL":"UNAVAILABLE");
-        batch.put("scope","KIS 등 1차 자료의 미확인 항목만, 최대 3종목·첫 응답 페이지. 날짜 미상 재무와 불완전 기간을 명시함");
         return batch;
     }
     private Read read(String api,Map<String,String> params,long deadline) {
@@ -193,16 +222,16 @@ public class KiwoomReadOnlyService {
         if(deadline-System.nanoTime()<wait+HTTP_BOUND||Thread.currentThread().isInterrupted()) return false;
         if(wait>0) TimeUnit.NANOSECONDS.sleep(wait);
         if(deadline-System.nanoTime()<HTTP_BOUND) return false;
-        nextRequestNanos=System.nanoTime()+SPACING;return true;
+        nextRequestNanos=System.nanoTime()+environment.spacingNanos;return true;
     }
     private Read failed(String status) {return new Read(status,clock.instant(),MissingNode.getInstance(),false);}
     private static List<String> codes(List<String> codes) {
         return codes==null?List.of():codes.stream().filter(Objects::nonNull).filter(c->c.matches("[0-9]{6}")).distinct().limit(3).toList();
     }
     private static boolean credential(String value) {return !value.isBlank()&&value.length()<=512&&value.chars().noneMatch(Character::isISOControl);}
-    private static Map<String,Object> status(String status) {return Map.of("status",status,"source",SOURCE);}
+    private Map<String,Object> status(String status) {return Map.of("status",status,"source",source(),"environment",environmentName());}
     private Map<String,Object> base(Read response,String code,String api) {
-        Map<String,Object> facts=new LinkedHashMap<>();facts.put("status",response.status());facts.put("source",SOURCE);
+        Map<String,Object> facts=new LinkedHashMap<>();facts.put("status",response.status());facts.put("source",source());facts.put("environment",environmentName());
         facts.put("apiId",api);facts.put("requestedStockCode",code);facts.put("fetchedAt",response.fetchedAt().toString());
         facts.put("firstResponseOnly",true);facts.put("providerHasMore",response.hasMore());return facts;
     }
@@ -235,11 +264,11 @@ public class KiwoomReadOnlyService {
             } catch(DateTimeException ignored) {return null;}
         }
         return new KeywordSearchDataService.Quote(requestedCode,name,"UNKNOWN",price,percent,volume,
-            money==null?null:money.multiply(new BigDecimal("1000000")),SOURCE,fetchedAt,observedAt);
+            money==null?null:money.multiply(new BigDecimal("1000000")),source(),fetchedAt,observedAt);
     }
     private Map<String,Object> quoteEvidence(KeywordSearchDataService.Quote quote,String api) {
         if(quote==null) return status("UNAVAILABLE");
-        Map<String,Object> out=new LinkedHashMap<>();out.put("status","AVAILABLE");out.put("source",SOURCE);out.put("apiId",api);
+        Map<String,Object> out=new LinkedHashMap<>();out.put("status","AVAILABLE");out.put("source",source());out.put("environment",environmentName());out.put("apiId",api);
         out.put("stockCode",quote.code());out.put("stockName",quote.name());out.put("market",quote.market());out.put("currentPrice",quote.price());
         out.put("changePct",quote.changePct());out.put("volume",quote.volume());out.put("priceUnit","KRW");out.put("fetchedAt",quote.fetchedAt().toString());
         if(quote.tradingValueKrw()!=null) {out.put("tradingValueKrw",quote.tradingValueKrw());out.put("tradingValueUnit","KRW");}
@@ -341,11 +370,18 @@ public class KiwoomReadOnlyService {
     private static final class HttpTransport implements Transport {
         private final HttpClient client=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).followRedirects(HttpClient.Redirect.NEVER).build();
         private final ObjectMapper mapper;
-        HttpTransport(ObjectMapper mapper) {this.mapper=mapper;}
+        private final Environment environment;
+        HttpTransport(ObjectMapper mapper,Environment environment) {this.mapper=mapper;this.environment=environment;}
+        private URI requestUri(String path,String api) {
+            if(environment==null) throw new IllegalStateException("Invalid environment");
+            if(!("au10001".equals(api)&&"/oauth2/token".equals(path))&&!Objects.equals(path,ENDPOINTS.get(api))) throw new IllegalArgumentException("Read endpoint not allowed");
+            if(path==null) throw new IllegalArgumentException("Read endpoint not allowed");
+            return URI.create(environment.baseUrl+path);
+        }
         @Override public Response send(String path,String api,String token,Map<String,String> params,long deadline) throws Exception {
-            if(!("au10001".equals(api)&&"/oauth2/token".equals(path))&&!path.equals(ENDPOINTS.get(api))) throw new IllegalArgumentException("Read endpoint not allowed");
+            URI target=requestUri(path,api);
             long left=deadline-System.nanoTime();if(left<=0) throw new TimeoutException();
-            HttpRequest.Builder request=HttpRequest.newBuilder(URI.create("https://api.kiwoom.com"+path))
+            HttpRequest.Builder request=HttpRequest.newBuilder(target)
                 .timeout(Duration.ofNanos(Math.min(HTTP_BOUND,left))).header("Content-Type","application/json;charset=UTF-8")
                 .header("api-id",api).POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(params),StandardCharsets.UTF_8));
             if(!token.isBlank()) request.header("Authorization","Bearer "+token);

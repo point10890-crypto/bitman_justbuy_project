@@ -33,11 +33,87 @@ import static org.mockito.Mockito.never;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class PrecomputePublicationIntegrityTest {
     @TempDir Path dataDir;
+
+    @Test
+    void cachedBreakoutOverlapDoesNotEraseFreshSwingPublicationOrChangeItsOutcome() {
+        var service = mock(AnalysisService.class);
+        var breakout = verifiedResponse("BREAKOUT", "005930", "000660", "035420");
+        var swing = verifiedResponse("REVERSAL_EDGE", "000660", "035420");
+        when(service.getPrecomputed(anyString())).thenAnswer(call -> switch ((String) call.getArgument(0)) {
+            case "BREAKOUT" -> breakout;
+            case "FLOW_LEADER" -> verifiedResponse("FLOW_LEADER", "068270");
+            case "CATALYST_BURST" -> verifiedResponse("CATALYST_BURST", "051910");
+            default -> null;
+        });
+        when(service.runAnalysisForPublication(anyString(), eq("REVERSAL_EDGE"))).thenReturn(swing);
+        var notifier = mock(TelegramNotifier.class);
+        var runs = new ConditionRunService();
+        var scheduler = new PrecomputeScheduler(service, new ConditionSearchFormulaCatalog(), notifier, null, null, runs,
+            Clock.fixed(Instant.parse("2026-10-12T01:51:00Z"), ZoneOffset.UTC));
+
+        ReflectionTestUtils.invokeMethod(scheduler, "runStartupPrecompute");
+
+        var saved = ArgumentCaptor.forClass(AnalysisResponse.class);
+        verify(service).saveAnalysis(eq("REVERSAL_EDGE"), saved.capture());
+        assertThat(saved.getValue().stockPicks()).extracting(StockPick::code).containsExactly("000660", "035420");
+        assertThat(saved.getValue().metadata().publicationStatus()).isEqualTo("COMPLETE");
+        verify(service).recordPublishedAnalysis(saved.getValue());
+        var run = runs.recent(10).stream().filter(item -> "REVERSAL_EDGE".equals(item.mode())).findFirst().orElseThrow();
+        assertThat(run.status()).isEqualTo(ConditionRunStatus.COMPLETE);
+        assertThat(run.pickCount()).isEqualTo(2);
+        assertThat(scheduler.getLastRunTimes()).containsEntry("REVERSAL_EDGE", "2026-10-12T01:51:00Z");
+        assertThat(runs.events(run.runId())).anySatisfy(event -> {
+            assertThat(event.type()).isEqualTo(ConditionRunEventType.NOTIFICATION_SKIPPED);
+            assertThat(event.metrics()).containsEntry("reason", "CROSS_MODE_DUPLICATE")
+                .containsEntry("pickCount", 0).containsEntry("publishedCount", 2);
+        });
+        verify(notifier, never()).sendAnalysisResult(anyString(), any());
+    }
+
+    @Test
+    void overlappingScheduledModesBothPublishButOnlyTheFirstNotificationIsSent() {
+        var service = mock(AnalysisService.class);
+        when(service.runAnalysisForPublication(anyString(), anyString())).thenAnswer(call -> {
+            String mode = call.getArgument(1);
+            return "BREAKOUT".equals(mode) || "REVERSAL_EDGE".equals(mode)
+                ? verifiedResponse(mode, "005930", "000660") : verifiedResponse(mode);
+        });
+        var notifier = mock(TelegramNotifier.class);
+        when(notifier.sendAnalysisResult(anyString(), any()))
+            .thenReturn(new TelegramNotifier.DeliveryReport(TelegramNotifier.DeliveryStatus.SENT, 1, 0));
+        var runs = new ConditionRunService();
+        var scheduler = new PrecomputeScheduler(service, new ConditionSearchFormulaCatalog(), notifier, null, null, runs,
+            Clock.fixed(Instant.parse("2026-10-12T01:51:00Z"), ZoneOffset.UTC));
+
+        scheduler.scheduledPrecompute();
+
+        for (String mode : List.of("BREAKOUT", "REVERSAL_EDGE")) {
+            var saved = ArgumentCaptor.forClass(AnalysisResponse.class);
+            verify(service).saveAnalysis(eq(mode), saved.capture());
+            assertThat(saved.getValue().stockPicks()).extracting(StockPick::code).containsExactly("005930", "000660");
+            assertThat(saved.getValue().metadata().publicationStatus()).isEqualTo("COMPLETE");
+            var run = runs.recent(10).stream().filter(item -> mode.equals(item.mode())).findFirst().orElseThrow();
+            assertThat(run.status()).isEqualTo(ConditionRunStatus.COMPLETE);
+            assertThat(run.pickCount()).isEqualTo(2);
+        }
+        verify(service, times(2)).recordPublishedAnalysis(any());
+        verify(notifier, times(1)).sendAnalysisResult(eq("BREAKOUT"), any());
+        verify(notifier, times(1)).sendAnalysisResult(anyString(), any());
+    }
+
+    private static AnalysisResponse verifiedResponse(String mode, String... codes) {
+        return new AnalysisResponse(mode, "fixture query", List.of(), null, "fixture report", java.util.Arrays.stream(codes)
+            .map(code -> new StockPick("fixture " + code, code, "70,000", null, null, "watch", "fixture", 0, "",
+                "KIS fixture rank", "KIS fixture quote", "2026-10-12T01:51:00Z")).toList(), null,
+            "2026-10-12T01:51:00Z", true, new AnalysisResponse.Metadata(100, 2, 2));
+    }
 
     @Test
     void manualAdminRefreshNeverSendsOperationalOrChannelMessages() {

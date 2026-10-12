@@ -93,6 +93,25 @@ class AdminSourceReadinessTest {
     }
 
     @Test
+    void mockKiwoomEnvironmentIsVisibleWithoutEnablingSourcesOrExposingConfiguredKeys() throws Exception {
+        var body = status(new MockEnvironment()
+            .withProperty("bitman.kiwoom.environment", "MOCK")
+            .withProperty("bitman.kiwoom.app-key", "fixture-kiwoom-mock-key-never-return")
+            .withProperty("bitman.kiwoom.app-secret", "fixture-kiwoom-mock-secret-never-return")
+            .withProperty("bitman.kiwoom.enabled", "false")
+            .withProperty("bitman.kiwoom.licensed", "false"));
+        var kiwoom = sources(body).stream().filter(source -> "KIWOOM".equals(source.get("id"))).findFirst().orElseThrow();
+        assertThat(kiwoom).containsEntry("name", "키움 보조 근거 (KIS 우선·모의)")
+            .containsEntry("enabled", false).containsEntry("credentialsConfigured", true).containsEntry("state", "DISABLED");
+        assertThat(kiwoom.get("message").toString()).startsWith("모의 서버 연결 점검용 설정입니다.")
+            .contains("실제 연결", "미검증");
+        assertThat(sources(body)).allSatisfy(source -> assertThat(source.get("enabled")).isEqualTo(false));
+        assertThat(new ObjectMapper().writeValueAsString(body)).doesNotContain("fixture-", "api-key", "app-secret");
+        verify(kis).isAvailable();
+        verifyNoMoreInteractions(kis);
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void mixedOutcomesKeepEmptyAndPartialSeparateFromFailuresAndLabelCompletionRate() {
         var logs = (Deque<Map<String, Object>>) ReflectionTestUtils.getField(MonitorController.class, "analysisLogs");

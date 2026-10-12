@@ -56,6 +56,16 @@ public class MultiAgentOrchestrator {
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     public void configureKiwoomSupplement(com.bitman.justbuy.service.KiwoomReadOnlyService supplement) { this.kiwoomSupplement = supplement; }
 
+    private boolean isProductionSupplement() {
+        try {
+            if (kiwoomSupplement == null || !kiwoomSupplement.isEnabled()) return false;
+            var readiness = kiwoomSupplement.readiness();
+            return readiness != null && "REAL".equals(readiness.get("environment"));
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void configureSourceEvidence(com.bitman.justbuy.service.KisExtendedEvidenceService kisEvidence) {
         this.kisExtendedEvidenceService = kisEvidence;
@@ -388,7 +398,7 @@ public class MultiAgentOrchestrator {
             } catch(Exception ignored) { sourceExpansionMetadata=Map.of("status","UNAVAILABLE"); }
             checkBudget(deadline);
         }
-        if (kiwoomSupplement != null && kiwoomSupplement.isEnabled()) {
+        if (isProductionSupplement()) {
             var missing = com.bitman.justbuy.service.KiwoomSupplementPolicy.missingParts(boundedEvidenceCodes, sourceExpansionMetadata);
             if (!missing.isEmpty()) {
                 checkBudget(deadline);
@@ -570,7 +580,7 @@ public class MultiAgentOrchestrator {
         quotes.entrySet().removeIf(entry -> parseKoreanPrice(entry.getValue()) <= 0);
         Map<String,String> quoteSources = new HashMap<>();
         quotes.keySet().forEach(code -> quoteSources.put(code, "NAVER_FINANCE"));
-        if (kiwoomSupplement != null && kiwoomSupplement.isEnabled()) {
+        if (isProductionSupplement()) {
             List<String> missing = draftPicks.keySet().stream().filter(code -> !quotes.containsKey(code)).limit(3).toList();
             if (!missing.isEmpty()) {
                 checkBudget(deadline);

@@ -83,6 +83,69 @@ class KiwoomReadOnlyServiceTest {
         return fixture.service(true,true).fetchEvidence(List.of("005930"), Map.of("005930",List.of(name)));
     }
 
+    private java.net.URI transportUri(KiwoomReadOnlyService service,String path,String api) throws Exception {
+        var field=KiwoomReadOnlyService.class.getDeclaredField("transport");field.setAccessible(true);
+        Object transport=field.get(service);
+        var target=transport.getClass().getDeclaredMethod("requestUri",String.class,String.class);target.setAccessible(true);
+        return (java.net.URI)target.invoke(transport,path,api);
+    }
+    @Test void defaultRealEnvironmentKeepsProductionHostAndMetadata() throws Exception {
+        Fixture fixture=new Fixture(); var service=fixture.service(true,true);
+        assertThat(service.readiness()).containsEntry("environment","REAL").containsEntry("source","KIWOOM_REST");
+        var httpService=new KiwoomReadOnlyService(mapper,true,true,"fixture-key","fixture-secret");
+        assertThat(transportUri(httpService,"/oauth2/token","au10001").toString()).isEqualTo("https://api.kiwoom.com/oauth2/token");
+        assertThat(transportUri(httpService,"/api/dostk/chart","ka10081").getHost()).isEqualTo("api.kiwoom.com");
+        assertThat(fixture.calls).isEmpty();
+    }
+    @Test void mockEnvironmentSelectsOnlyOfficialMockHostForAuthenticationAndMarketRequests() throws Exception {
+        var service=new KiwoomReadOnlyService(mapper,true,true,"fixture-key","fixture-secret","MOCK");
+        assertThat(transportUri(service,"/oauth2/token","au10001").toString()).isEqualTo("https://mockapi.kiwoom.com/oauth2/token");
+        assertThat(transportUri(service,"/api/dostk/stkinfo","ka10095").toString()).isEqualTo("https://mockapi.kiwoom.com/api/dostk/stkinfo");
+    }
+    @Test void unknownEnvironmentAndUrlsDisableAllRequestsRatherThanSelectingAnyHost() {
+        for(String environment:List.of("PAPER","https://api.kiwoom.com","https://mockapi.kiwoom.com","https://attacker.invalid","")) {
+            Fixture fixture=new Fixture();
+            var service=new KiwoomReadOnlyService(fixture,mapper,fixture.clock,true,true,"fixture-key","fixture-secret",environment);
+            assertThat(service.isEnabled()).isFalse();
+            assertThat(service.readiness()).containsEntry("status","INVALID_ENVIRONMENT").containsEntry("environment","INVALID");
+            assertThat(service.lookup("005930")).isNull();assertThat(service.lookupAll(List.of("005930"))).isEmpty();
+            assertThat(service.fetchEvidence(List.of("005930")).get("status")).isEqualTo("INVALID_ENVIRONMENT");
+            assertThat(fixture.calls).isEmpty();
+        }
+    }
+    @Test void mockQuotesAndEveryEvidenceGroupAreMarkedAsSimulationAndCannotClaimProductionSource() {
+        Fixture fixture=new Fixture();fixture.reply("ka10095",quoteBody("005930","20261012","095959"));
+        fixture.reply("ka10001",basic("005930"));fixture.reply("ka10081",chartBody("005930",60));fixture.reply("ka10059",flows(5));
+        var service=new KiwoomReadOnlyService(fixture,mapper,fixture.clock,true,true,"fixture-key","fixture-secret","MOCK");
+        assertThat(service.lookupAll(List.of("005930")).get("005930").source()).isEqualTo("KIWOOM_REST_MOCK");
+        assertThat(service.readiness()).containsEntry("environment","MOCK").containsEntry("source","KIWOOM_REST_MOCK");
+        assertThat(service.readiness().get("scope").toString()).contains("모의","실전");
+        Map<String,Object> result=service.fetchEvidence(List.of("005930"));
+        assertThat(result).containsEntry("environment","MOCK").containsEntry("source","KIWOOM_REST_MOCK");
+        assertThat(result.get("scope").toString()).contains("모의","실전");
+        for(String name:List.of("quote","valuation","technical","investorDaily"))
+            assertThat(part(result,name)).containsEntry("environment","MOCK").containsEntry("source","KIWOOM_REST_MOCK");
+    }
+    @Test void mockEnvironmentDoesNotBypassEnablementOrPermissionGates() {
+        Fixture fixture=new Fixture();
+        var disabled=new KiwoomReadOnlyService(fixture,mapper,fixture.clock,false,true,"fixture-key","fixture-secret","MOCK");
+        var unlicensed=new KiwoomReadOnlyService(fixture,mapper,fixture.clock,true,false,"fixture-key","fixture-secret","MOCK");
+        assertThat(disabled.fetchEvidence(List.of("005930")).get("status")).isEqualTo("DISABLED");
+        assertThat(unlicensed.fetchEvidence(List.of("005930")).get("status")).isEqualTo("RIGHTS_UNCONFIRMED");
+        assertThat(disabled.lookupAll(List.of("005930"))).isEmpty();assertThat(unlicensed.lookupAll(List.of("005930"))).isEmpty();
+        assertThat(fixture.calls).isEmpty();
+    }
+    @Test void mockRequestsRespectOnePerSecondWhileRealKeepsFivePerSecond() {
+        Fixture fixture=new Fixture();fixture.reply("ka10001",basic("005930"));fixture.reply("ka10081",chartBody("005930",60));
+        var service=new KiwoomReadOnlyService(fixture,mapper,fixture.clock,true,true,"fixture-key","fixture-secret","MOCK");
+        service.fetchEvidence(List.of("005930"),Map.of("005930",List.of("valuation","technical")));
+        assertThat(fixture.calls).hasSize(3);
+        for(int index=1;index<fixture.calls.size();index++)
+            assertThat(fixture.calls.get(index).nanos()-fixture.calls.get(index-1).nanos()).isGreaterThanOrEqualTo(Duration.ofMillis(995).toNanos());
+        assertThat(service.readiness()).containsEntry("maxRequestsPerSecond",1);
+        assertThat(fixture.service(true,true).readiness()).containsEntry("maxRequestsPerSecond",5);
+    }
+
     @Test void disabledAndUnlicensedAdaptersNeverAuthenticate() {
         Fixture fixture=new Fixture();
         assertThat(fixture.service(false,true).lookup("005930")).isNull();

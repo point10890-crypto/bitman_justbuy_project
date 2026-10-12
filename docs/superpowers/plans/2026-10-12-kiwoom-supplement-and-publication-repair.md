@@ -17,12 +17,14 @@ User selection: keep KIS as primary and use Kiwoom only for missing facts. The c
 - [x] Add four-TR closed Kiwoom query adapter, bounded transport, private token cache, global throttle and explicit timestamps/units/coverage.
 - [x] Request only missing primary evidence; use auxiliary quotes only when primary publication quote verification fails.
 - [x] Expose supplement readiness and source status without credentials. Keep KIS metadata independent and preserve API compatibility.
-- [x] Full backend 745 tests passed (95 suites, no failures/errors/skips); frontend 198 tests passed and TypeScript/Vite build passed. Commit/push follows verification.
-- [ ] Deploy MiniPC, verify JAR equality, local/public health and exact homepage.
-- [ ] Verify swing/leader from startup recovery or silent admin refresh, then record actual candidate/schema/quote/publication counts. Avoid repeating an active or already completed run. Do not force publish a result with insufficient source evidence.
+- [x] Full backend 756 tests passed (95 suites, no failures/errors/skips); frontend 198 tests passed and TypeScript/Vite build passed. The final commit includes scoped source/tests, matching Spring static assets and these verification notes.
+- [x] Deploy MiniPC, verify JAR equality, local/public health and exact homepage. Both Cloudflare Pages aliases serve the new bundle and SW r8; the admin shows the selected MOCK configuration.
+- [x] Verify swing/leader from startup recovery or silent admin refresh, then record actual candidate/schema/quote/publication counts. Final swing run published and saved 2 verified picks despite both overlapping the short-term cache; duplicate notification alone was skipped. The exact homepage displays swing 2 and leader 3. Recovery 4/4 includes one new AI mode and three cache hits.
 
 Activation requires actual permitted production use and the MiniPC's public outbound IP registered in Kiwoom. Issued keys alone do not prove those conditions. The adapter follows the official protocol independently; DART/ECOS and KIS remain in place.
 
-User-entered BitMan keys were installed in the same two MiniPC environment fields without changing other runtime settings. The real-server token request was rejected with detailed code 8030 (real/mock key mismatch); request no market data and keep the supplement disabled. The user must provide the appropriate real REST keys and confirm permitted usage.
+User-entered BitMan keys were installed in the same two MiniPC environment fields without changing other runtime settings. The real-server token request was rejected with detailed code 8030 (real/mock key mismatch). The user explicitly chose MOCK, so both environments now select the official mock host; a MiniPC mock token request succeeded (return_code=0, token received). No market data was requested. Retain disabled operation/rights flags and exclude MOCK evidence/quotes from the member-facing actual-data pipeline.
 
 Additional review repairs: shared startup/cron/admin execution lock, cached-quote session/180-second revalidation, completed-attempt metadata on homepage empty states, date-aware old snapshots, one-mode admin refresh, and excluding normal EMPTY from failed-mode retry. Independent realtime scanner rows do not inherit the last scheduled AI empty message.
+
+Live 10:51 evidence found a second publishing defect: verified swing picks (2) were erased by cross-mode dedup against the earlier short-term cache. Preserve verified publication independently per strategy and deduplicate only Telegram delivery copies. Same-mode/ETF/identity/price filters remain. Two startup/cron regressions reproduce the missing save before the change; verify no duplicate notification and independent mode tracking afterward.
