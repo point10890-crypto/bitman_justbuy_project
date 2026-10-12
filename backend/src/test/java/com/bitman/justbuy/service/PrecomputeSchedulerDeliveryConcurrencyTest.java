@@ -14,6 +14,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -93,6 +94,71 @@ class PrecomputeSchedulerDeliveryConcurrencyTest {
         assertThat(calls).hasValue(4);
         assertThat(scheduler.getLastRunTimes()).hasSize(4);
         verify(notifier, times(4)).sendAnalysisResult(anyString(), any());
+    }
+
+    @Test void adminRefreshIsRejectedBeforeAnyPaidWorkWhileStartupRecoveryRuns() throws Exception {
+        var service = mock(AnalysisService.class);
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var calls = new AtomicInteger();
+        when(service.runAnalysisForPublication(anyString(), anyString())).thenAnswer(call -> {
+            if (calls.incrementAndGet() == 1) {
+                entered.countDown();
+                if (!release.await(3, TimeUnit.SECONDS)) throw new IllegalStateException("fixture latch not released");
+            }
+            return response(call.getArgument(1));
+        });
+        var scheduler = new PrecomputeScheduler(service, new ConditionSearchFormulaCatalog(), null, null, null,
+            new ConditionRunService(), CLOCK);
+        Thread startup = Thread.ofVirtual().start(() -> ReflectionTestUtils.invokeMethod(scheduler, "runStartupPrecompute"));
+        try {
+            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> scheduler.refreshModes(List.of("REVERSAL_EDGE", "FLOW_LEADER")))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("실행 중");
+            assertThat(calls).hasValue(1);
+        } finally { release.countDown(); startup.join(3000); }
+        assertThat(calls).hasValue(4);
+    }
+
+    @Test void adminRefreshPreventsConcurrentStartupCronAndAnotherManualBatch() throws Exception {
+        var service = mock(AnalysisService.class);
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var calls = new AtomicInteger();
+        when(service.runAnalysisForPublication(anyString(), anyString())).thenAnswer(call -> {
+            if (calls.incrementAndGet() == 1) {
+                entered.countDown();
+                if (!release.await(3, TimeUnit.SECONDS)) throw new IllegalStateException("fixture latch not released");
+            }
+            return response(call.getArgument(1));
+        });
+        var scheduler = new PrecomputeScheduler(service, new ConditionSearchFormulaCatalog(), null, null, null,
+            new ConditionRunService(), CLOCK);
+        Thread admin = Thread.ofVirtual().start(() -> scheduler.refreshModes(List.of("REVERSAL_EDGE", "FLOW_LEADER")));
+        try {
+            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+            scheduler.scheduledPrecompute();
+            ReflectionTestUtils.invokeMethod(scheduler, "runStartupPrecompute");
+            assertThatThrownBy(() -> scheduler.refreshModes(List.of("CATALYST_BURST")))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("실행 중");
+            assertThat(calls).hasValue(1);
+        } finally { release.countDown(); admin.join(3000); }
+        assertThat(calls).hasValue(2);
+        assertThat(scheduler.getLastRunTimes()).containsOnlyKeys("REVERSAL_EDGE", "FLOW_LEADER");
+    }
+
+    @Test void aFailedManualBatchReleasesTheSharedGuardForTheNextSelectedRefresh() {
+        var service = mock(AnalysisService.class);
+        when(service.runAnalysisForPublication(anyString(), eq("REVERSAL_EDGE")))
+            .thenThrow(new IllegalStateException("provider timed out"));
+        when(service.runAnalysisForPublication(anyString(), eq("FLOW_LEADER")))
+            .thenReturn(response("FLOW_LEADER"));
+        var scheduler = new PrecomputeScheduler(service, new ConditionSearchFormulaCatalog(), null, null, null,
+            new ConditionRunService(), CLOCK);
+        assertThat(scheduler.refreshModes(List.of("REVERSAL_EDGE")))
+            .containsEntry("REVERSAL_EDGE", "error: provider timed out");
+        assertThat(scheduler.refreshModes(List.of("FLOW_LEADER"))).containsEntry("FLOW_LEADER", "success");
+        verify(service, times(2)).runAnalysisForPublication(anyString(), anyString());
     }
 
     private static AnalysisResponse response(String mode) {

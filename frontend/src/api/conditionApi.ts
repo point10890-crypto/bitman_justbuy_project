@@ -32,6 +32,16 @@ export interface ConditionSectionResponse {
   asOf: string
   sourceStatus: 'REALTIME_SCAN' | 'REALTIME_EMPTY' | 'REALTIME_WAITING' | 'PRECOMPUTED' | 'STALE_CACHE' | 'SERVICE_FALLBACK' | 'READY' | string
   signals: ConditionSignal[]
+  /** Latest completed AI check; independent of the retained candidates' asOf. */
+  latestAnalysis?: LatestConditionAnalysis | null
+}
+
+export interface LatestConditionAnalysis {
+  checkedAt: string
+  outcome: 'COMPLETE' | 'PARTIAL' | 'EMPTY' | 'FAILED'
+  agentsUsed: number
+  agentsSucceeded: number
+  publishedCount: number
 }
 
 export interface ConditionCaptureTime {

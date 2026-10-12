@@ -31,7 +31,7 @@ class AdminSourceReadinessTest {
         var body = status(new MockEnvironment());
 
         var sources = sources(body);
-        assertThat(sources).hasSize(3);
+        assertThat(sources).hasSize(4);
         assertThat(sources).allSatisfy(source -> {
             assertThat(source.get("enabled")).isEqualTo(false);
             assertThat(source.get("credentialsConfigured")).isEqualTo(false);
@@ -39,6 +39,8 @@ class AdminSourceReadinessTest {
         });
         assertThat(sources.get(0).get("message").toString()).contains("이용 권한");
         assertThat(sources.get(2).get("message").toString()).contains("인증키");
+        assertThat(sources.get(3)).containsEntry("id","KIWOOM").containsEntry("name","키움 보조 근거 (KIS 우선)");
+        assertThat(sources.get(3).get("message").toString()).contains("키", "공인 출발 IP", "정보이용 범위");
     }
 
     @Test
@@ -47,7 +49,9 @@ class AdminSourceReadinessTest {
             .withProperty("bitman.kis.app-key", "fixture-kis-key-never-return")
             .withProperty("bitman.kis.app-secret", "fixture-kis-secret-never-return")
             .withProperty("bitman.dart.api-key", "fixture-dart-key-never-return")
-            .withProperty("bitman.ecos.api-key", "fixture-ecos-key-never-return");
+            .withProperty("bitman.ecos.api-key", "fixture-ecos-key-never-return")
+            .withProperty("bitman.kiwoom.app-key", "fixture-kiwoom-key-never-return")
+            .withProperty("bitman.kiwoom.app-secret", "fixture-kiwoom-secret-never-return");
         var body = status(env);
 
         var sources = sources(body);
@@ -58,6 +62,7 @@ class AdminSourceReadinessTest {
         assertThat(sources.get(0).get("state")).isEqualTo("RIGHTS_CHECK_REQUIRED");
         assertThat(sources.get(1).get("state")).isEqualTo("CONFIGURED");
         assertThat(sources.get(2).get("state")).isEqualTo("CONFIGURED");
+        assertThat(sources.get(3).get("state")).isEqualTo("RIGHTS_CHECK_REQUIRED");
         assertThat(new ObjectMapper().writeValueAsString(body)).doesNotContain("fixture-", "api-key", "app-secret");
         verify(kis).isAvailable();
         verifyNoMoreInteractions(kis);
@@ -72,6 +77,19 @@ class AdminSourceReadinessTest {
             assertThat(source.get("credentialsConfigured")).isEqualTo(false);
             assertThat(source.get("state")).isEqualTo("CREDENTIALS_MISSING");
         });
+    }
+
+    @Test
+    void licensedKiwoomConfigurationIsReportedWithoutClaimingAValidatedConnectionOrReturningKeys() throws Exception {
+        var body=status(enabledEnvironment()
+            .withProperty("bitman.kiwoom.app-key","fixture-kiwoom-key-never-return")
+            .withProperty("bitman.kiwoom.app-secret","fixture-kiwoom-secret-never-return")
+            .withProperty("bitman.kiwoom.licensed","true"));
+        var kiwoom=sources(body).stream().filter(source->"KIWOOM".equals(source.get("id"))).findFirst().orElseThrow();
+        assertThat(kiwoom).containsEntry("enabled",true).containsEntry("credentialsConfigured",true).containsEntry("state","CONFIGURED");
+        assertThat(kiwoom.get("message").toString()).contains("실제 연결", "미검증", "공인 출발 IP", "정보이용 범위");
+        assertThat(new ObjectMapper().writeValueAsString(body)).doesNotContain("fixture-", "api-key", "app-secret");
+        verify(kis).isAvailable(); verifyNoMoreInteractions(kis);
     }
 
     @Test
@@ -109,7 +127,8 @@ class AdminSourceReadinessTest {
         return new MockEnvironment()
             .withProperty("bitman.kis.extended-evidence.enabled", "true")
             .withProperty("bitman.dart.event-evidence.enabled", "true")
-            .withProperty("bitman.ecos.enabled", "true");
+            .withProperty("bitman.ecos.enabled", "true")
+            .withProperty("bitman.kiwoom.enabled", "true");
     }
 
     private Map<String, Object> status(MockEnvironment environment) {

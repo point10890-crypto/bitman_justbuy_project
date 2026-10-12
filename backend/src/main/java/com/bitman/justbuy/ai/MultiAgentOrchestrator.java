@@ -49,8 +49,12 @@ public class MultiAgentOrchestrator {
     private final ObjectMapper objectMapper;
     private com.bitman.justbuy.service.KisExtendedEvidenceService kisExtendedEvidenceService;
     private com.bitman.justbuy.service.KisSourceExpansionService sourceExpansion;
+    private com.bitman.justbuy.service.KiwoomReadOnlyService kiwoomSupplement;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     public void configureSourceExpansion(com.bitman.justbuy.service.KisSourceExpansionService expansion) { this.sourceExpansion=expansion; }
+
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void configureKiwoomSupplement(com.bitman.justbuy.service.KiwoomReadOnlyService supplement) { this.kiwoomSupplement = supplement; }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void configureSourceEvidence(com.bitman.justbuy.service.KisExtendedEvidenceService kisEvidence) {
@@ -255,15 +259,15 @@ public class MultiAgentOrchestrator {
             + "공식 = 거래대금 + 외국인/기관 수급 + 섹터 강도 + 거래량 상위 + 거래대금 상위.\n"
             + "쌍끌이(외국인+기관 동시매수), 연속 순매수, 거래대금 집중, 섹터 상대강도 상위 종목을 찾아:\n"
             + "\uD83D\uDCCC 종목명 (종목코드) \u2014 현재가 약 XX,XXX원\n"
-            + "  - 외국인: 순매수 X일 연속, 약 X억원 (Grok 검색·krx.co.kr 기준)\n"
-            + "  - 기관: 순매수 X일 연속, 약 X억원 (Grok 검색 기준)\n"
+            + "  - 외국인: 실제 입력에서 확인된 관측일·기간의 순매수, 출처와 수량 또는 금액의 단위\n"
+            + "  - 기관: 실제 입력에서 확인된 관측일·기간의 순매수, 출처와 수량 또는 금액의 단위\n"
             + "  - 수급 유형: 쌍끌이/외국인단독/기관유입/연기금매수/프로그램\n"
             + "  - 주도주 검출 근거: 거래대금 순위, 거래량 순위, 섹터 강도, 관련 대장주 여부\n"
             + "  - 수급 전환 배경: (왜 외국인/기관이 매수하는지 매크로·뉴스 연결)\n"
             + "  - 목표가: XX,XXX원 (수급 지속 시)\n"
-            + "  - 환율·매크로 영향: USD/KRW 방향이 외국인 자금에 미치는 영향 (ChatGPT)\n"
-            + "KIS 실시간 데이터 + Grok 실시간 검색 기반. 수급 수치는 출처 명시 필수.\n"
-            + "⚠️ 수급 수치는 Grok 검색 결과만 사용. 출처 없는 수치 환각 금지!");
+            + "  - 환율·매크로 영향: 확인된 USD/KRW 자료가 외국인 자금에 미치는 영향\n"
+            + "실제 입력된 KIS/Naver/DART 자료와 출처·관측일이 확인된 수급·섹터 근거를 사용한다. 특정 에이전트의 검색은 필수 조건이 아니다.\n"
+            + "⚠️ 수급의 기간·단위·확정 여부가 미확인이면 쌍끌이·연속 순매수 조건을 보류한다. 출처 없는 수치나 추정치를 확정 수급으로 만들지 않는다. 조건을 검증할 수 없으면 0종목도 허용한다.");
 
         m.put("CATALYST_BURST",
             "테마주 조건검색 전용 분석. 반드시 아래 공식으로 후보를 선별해:\n"
@@ -289,7 +293,8 @@ public class MultiAgentOrchestrator {
             + "  - 리스크: 추세 이탈, 거래대금 감소, 공시/실적 악재, 테마 소멸\n"
             + "  - 대장주 판별: 같은 섹터 안에서 거래대금·상승률·수급이 가장 강한지\n"
             + "  - 목표가: XX,XXX원 / 손절: XX,XXX원\n"
-            + "  - Grok 실시간 섹터/뉴스 확인 + ChatGPT 기술적 눌림목 판단 결합\n"
+            + "  - 실제 입력된 KIS/Naver/DART 자료와 출처·관측일이 확인된 차트·섹터·수급·공시 근거를 결합\n"
+            + "⚠️ 눌림목·추세 유지·대장주 조건의 차트 또는 수급 근거가 미확인이면 해당 조건을 보류한다. 특정 에이전트의 검색은 필수 조건이 아니다. 자료 없는 패턴·수치를 만들지 않고, 조건을 검증할 수 없으면 0종목도 허용한다.\n"
             + "⚠️ 시장 전체 급락(-3% 이상)이면 신규 스윙보다 리스크 관리와 분할 접근을 우선 진단할 것.");
 
         MODE_PROMPTS = java.util.Collections.unmodifiableMap(m);
@@ -382,6 +387,23 @@ public class MultiAgentOrchestrator {
                 marketDataText += enrichment.prompt();sourceExpansionMetadata=enrichment.metadata();
             } catch(Exception ignored) { sourceExpansionMetadata=Map.of("status","UNAVAILABLE"); }
             checkBudget(deadline);
+        }
+        if (kiwoomSupplement != null && kiwoomSupplement.isEnabled()) {
+            var missing = com.bitman.justbuy.service.KiwoomSupplementPolicy.missingParts(boundedEvidenceCodes, sourceExpansionMetadata);
+            if (!missing.isEmpty()) {
+                checkBudget(deadline);
+                try {
+                    var evidence = kiwoomSupplement.fetchEvidence(new ArrayList<>(missing.keySet()), missing);
+                    marketDataText += "\n[키움 보조 조회 근거] KIS의 확인된 자료를 유지하고 미확인 그룹만 보완한다. 원 제공 날짜·기간·단위를 유지하며 날짜 미확인 자료를 실시간 확정 자료로 취급하지 않는다.\n"
+                        + objectMapper.writeValueAsString(evidence);
+                    var metadata = new LinkedHashMap<String,Object>(sourceExpansionMetadata == null ? Map.of() : sourceExpansionMetadata);
+                    metadata.put("kiwoomSupplement", supplementCoverage(evidence, missing));
+                    sourceExpansionMetadata = Map.copyOf(metadata);
+                } catch (Exception ignored) {
+                    marketDataText += "\n[키움 보조 근거 확인 불가. KIS의 확인된 자료는 유지한다.]\n";
+                }
+                checkBudget(deadline);
+            }
         }
         if (!boundedEvidenceCodes.isEmpty()) {
             checkBudget(deadline);
@@ -525,6 +547,11 @@ public class MultiAgentOrchestrator {
                     formatPrice(stock.currentPrice()), formatPrice(stock.targetPrice()), formatPrice(stock.stopLoss()),
                     stock.action(), String.join("; ", stock.reasons()))).toList()
                 : (result.content().contains("```json:analysis") ? List.of() : StockParser.parseStockPicks(result.content()));
+            var inspection = StructuredAnalysisParser.inspect(result.content());
+            log.info("[PublicationGate] mode={} agent={} schema={} declared={} accepted={} draft={}",
+                Set.of("BREAKOUT", "REVERSAL_EDGE", "FLOW_LEADER", "CATALYST_BURST").contains(mode) ? mode : "OTHER",
+                Set.of("chatgpt", "deepseek", "grok", "gemini").contains(result.agent()) ? result.agent() : "OTHER",
+                inspection.status(), inspection.declaredStocks(), inspection.acceptedStocks(), picks.size());
             agentPicks.putIfAbsent(result.agent(), picks);
         }
         Map<String, StockPick> draftPicks = new LinkedHashMap<>();
@@ -541,6 +568,34 @@ public class MultiAgentOrchestrator {
             }
         }
         quotes.entrySet().removeIf(entry -> parseKoreanPrice(entry.getValue()) <= 0);
+        Map<String,String> quoteSources = new HashMap<>();
+        quotes.keySet().forEach(code -> quoteSources.put(code, "NAVER_FINANCE"));
+        if (kiwoomSupplement != null && kiwoomSupplement.isEnabled()) {
+            List<String> missing = draftPicks.keySet().stream().filter(code -> !quotes.containsKey(code)).limit(3).toList();
+            if (!missing.isEmpty()) {
+                checkBudget(deadline);
+                try {
+                    var supplementaryQuotes = kiwoomSupplement.lookupAll(missing);
+                    Instant receivedAt = Instant.now();
+                    for (String code : missing) {
+                        var quote = supplementaryQuotes.get(code);
+                        if (quote == null || !code.equals(quote.code()) || !"KIWOOM_REST".equals(quote.source())
+                            || !Objects.equals(candidateNames.get(code), quote.name()) || quote.fetchedAt() == null
+                            || quote.fetchedAt().isAfter(receivedAt) || quote.fetchedAt().isBefore(receivedAt.minusSeconds(60))
+                            || quote.price() == null || quote.price().signum() <= 0) continue;
+                        try {
+                            long price = quote.price().toBigIntegerExact().longValueExact();
+                            if (price <= 0) continue;
+                            quotes.put(code, String.format("%,d", price));
+                            quoteSources.put(code, "KIWOOM_REST");
+                        } catch (ArithmeticException ignored) { /* A fractional or out-of-range won price is unavailable. */ }
+                    }
+                } catch (Exception ignored) {
+                    log.warn("[PublicationGate] Auxiliary quote unavailable; unquoted candidates remain excluded");
+                }
+                checkBudget(deadline);
+            }
+        }
         String quoteCheckedAt = Instant.now().toString(); // retrieval validation time, not exchange trade time
         Map<String, StockPick> publishedPicks = new LinkedHashMap<>();
         for (StockPick pick : draftPicks.values()) {
@@ -558,7 +613,7 @@ public class MultiAgentOrchestrator {
             publishedPicks.put(pick.code(), new StockPick(candidateName, pick.code(), String.format("%,d", current),
                 validatePrice(pick.targetPrice(), current, pick.name(), "목표가"),
                 validatePrice(pick.stopLoss(), current, pick.name(), "손절가"), pick.action(), pick.reason(),
-                financial.score(), financial.summary(), candidateSources.get(pick.code()), "NAVER_FINANCE", quoteCheckedAt));
+                financial.score(), financial.summary(), candidateSources.get(pick.code()), quoteSources.get(pick.code()), quoteCheckedAt));
         }
         Map<String, StructuredAnalysis> verifiedResults = new LinkedHashMap<>();
         for (var entry : parsedResults.entrySet()) {
@@ -602,10 +657,40 @@ public class MultiAgentOrchestrator {
         long totalDuration = System.currentTimeMillis() - totalStart;
         checkBudget(deadline);
         List<StockPick> finalPicks = List.copyOf(publishedPicks.values());
+        Set<String> parsedCodes = new HashSet<>();
+        agentPicks.values().forEach(picks -> picks.forEach(pick -> parsedCodes.add(pick.code())));
+        long outsidePool = parsedCodes.stream().filter(code -> !candidateSources.containsKey(code)).count();
+        long missingQuote = draftPicks.keySet().stream().filter(code -> parseKoreanPrice(quotes.get(code)) <= 0).count();
+        long missingName = draftPicks.keySet().stream().filter(code -> candidateNames.get(code) == null || candidateNames.get(code).isBlank()).count();
+        log.info("[PublicationGate] mode={} candidates={} parsedCodes={} outsidePool={} eligible={} missingQuote={} missingName={} published={}",
+            Set.of("BREAKOUT", "REVERSAL_EDGE", "FLOW_LEADER", "CATALYST_BURST").contains(mode) ? mode : "OTHER",
+            candidateSources.size(), parsedCodes.size(), outsidePool, draftPicks.size(), missingQuote, missingName, finalPicks.size());
         // The caller persists and tracks only its final publication after all periodic filters.
         return new AnalysisResponse(mode, query, publicResults, null, renderPublishedPicks(finalPicks), finalPicks, consensus,
             Instant.now().toString(), !finalPicks.isEmpty(),
             new AnalysisResponse.Metadata(totalDuration, availableAgents.size(), successResults.size(),null,sourceExpansionMetadata));
+    }
+
+    private static Map<String,Object> supplementCoverage(Map<String,Object> evidence, Map<String,List<String>> requested) {
+        Map<?,?> candidates = evidence != null && evidence.get("candidates") instanceof Map<?,?> rows ? rows : Map.of();
+        var states = new LinkedHashMap<String,Object>();
+        int confirmed = 0;
+        boolean complete = true;
+        for (String code : requested.keySet()) {
+            Map<?,?> groups = candidates.get(code) instanceof Map<?,?> row ? row : Map.of();
+            var sourceStates = new LinkedHashMap<String,String>();
+            for (String part : requested.get(code)) {
+                Object value = groups.get(part);
+                String status = value instanceof Map<?,?> fact ? Objects.toString(fact.get("status"), "UNAVAILABLE") : "UNAVAILABLE";
+                sourceStates.put(part, Set.of("AVAILABLE", "PARTIAL", "UNAVAILABLE", "EMPTY", "UNDATED", "DISABLED").contains(status) ? status : "UNAVAILABLE");
+                if (!"AVAILABLE".equals(status)) complete = false;
+            }
+            if (sourceStates.containsValue("AVAILABLE")) confirmed++;
+            states.put(code, sourceStates);
+        }
+        String status = complete && confirmed == requested.size() ? "AVAILABLE" : confirmed > 0 ? "PARTIAL" : "UNAVAILABLE";
+        return Map.of("status", status, "requestedCodes", requested.size(), "enrichedCodes", confirmed,
+            "sourceStates", states, "requestedParts", requested, "source", "KIWOOM_REST");
     }
 
     private static void collectCandidateRows(String text, String source, Map<String, String> out, Map<String, String> names) {

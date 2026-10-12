@@ -63,6 +63,11 @@ bitman:
       hts-id: ${BITMAN_KIS_HTS_ID:}
     extended-evidence:
       enabled: ${BITMAN_KIS_EXTENDED_EVIDENCE_ENABLED:false}
+  kiwoom:
+    app-key: ${KIWOOM_APP_KEY:}
+    app-secret: ${KIWOOM_APP_SECRET:}
+    enabled: ${BITMAN_KIWOOM_SUPPLEMENT_ENABLED:false}
+    licensed: ${BITMAN_KIWOOM_SUPPLEMENT_LICENSED:false}
   ecos:
     enabled: ${BITMAN_ECOS_ENABLED:false}
     api-key: ${ECOS_API_KEY:}

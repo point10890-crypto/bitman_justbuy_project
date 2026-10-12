@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { fetchConditionSection, type ConditionSectionResponse, type MainConditionResponse } from '../api/conditionApi'
 import HomePage from './HomePage'
+import { latestAnalysisPresentation } from '../lib/conditionPresentation'
 
 let main: MainConditionResponse
 const { analyzeMock } = vi.hoisted(() => ({ analyzeMock: vi.fn() }))
@@ -31,8 +32,12 @@ function feed(name: string, asOf: string): MainConditionResponse {
   }
 }
 const tree = () => <MemoryRouter><HomePage /></MemoryRouter>
-beforeEach(() => { vi.clearAllMocks(); main = feed('MAIN_0850', '2026-05-18T08:50:00+09:00') })
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-12T11:00:00+09:00'))
+  main = feed('MAIN_0850', '2026-05-18T08:50:00+09:00')
+})
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 it('manual section rows use the same response timestamp and yield to a later feed response', async () => {
   vi.mocked(fetchConditionSection).mockResolvedValue(section('MANUAL_0900', '2026-05-18T09:00:00+09:00'))
@@ -158,4 +163,95 @@ it('each repeated keyword search makes a new data request instead of reusing the
   fireEvent.click(within(screen.getByRole('dialog', { name: '실데이터 조건검색' })).getByRole('button', { name: '닫기' }))
   fireEvent.submit(screen.getByRole('search'))
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+})
+
+const latestAnalysis = (outcome: 'COMPLETE' | 'PARTIAL' | 'EMPTY' | 'FAILED', publishedCount = 0) => ({
+  checkedAt: '2026-10-12T10:32:00+09:00', outcome, agentsUsed: 2,
+  agentsSucceeded: outcome === 'FAILED' ? 0 : outcome === 'PARTIAL' ? 1 : 2, publishedCount,
+})
+
+it('completed empty analysis is shown for every AI mode using the latest check instead of an old cache time', () => {
+  const ids = ['short-term', 'swing', 'leaders', 'themes']
+  const keys = ['shortTerm', 'swing', 'leaders', 'themes'] as const
+  const modes = ['BREAKOUT', 'REVERSAL_EDGE', 'FLOW_LEADER', 'CATALYST_BURST']
+  keys.forEach((key, index) => {
+    main.sections[key] = {
+      ...main.sections[key], slug: ids[index], mode: modes[index], sourceStatus: 'DATA_UNAVAILABLE',
+      asOf: '2026-10-11T20:47:00+09:00', signals: [], latestAnalysis: latestAnalysis('EMPTY'),
+    }
+  })
+  const { container } = render(tree())
+  for (const id of ids) {
+    const card = within(container.querySelector(`#${id}`) as HTMLElement)
+    expect(card.getByText('오늘 10:32 분석 완료 · 현재 조건을 통과한 종목이 없습니다.')).toBeTruthy()
+    expect(card.queryByText('조건검색 데이터가 준비되면 최신 후보가 표시됩니다.')).toBeNull()
+    expect(card.queryByText(/20:47 기준/)).toBeNull()
+  }
+  expect(analyzeMock).not.toHaveBeenCalled()
+})
+
+it('preserves previous candidates and their dated source timestamp beside a newer empty analysis', () => {
+  main.sections.swing = {
+    ...section('이전 스윙 후보', '2026-10-11T20:47:00+09:00'), key: 'swing', slug: 'swing', mode: 'REVERSAL_EDGE',
+    sourceStatus: 'STALE_CACHE', latestAnalysis: latestAnalysis('EMPTY'),
+  }
+  const { container } = render(tree())
+  const card = within(container.querySelector('#swing') as HTMLElement)
+  expect(card.getByText('이전 스윙 후보')).toBeTruthy()
+  expect(card.getByText(/2026\.10\.11 20:47 기준/)).toBeTruthy()
+  expect(card.getByText(/오늘 10:32 분석 완료 · 현재 조건을 통과한 종목이 없습니다\./)).toBeTruthy()
+  expect(card.getByText(/표에는 이전에 저장한 후보가 표시됩니다\./)).toBeTruthy()
+})
+
+it('distinguishes a failed analysis from a successful search with no eligible stocks', () => {
+  main.sections.swing = {
+    ...main.sections.swing, mode: 'REVERSAL_EDGE', sourceStatus: 'DATA_UNAVAILABLE', signals: [], latestAnalysis: latestAnalysis('FAILED'),
+  }
+  const { container } = render(tree())
+  const card = within(container.querySelector('#swing') as HTMLElement)
+  expect(card.getByText('오늘 10:32 분석 결과를 확인하지 못했습니다. 잠시 후 다시 확인해 주세요.')).toBeTruthy()
+  expect(card.queryByText(/분석 완료 · 현재 조건을 통과한 종목이 없습니다/)).toBeNull()
+})
+
+it('shows partial agent completion without claiming that every agent completed', () => {
+  main.sections.swing = {
+    ...section('확인된 스윙 후보', '2026-10-12T10:32:00+09:00'), mode: 'REVERSAL_EDGE',
+    sourceStatus: 'PRECOMPUTED', latestAnalysis: latestAnalysis('PARTIAL', 1),
+  }
+  const { container } = render(tree())
+  const card = within(container.querySelector('#swing') as HTMLElement)
+  expect(card.getByText('확인된 스윙 후보')).toBeTruthy()
+  expect(card.getByText('오늘 10:32 일부 AI 분석 완료 (1/2) · 확인된 결과만 표시합니다.')).toBeTruthy()
+})
+
+it('keeps the preparation guidance when analysis metadata is absent or its timestamp cannot be verified', () => {
+  main.sections.swing = { ...main.sections.swing, mode: 'REVERSAL_EDGE', sourceStatus: 'DATA_UNAVAILABLE', signals: [] }
+  main.sections.themes = {
+    ...main.sections.themes, mode: 'CATALYST_BURST', sourceStatus: 'DATA_UNAVAILABLE', signals: [],
+    latestAnalysis: { ...latestAnalysis('EMPTY'), checkedAt: 'invalid-date' },
+  }
+  const { container } = render(tree())
+  for (const id of ['swing', 'themes']) {
+    const card = within(container.querySelector(`#${id}`) as HTMLElement)
+    expect(card.getByText('조건검색 데이터가 준비되면 최신 후보가 표시됩니다.')).toBeTruthy()
+    expect(card.queryByText(/분석 완료/)).toBeNull()
+  }
+})
+
+it.each([
+  ['REALTIME_SCAN', 'EMPTY'], ['REALTIME_SCAN', 'FAILED'],
+  ['LEADER_SCAN', 'EMPTY'], ['LEADER_SCAN', 'FAILED'],
+] as const)('keeps independent %s candidates separate from a previous AI %s attempt', (sourceStatus, outcome) => {
+  const current = section('실시간 후보 1', '2026-10-12T10:40:00+09:00')
+  const snapshot: ConditionSectionResponse = {
+    ...current, key: 'leaders', slug: 'leaders', mode: 'FLOW_LEADER', sourceStatus,
+    signals: [1, 2, 3].map(index => ({ ...current.signals[0], stockName: `실시간 후보 ${index}` })),
+    latestAnalysis: latestAnalysis(outcome),
+  }
+  expect(latestAnalysisPresentation(snapshot)).toBeNull()
+  main.sections.leaders = snapshot
+  const { container } = render(tree())
+  const card = within(container.querySelector('#leaders') as HTMLElement)
+  for (const index of [1, 2, 3]) expect(card.getByText(`실시간 후보 ${index}`)).toBeTruthy()
+  expect(card.queryByText(/조건을 통과한 종목이 없습니다|분석 결과를 확인하지 못했습니다/)).toBeNull()
 })

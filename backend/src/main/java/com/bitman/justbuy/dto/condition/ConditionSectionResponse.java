@@ -10,5 +10,14 @@ public record ConditionSectionResponse(
     String endpoint,
     String asOf,
     String sourceStatus,
-    List<ConditionSignalDto> signals
-) {}
+    List<ConditionSignalDto> signals,
+    LatestAnalysis latestAnalysis
+) {
+    public ConditionSectionResponse(String key, String slug, String title, String mode, String endpoint,
+                                    String asOf, String sourceStatus, List<ConditionSignalDto> signals) {
+        this(key, slug, title, mode, endpoint, asOf, sourceStatus, signals, null);
+    }
+
+    public record LatestAnalysis(String checkedAt, String outcome, int agentsUsed,
+                                 int agentsSucceeded, int publishedCount) {}
+}

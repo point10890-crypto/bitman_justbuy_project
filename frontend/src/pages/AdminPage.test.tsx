@@ -99,6 +99,7 @@ describe('admin approval details for monthly to six-month upgrades', () => {
 describe('admin analysis refresh recovery', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(refreshAllAnalysis).mockReset()
     vi.mocked(fetchAllUsers).mockResolvedValue([])
     vi.mocked(fetchPendingSubscriptions).mockResolvedValue([])
     vi.mocked(fetchSystemStatus).mockResolvedValue({ conditionRuns: [{
@@ -113,6 +114,43 @@ describe('admin analysis refresh recovery', () => {
     render(<MemoryRouter initialEntries={['/admin?view=system']}><AdminPage /></MemoryRouter>)
     return screen.findByRole('button', { name: '조건검색식 / 분석 캐시 새로고침' })
   }
+
+  it.each([
+    ['breakout', 'BREAKOUT'], ['reversal', 'REVERSAL_EDGE'],
+    ['flow', 'FLOW_LEADER'], ['catalyst', 'CATALYST_BURST'],
+  ])('refreshes only the selected strategy from the %s detail view', async (view, mode) => {
+    vi.mocked(refreshAllAnalysis).mockResolvedValue({ status: 'ok', results: { [mode]: 'success' } })
+    render(<MemoryRouter initialEntries={[`/admin?view=${view}`]}><AdminPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', { name: '분석 캐시 새로고침' }))
+
+    await waitFor(() => expect(refreshAllAnalysis).toHaveBeenCalledWith('admin-upgrade-fixture-token', [mode]))
+    expect(refreshAllAnalysis).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats normal empty results as completed without offering a paid retry', async () => {
+    vi.mocked(refreshAllAnalysis).mockResolvedValue({ status: 'ok', results: { REVERSAL_EDGE: 'empty', FLOW_LEADER: 'success' } })
+    fireEvent.click(await openSystem())
+
+    const results = await screen.findByRole('region', { name: '분석 캐시 갱신 결과' })
+    expect(within(results).getByText('추천 없음')).toBeTruthy()
+    expect(await screen.findByText('분석 캐시 2개 모드 갱신 완료.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '실패한 모드만 재시도' })).toBeNull()
+    expect(refreshAllAnalysis).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries only failed or partial modes while retaining normal empty and successful results', async () => {
+    vi.mocked(refreshAllAnalysis).mockResolvedValueOnce({ status: 'partial', results: {
+      BREAKOUT: 'success', REVERSAL_EDGE: 'empty', FLOW_LEADER: 'partial', CATALYST_BURST: 'error: provider unavailable',
+    } }).mockResolvedValueOnce({ status: 'ok', results: { FLOW_LEADER: 'success', CATALYST_BURST: 'success' } })
+    fireEvent.click(await openSystem())
+    fireEvent.click(await screen.findByRole('button', { name: '실패한 모드만 재시도' }))
+
+    await waitFor(() => expect(refreshAllAnalysis).toHaveBeenLastCalledWith('admin-upgrade-fixture-token', ['FLOW_LEADER', 'CATALYST_BURST']))
+    await waitFor(() => expect(screen.queryByRole('button', { name: '실패한 모드만 재시도' })).toBeNull())
+    const results = screen.getByRole('region', { name: '분석 캐시 갱신 결과' })
+    expect(within(results).getByText('추천 없음')).toBeTruthy()
+    expect(refreshAllAnalysis).toHaveBeenCalledTimes(2)
+  })
 
   it('shows the failed mode and retries it without recomputing successful modes', async () => {
     vi.mocked(refreshAllAnalysis).mockResolvedValueOnce({ status: 'partial', results: { BREAKOUT: 'success', CATALYST_BURST: 'error: Analysis provider timed out' } })

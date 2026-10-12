@@ -65,6 +65,36 @@ public final class StructuredAnalysisParser {
         List<String> keyRisks
     ) {}
 
+    /** Diagnostic counts only: never contains provider text, names, codes, or reasons. */
+    public record ParseInspection(String status, int declaredStocks, int acceptedStocks) {}
+
+    /** Uses the same fence priority and stock validation as parse, without changing its contract. */
+    public static ParseInspection inspect(String content) {
+        if (content == null || content.isBlank()) return new ParseInspection("NO_STRUCTURED_BLOCK", 0, 0);
+        boolean found = false;
+        for (Pattern pattern : JSON_BLOCK_PATTERNS) {
+            Matcher matcher = pattern.matcher(content);
+            if (!matcher.find()) continue;
+            found = true;
+            try {
+                JsonNode root = mapper.readTree(matcher.group(1).trim());
+                if (root == null) continue;
+                if (!root.has("stocks") || !root.get("stocks").isArray())
+                    return new ParseInspection("SCHEMA_INVALID", 0, 0);
+                JsonNode rows = root.get("stocks");
+                if (rows.isEmpty()) return new ParseInspection("DECLARED_EMPTY", 0, 0);
+                int accepted = 0;
+                for (JsonNode row : rows) if (parseStock(row) != null) accepted++;
+                String status = accepted == 0 ? "SCHEMA_INVALID"
+                    : accepted == rows.size() ? "STRUCTURED_VALID" : "PARTIAL_INVALID";
+                return new ParseInspection(status, rows.size(), accepted);
+            } catch (Exception ignored) {
+                // Preserve parse's fallback to the next fence pattern; do not expose raw content.
+            }
+        }
+        return new ParseInspection(found ? "JSON_INVALID" : "NO_STRUCTURED_BLOCK", 0, 0);
+    }
+
     /**
      * AI 응답 텍스트에서 구조화 JSON 블록을 추출하여 파싱.
      * 블록이 없거나 파싱 실패 시 null 반환.

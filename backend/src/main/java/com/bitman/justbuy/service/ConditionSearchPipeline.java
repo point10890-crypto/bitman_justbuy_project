@@ -19,8 +19,11 @@ public class ConditionSearchPipeline {
     private final ConditionSearchFormulaCatalog formulaCatalog;
     private final AnalysisService analysisService;
     private KisSourceExpansionService sourceExpansion;
+    private KiwoomReadOnlyService kiwoomSupplement;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     public void configureSourceExpansion(KisSourceExpansionService expansion) { this.sourceExpansion=expansion; }
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void configureKiwoomSupplement(KiwoomReadOnlyService supplement) { this.kiwoomSupplement=supplement; }
 
     public ConditionSearchPipeline(ConditionSearchFormulaCatalog formulaCatalog,
                                    AnalysisService analysisService) {
@@ -53,6 +56,7 @@ public class ConditionSearchPipeline {
         result.put("name", "BitMan condition-search pipeline");
         result.put("version", "v2");
         if (sourceExpansion != null) result.put("sourceExpansion", sourceExpansion.readiness());
+        if (kiwoomSupplement != null) result.put("kiwoomSupplement", kiwoomSupplement.readiness());
         result.put("entrypoints", Map.of(
             "precomputed", "/api/analysis/{mode}",
             "live", "/api/analysis/live",

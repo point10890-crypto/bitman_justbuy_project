@@ -230,6 +230,7 @@ public class AdminController {
         boolean kisConfigured = hasConfiguration("bitman.kis.app-key") && hasConfiguration("bitman.kis.app-secret");
         boolean dartConfigured = hasConfiguration("bitman.dart.api-key");
         boolean ecosConfigured = hasConfiguration("bitman.ecos.api-key");
+        boolean kiwoomConfigured = hasConfiguration("bitman.kiwoom.app-key") && hasConfiguration("bitman.kiwoom.app-secret");
         return List.of(
             sourceReadiness("KIS", "KIS 추가 근거", configurationEnabled("bitman.kis.extended-evidence.enabled"),
                 kisConfigured, true, "유료 회원 앱의 KIS 이용 권한 확인이 필요합니다."),
@@ -238,7 +239,11 @@ public class AdminController {
                     : "DART 인증키의 서버 설정이 필요합니다."),
             sourceReadiness("ECOS", "한국은행 ECOS", configurationEnabled("bitman.ecos.enabled"),
                 ecosConfigured, false, ecosConfigured ? "일별 공표 통계 설정 확인. 실제 연결과 관측일 검증이 필요합니다."
-                    : "ECOS 인증키 발급과 서버 설정이 필요합니다.")
+                    : "ECOS 인증키 발급과 서버 설정이 필요합니다."),
+            sourceReadiness("KIWOOM", "키움 보조 근거 (KIS 우선)", configurationEnabled("bitman.kiwoom.enabled"),
+                kiwoomConfigured, !configurationEnabled("bitman.kiwoom.licensed"), kiwoomConfigured
+                    ? "서버 공인 출발 IP 등록과 정보이용 범위·권한 설정을 확인해 주세요. 실제 연결은 미검증 상태입니다."
+                    : "키움 앱 키·시크릿 입력, 서버 공인 출발 IP 등록 및 정보이용 범위·권한 설정이 필요합니다. 실제 연결은 미검증 상태입니다.")
         );
     }
 

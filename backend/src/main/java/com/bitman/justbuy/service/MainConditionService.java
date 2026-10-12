@@ -1,5 +1,6 @@
 package com.bitman.justbuy.service;
 
+import com.bitman.justbuy.condition.run.ConditionRunService;
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.StockPick;
 import com.bitman.justbuy.dto.condition.ConditionCaptureTimeDto;
@@ -46,6 +47,12 @@ public class MainConditionService {
     private final JonggaV2SearchService jonggaV2SearchService;
     private final LeaderConditionEngine leaderConditionEngine;
     private final TrackRecordService trackRecordService;
+    private ConditionRunService conditionRunService;
+
+    @Autowired(required = false)
+    void configureConditionRuns(ConditionRunService conditionRunService) {
+        this.conditionRunService = conditionRunService;
+    }
 
     public MainConditionService(ConditionSearchPipeline conditionSearchPipeline) {
         this(conditionSearchPipeline, (ShortTermRealtimeScanner) null, null, null);
@@ -162,7 +169,8 @@ public class MainConditionService {
             section.endpoint(),
             section.asOf(),
             section.sourceStatus(),
-            masked
+            masked,
+            section.latestAnalysis()
         );
     }
 
@@ -259,7 +267,8 @@ public class MainConditionService {
                     "/api/conditions/" + section.slug(),
                     snapshot.get().asOf(),
                     "REALTIME_SCAN",
-                    snapshot.get().signals()
+                    snapshot.get().signals(),
+                    latestAnalysis(section.legacyMode())
                 );
             }
         }
@@ -275,7 +284,8 @@ public class MainConditionService {
                     "/api/conditions/" + section.slug(),
                     snapshot.get().asOf(),
                     snapshot.get().sourceStatus(),
-                    snapshot.get().signals()
+                    snapshot.get().signals(),
+                    latestAnalysis(section.legacyMode())
                 );
             }
         }
@@ -321,8 +331,17 @@ public class MainConditionService {
             "/api/conditions/" + section.slug(),
             asOf,
             sourceStatus,
-            signals
+            signals,
+            latestAnalysis(section.legacyMode())
         );
+    }
+
+    private ConditionSectionResponse.LatestAnalysis latestAnalysis(String mode) {
+        if (conditionRunService == null) return null;
+        return conditionRunService.latestCompletedAttempt(mode)
+            .map(attempt -> new ConditionSectionResponse.LatestAnalysis(attempt.checkedAt().toString(), attempt.outcome(),
+                attempt.agentsUsed(), attempt.agentsSucceeded(), attempt.publishedCount()))
+            .orElse(null);
     }
 
     private ConditionSectionResponse alertsSection(List<ConditionSignalDto> candidates, String sourceStatus) {

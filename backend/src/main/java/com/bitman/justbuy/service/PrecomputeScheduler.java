@@ -455,6 +455,8 @@ public class PrecomputeScheduler {
             result = postProcessPicks(mode, result, seenCodes);
             AnalysisOutcome outcome = AnalysisOutcome.classify(result);
             if (outcome == AnalysisOutcome.EMPTY) {
+                log.info("[Scheduler] {} outcome=EMPTY agents={}/{} picks=0 cachePreserved=true", mode,
+                    result.metadata().agentsSucceeded(), result.metadata().agentsUsed());
                 conditionRunService.recordEvent(run.runId(), ConditionRunEventType.NOTIFICATION_SKIPPED,
                     "empty publication; last good cache preserved", Map.of("outcome", "EMPTY", "pickCount", 0));
                 conditionRunService.markComplete(run.runId(), result);
@@ -540,6 +542,10 @@ public class PrecomputeScheduler {
     /** 선택 모드만 다시 실행한다. 모든 모드는 실행 전에 검증한다. */
     public Map<String, String> refreshModes(List<String> modes) {
         List<String> selectedModes = normalizeRefreshModes(modes);
+        if (!scheduledRunning.compareAndSet(false, true)) {
+            throw new IllegalStateException("분석 갱신 작업이 이미 실행 중입니다. 완료 후 다시 시도해 주세요.");
+        }
+        try {
         Map<String, String> scheduledModes = formulaCatalog.scheduledQueries();
         Map<String, String> results = new LinkedHashMap<>();
         log.info("[Scheduler] 검색식 새로고침 시작: {}", selectedModes);
@@ -555,6 +561,9 @@ public class PrecomputeScheduler {
         }
         log.info("[Scheduler] 전체 새로고침 완료: {} — 누적 추천 {}종목", results, seenCodes.size());
         return results;
+        } finally {
+            scheduledRunning.set(false);
+        }
     }
 
     public List<String> normalizeRefreshModes(List<String> modes) {

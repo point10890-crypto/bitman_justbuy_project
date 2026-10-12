@@ -7,6 +7,7 @@ import { fetchConditionSection, type ConditionSectionResponse } from '../api/con
 import { AgentMascot } from '../components/app/AgentMascot'
 import { KeywordSearchPanel } from '../components/app/KeywordSearchPanel'
 import { searchKeywordStocks, type KeywordSearchResponse } from '../api/keywordSearchApi'
+import { formatConditionAsOf, latestAnalysisPresentation } from '../lib/conditionPresentation'
 import './HomePage.css'
 
 type Section = {
@@ -374,6 +375,8 @@ export default function HomePage() {
     const usesManual = !!manual && manual.feed === mainConditions
       && (!mainSection || Date.parse(manual.data.asOf) >= Date.parse(mainSection.asOf))
     const apiSection = manual && usesManual ? manual.data : mainSection
+    const latestAnalysis = latestAnalysisPresentation(apiSection)
+    const rows = rowsFromCondition(apiSection, section.rows)
     const observedChange = (section.id === 'short-term' && apiSection?.sourceStatus === 'REALTIME_SCAN')
       || (section.id === 'leaders' && apiSection?.sourceStatus === 'LEADER_SCAN')
     const columns = [...section.columns]
@@ -384,10 +387,12 @@ export default function HomePage() {
     return {
       ...section,
       columns,
-      rows: rowsFromCondition(apiSection, section.rows),
-      sourceStatus: endpointLoading === section.id ? '최신 후보 불러오는 중' : (usesManual ? endpointStatus[section.id] : undefined) || sectionSourceStatus(apiSection),
+      rows,
+      sourceStatus: endpointLoading === section.id ? '최신 후보 불러오는 중' : rows.length === 0 && latestAnalysis
+        ? latestAnalysis.label : (usesManual ? endpointStatus[section.id] : undefined) || sectionSourceStatus(apiSection),
       asOf: apiSection?.asOf,
-      asOfLabel: formatKstTime(apiSection?.asOf),
+      asOfLabel: rows.length === 0 && latestAnalysis ? '' : formatConditionAsOf(apiSection?.asOf),
+      latestAnalysisMessage: latestAnalysis?.message,
       warning: sectionWarning(apiSection),
     }
   })
@@ -439,7 +444,7 @@ export default function HomePage() {
           <span>측정 완료 {mainConditions.trackRecord.totalSignals}건</span>
           <span>5거래일 평균 {mainConditions.trackRecord.avgMaxReturnPct === '-' ? '자료 없음' : mainConditions.trackRecord.avgMaxReturnPct}</span>
           <span>5거래일 승률 {mainConditions.trackRecord.winRate5d === '-' ? '자료 없음' : mainConditions.trackRecord.winRate5d}</span>
-          {mainConditions.asOf && <span>{formatKstTime(mainConditions.asOf)} 기준</span>}
+          {mainConditions.asOf && <span>{formatConditionAsOf(mainConditions.asOf)} 기준</span>}
         </div>
       )}
 
@@ -476,6 +481,10 @@ export default function HomePage() {
             </div>
           )}
 
+          {section.rows.length > 0 && section.latestAnalysisMessage && (
+            <div className="condition-warning-strip" role="status">{section.latestAnalysisMessage}</div>
+          )}
+
           <div className="rank-table" style={{ ['--rank-cols' as string]: '1.1fr .75fr .75fr .75fr' }}>
             <div className="rank-table-head">
               {section.columns.map(column => <span key={column}>{column}</span>)}
@@ -501,7 +510,7 @@ export default function HomePage() {
             ))}
             {section.rows.length === 0 && (
               <div className="rank-table-empty">
-                조건검색 데이터가 준비되면 최신 후보가 표시됩니다.
+                {section.latestAnalysisMessage || '조건검색 데이터가 준비되면 최신 후보가 표시됩니다.'}
               </div>
             )}
           </div>

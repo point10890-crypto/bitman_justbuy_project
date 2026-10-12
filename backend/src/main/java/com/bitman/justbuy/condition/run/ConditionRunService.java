@@ -120,6 +120,42 @@ public class ConditionRunService {
             .toList();
     }
 
+    /** Summary of actual section analyses; cache recovery and private live queries are excluded. */
+    public synchronized Optional<CompletedAnalysisAttempt> latestCompletedAttempt(String mode) {
+        if (mode == null || mode.isBlank()) return Optional.empty();
+        var candidates = runs.values().stream()
+            .filter(run -> mode.equals(run.mode) && run.finishedAt != null)
+            .filter(run -> run.trigger == ConditionRunTrigger.ADMIN_REFRESH
+                || run.trigger == ConditionRunTrigger.SCHEDULER_CRON
+                || run.trigger == ConditionRunTrigger.SCHEDULER_STARTUP)
+            .sorted(Comparator.comparing((MutableRun run) -> run.finishedAt).reversed())
+            .limit(100)
+            .toList();
+        for (var run : candidates) {
+            var history = events.getOrDefault(run.runId, List.of());
+            if (history.stream().anyMatch(event -> event.type() == ConditionRunEventType.CACHE_HIT)
+                || history.stream().noneMatch(event -> event.type() == ConditionRunEventType.AI_STARTED)) continue;
+            String outcome = null;
+            for (var event : history) {
+                if (event.type() == ConditionRunEventType.COMPLETED) {
+                    Object value = event.metrics().get("outcome");
+                    if (value instanceof String text && List.of("COMPLETE", "PARTIAL", "EMPTY").contains(text)) outcome = text;
+                }
+            }
+            if (run.status == ConditionRunStatus.FAILED
+                && history.stream().anyMatch(event -> event.type() == ConditionRunEventType.FAILED)) outcome = "FAILED";
+            if (outcome == null) continue;
+            return Optional.of(new CompletedAnalysisAttempt(run.finishedAt, outcome,
+                nonNegative(run.agentsUsed), nonNegative(run.agentsSucceeded), nonNegative(run.pickCount)));
+        }
+        return Optional.empty();
+    }
+
+    private static int nonNegative(Integer value) { return value == null ? 0 : Math.max(0, value); }
+
+    public record CompletedAnalysisAttempt(Instant checkedAt, String outcome, int agentsUsed,
+                                           int agentsSucceeded, int publishedCount) {}
+
     public synchronized List<ConditionRunEvent> events(UUID runId) {
         return List.copyOf(events.getOrDefault(runId, List.of()));
     }

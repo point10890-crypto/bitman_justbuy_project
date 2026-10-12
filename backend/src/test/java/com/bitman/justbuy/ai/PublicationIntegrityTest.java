@@ -22,6 +22,9 @@ class PublicationIntegrityTest {
             + "```json:analysis\n{\"stocks\":[{\"name\":\"fixture\",\"code\":\"" + code + "\",\"confidence\":0.8,\"action\":\"매수\",\"reasons\":[\"확인한 후보\"]}]}\n```";
     }
     AnalysisResponse run(String code, Map<String,String> prices) {
+        return run(code,prices,"BREAKOUT",null);
+    }
+    AnalysisResponse run(String code, Map<String,String> prices, String mode, KisSourceExpansionService expansion) {
         when(market.fetchFormattedMarketData()).thenReturn("Verified input candidate: 삼성전자(005930), current price 10,000 KRW.");
         when(market.fetchStockPrices(anyList())).thenReturn(prices);
         FinancialScorer financial = mock(FinancialScorer.class);
@@ -29,8 +32,10 @@ class PublicationIntegrityTest {
         RestTemplate rest = mock(RestTemplate.class);
         when(rest.getForEntity(anyString(), eq(String.class))).thenReturn(ResponseEntity.ok("{\"gate\":\"GREEN\"}"));
         List<AiAgent> agents = List.of(agent("chatgpt", row(code)), agent("deepseek", row(code)));
-        return new MultiAgentOrchestrator(agents, market, new ConsensusEngine(), mock(DartApiService.class), financial,
-            mock(KisApiService.class), track, rest, new ObjectMapper()).runAnalysis("fixture request", "BREAKOUT");
+        var orchestrator=new MultiAgentOrchestrator(agents, market, new ConsensusEngine(), mock(DartApiService.class), financial,
+            mock(KisApiService.class), track, rest, new ObjectMapper());
+        if(expansion!=null) orchestrator.configureSourceExpansion(expansion);
+        return orchestrator.runAnalysis("fixture request", mode);
     }
     AiAgent agent(String name, String content) {
         return new AiAgent() {
@@ -70,6 +75,30 @@ class PublicationIntegrityTest {
         assertThat(result.stockPicks().getFirst().name()).isEqualTo("삼성전자");
         assertThat(result.finalContent()).doesNotContain("fixture");
         assertThat(result.consensus().stocks().getFirst().name()).isEqualTo("삼성전자");
+    }
+    @Test void verifiedSwingAndLeaderPublishWithSourceExpansionDisabled() {
+        var gateway=mock(KisSourceGateway.class);
+        when(gateway.isEnabled()).thenReturn(false);
+        when(gateway.readiness()).thenReturn(Map.of("status","DISABLED"));
+        var expansion=new KisSourceExpansionService(gateway,null,null,null,null,new ObjectMapper());
+        for(String mode:List.of("REVERSAL_EDGE","FLOW_LEADER")) {
+            AnalysisResponse result=run("005930",Map.of("005930","70,000"),mode,expansion);
+            assertThat(result.mode()).isEqualTo(mode);
+            assertThat(result.stockPicks()).extracting(StockPick::code).containsExactly("005930");
+            assertThat(result.stockPicks().getFirst().name()).isEqualTo("삼성전자");
+            assertThat(result.stockPicks().getFirst().currentPrice()).isEqualTo("70,000");
+            assertThat(AnalysisOutcome.classify(result)).isEqualTo(AnalysisOutcome.COMPLETE);
+            assertThat(result.metadata().sourceExpansion()).containsEntry("status","DISABLED");
+        }
+        verify(gateway,never()).fetch(anyString(),anyString(),anyMap(),anyLong());
+        verifyNoInteractions(track);
+    }
+    @Test void swingAndLeaderPromptsUseVerifiedInputSourcesWithoutRequiringAnUnavailableAgent() {
+        for(String mode:List.of("FLOW_LEADER","REVERSAL_EDGE")) {
+            assertThat(MultiAgentOrchestrator.MODE_PROMPTS.get(mode))
+                .doesNotContain("Grok 검색 결과만 사용","Grok 검색 기준","Grok 실시간 섹터/뉴스")
+                .contains("KIS","Naver","DART","미확인","보류");
+        }
     }
     @Test void duplicateRowsHaveOneVotePerIndependentAgent() {
         var stock = new StructuredStock("fixture","005930","관망",.8,10000L,null,null,null,List.of("reason"));
