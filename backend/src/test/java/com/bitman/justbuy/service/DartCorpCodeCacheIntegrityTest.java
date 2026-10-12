@@ -33,6 +33,34 @@ class DartCorpCodeCacheIntegrityTest {
     }
 
     @Test
+    void mixedPreferredCodeDoesNotInvalidateVerifiedNumericMappings() throws Exception {
+        Files.writeString(dataDir.resolve("dart_corp_codes.json"), "{\"005930\":\"00126380\",\"00088K\":\"00123456\"}");
+        var mapper = new DartCorpCodeMapper(new DartProperties(""), new ObjectMapper(), dataDir.toString());
+        assertThat(mapper.getCachedCorpCode("005930")).isEqualTo("00126380");
+        assertThat(mapper.getCachedCorpCode("00088K")).isNull();
+    }
+
+    @Test
+    void invalidNumericEntryCannotPoisonOtherValidMappingsOrBeReturnedByLegacyLookup() throws Exception {
+        Files.writeString(dataDir.resolve("dart_corp_codes.json"), "{\"005930\":\"BAD\",\"000660\":\"00164779\"}");
+        var mapper = new DartCorpCodeMapper(new DartProperties(""), new ObjectMapper(), dataDir.toString());
+        assertThat(mapper.getCachedCorpCode("005930")).isNull();
+        assertThat(mapper.getCachedCorpCode("000660")).isEqualTo("00164779");
+        assertThat(mapper.getCorpCode("005930")).isNull();
+    }
+
+    @Test
+    void legacyLookupCannotExtendFreshnessBeyondTheOriginalFileTime() throws Exception {
+        Path path = dataDir.resolve("dart_corp_codes.json");
+        Files.writeString(path, "{\"005930\":\"00126380\"}");
+        Instant original = Instant.now().minusSeconds(6 * 24 * 3600);
+        Files.setLastModifiedTime(path, FileTime.from(original));
+        var mapper = new DartCorpCodeMapper(new DartProperties(""), new ObjectMapper(), dataDir.toString());
+        assertThat(mapper.getCorpCode("005930")).isEqualTo("00126380");
+        assertThat(ReflectionTestUtils.getField(mapper, "lastLoaded")).isEqualTo(Files.getLastModifiedTime(path).toInstant());
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void verifiedExistingMemoryMappingNeedsNoFileRead() {
         var mapper = new DartCorpCodeMapper(new DartProperties(""), new ObjectMapper(), dataDir.toString());
@@ -71,9 +99,9 @@ class DartCorpCodeCacheIntegrityTest {
     @Test
     void existingMapperExceptionLoggingDoesNotExposeUrlsOrCredentials() throws Exception {
         Path path = dataDir.resolve("dart_corp_codes.json"); Files.writeString(path, "{}");
-        ObjectMapper objectMapper = mock(ObjectMapper.class);
-        when(objectMapper.readValue(any(File.class), org.mockito.ArgumentMatchers.<TypeReference<Map<String, String>>>any()))
-            .thenThrow(new IllegalStateException("https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key=fixture-sensitive-marker"));
+        ObjectMapper objectMapper = spy(new ObjectMapper());
+        doThrow(new IllegalStateException("https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key=fixture-sensitive-marker"))
+            .when(objectMapper).readTree(any(com.fasterxml.jackson.core.JsonParser.class));
         var logger = (Logger) LoggerFactory.getLogger(DartCorpCodeMapper.class);
         var appender = new ListAppender<ILoggingEvent>(); appender.start(); logger.addAppender(appender);
         try {

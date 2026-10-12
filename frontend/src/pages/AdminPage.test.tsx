@@ -324,9 +324,37 @@ describe('admin detected stock evidence quality', () => {
     const section = within(await screen.findByRole('region', { name: '검출 종목 근거 품질' }))
     expect(section.getByText('표시 항목 9개 · 서로 다른 종목 4개')).toBeTruthy()
     expect(section.getByText('DB손해보험 (005830)')).toBeTruthy()
+    expect(section.getByText('시세 출처 네이버 금융')).toBeTruthy()
+    expect(section.getByText(/10\. 12\. 오후 02:55/)).toBeTruthy()
     expect(section.getByText(/구조화 재무 근거 없음/)).toBeTruthy()
     expect(section.getByText(/목표 상승폭보다 손절 하락폭이 큼/)).toBeTruthy()
     expect(section.queryByText(/성공 확률/)).toBeNull()
+    expect(refreshAllAnalysis).not.toHaveBeenCalled()
+    expect(fetchSystemStatus).toHaveBeenCalledTimes(1)
+  })
+  it.each([
+    [null, '시세 출처 미확인'],
+    ['UNRECOGNIZED_SOURCE', '시세 출처 미확인'],
+    ['KIWOOM_REST_MOCK', '시세 출처 키움 REST (MOCK 시장조회)'],
+  ])('labels stored quote source %s without treating unknown suppliers as verified providers', async (quoteSource, expectedLabel) => {
+    vi.clearAllMocks()
+    vi.mocked(fetchAllUsers).mockResolvedValue([])
+    vi.mocked(fetchPendingSubscriptions).mockResolvedValue([])
+    vi.mocked(fetchSystemStatus).mockResolvedValue({ detectedStockQuality: {
+      status: 'SAVED_SNAPSHOT_ASSESSMENT', publishedSlots: 1, uniqueStocks: 1, crossModeOverlap: [],
+      scope: '네 가지 AI 모드의 최신 저장 픽', performanceConclusion: '자료 근거 평가입니다.',
+      modes: [{ mode: 'FLOW_LEADER', updatedAt: '2026-10-12T05:55:00Z', counts: {}, limitations: [], stocks: [{
+        stockCode: '005930', stockName: '삼성전자', evidenceState: 'LIMITED_EVIDENCE', quoteVerified: true,
+        quoteFresh: true, quoteSource, quoteCheckedAt: '2026-10-12T05:55:00Z', analystCount: 1,
+        financialEvidenceAvailable: false, issues: [],
+      }] }],
+    } })
+    render(<MemoryRouter initialEntries={['/admin?view=system']}><AdminPage /></MemoryRouter>)
+    const section = within(await screen.findByRole('region', { name: '검출 종목 근거 품질' }))
+
+    expect(section.getByText(expectedLabel!)).toBeTruthy()
+    expect(section.queryByText('시세 출처 UNRECOGNIZED_SOURCE')).toBeNull()
+    expect(fetchDartFinancialEvidence).not.toHaveBeenCalled()
     expect(refreshAllAnalysis).not.toHaveBeenCalled()
     expect(fetchSystemStatus).toHaveBeenCalledTimes(1)
   })

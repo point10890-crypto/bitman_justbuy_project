@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.http.client.MockClientHttpResponse;
@@ -75,6 +76,27 @@ class DartFinancialEvidenceServiceTest {
         body.withArray("list").forEach(row -> ((ObjectNode) row).remove(List.of("stock_code", "fs_div")));
         expect("CFS", body);
         assertThat(only(service.fetchEvidence(List.of("005930"))).facts().fsDiv()).isEqualTo("CFS");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings={"-"," - "})
+    void providerTotalAccountDashIsAcceptedWhileDimensionalRowsCannotReplaceTotals(String detail) {
+        mapped();var body=financial();
+        body.withArray("list").forEach(row->{
+            var item=(ObjectNode)row;item.put("account_detail",detail);
+            item.remove(List.of("stock_code","fs_div"));
+            if("IS".equals(item.path("sj_div").asText()))item.put("sj_div","CIS");
+        });
+        body.withArray("list").add(row("SCE","ifrs-full_Equity","999999","999999").put("account_detail","자본구성요소 [member]"));
+        body.withArray("list").add(row("IS","ifrs-full_Revenue","999999","999999").put("account_detail","사업부문 [member]"));
+        expect("CFS",body);
+        var stock=only(service.fetchEvidence(List.of("005930")));
+        assertThat(stock.status()).isEqualTo("COMPLETE");
+        assertThat(stock.facts().revenue()).isEqualByComparingTo("1000");
+        assertThat(stock.facts().equity()).isEqualByComparingTo("2000");
+        assertThat(stock.facts().operatingCashFlow()).isEqualByComparingTo("700");
+        assertThat(stock.facts().selectionBasis()).endsWith("INCOME_CIS");
+        server.verify();
     }
 
     @ParameterizedTest

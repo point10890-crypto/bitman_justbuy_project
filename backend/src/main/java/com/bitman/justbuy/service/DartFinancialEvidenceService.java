@@ -276,14 +276,14 @@ public class DartFinancialEvidenceService {
         String incomeStatement = "IS";
         boolean hasIs = false;
         for (JsonNode row : rows) if ("IS".equals(text(row, "sj_div"))
-            && INCOME_ACCOUNTS.contains(ACCOUNTS.getOrDefault(text(row, "account_id"), ""))) { hasIs = true; break; }
+            && totalAccount(row) && INCOME_ACCOUNTS.contains(ACCOUNTS.getOrDefault(text(row, "account_id"), ""))) { hasIs = true; break; }
         if (!hasIs) incomeStatement = "CIS";
         Map<String, Amounts> amounts = new LinkedHashMap<>();
         Set<String> ambiguous = new LinkedHashSet<>();
         List<String> risks = new ArrayList<>();
         for (JsonNode row : rows) {
             String metric = ACCOUNTS.get(text(row, "account_id"));
-            if (metric == null || !text(row, "account_detail").isBlank()) continue;
+            if (metric == null || !totalAccount(row)) continue;
             String statement = text(row, "sj_div");
             if (INCOME_ACCOUNTS.contains(metric) && !incomeStatement.equals(statement)) continue;
             if (Set.of("equity", "debt").contains(metric) && !"BS".equals(statement)) continue;
@@ -321,6 +321,12 @@ public class DartFinancialEvidenceService {
             "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=" + receipt, List.copyOf(new LinkedHashSet<>(risks)),
             period(report, true), report.year() + " 사업연도 " + reportName(report.code()) + " 보고서 기말(날짜 unknown)",
             "BOUNDED_REPORT_LOOKUP_LATEST_UNKNOWN;REQUEST_BOUND_STOCK_FS;INCOME_" + incomeStatement);
+    }
+
+    // OpenDART uses '-' for the undimensioned total; member/segment details remain excluded.
+    private static boolean totalAccount(JsonNode row){
+        String detail=text(row,"account_detail");
+        return detail.isBlank()||"-".equals(detail);
     }
 
     public String formatEvidence(EvidenceSnapshot snapshot) {

@@ -1,262 +1,113 @@
 package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.config.DartProperties;
-import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-
-import javax.xml.stream.XMLInputFactory;
-import javax.xml.stream.XMLStreamConstants;
-import javax.xml.stream.XMLStreamReader;
 import java.io.*;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.*;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
-import java.util.HashMap;
-import java.util.Map;
+import java.nio.file.attribute.FileTime;
+import java.time.*;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.zip.ZipInputStream;
 
-/**
- * DART corp_code(8자리) ↔ 종목코드(6자리) 매핑 서비스.
- * DART API는 corp_code를 사용하므로 종목코드→corp_code 변환 필요.
- */
+/** Cache-only stock-to-company lookup. Official downloads belong to independent maintenance. */
 @Service
 public class DartCorpCodeMapper {
-
     private static final Logger log = LoggerFactory.getLogger(DartCorpCodeMapper.class);
-    private static final String DART_CORPCODE_URL = "https://opendart.fss.or.kr/api/corpCode.xml";
-
-    private final DartProperties dartProperties;
+    private static final int MAX_BYTES = 4 * 1_048_576;
     private final ObjectMapper objectMapper;
     private final Path cacheFilePath;
-
-    private final Map<String, String> stockToCorpCode = new ConcurrentHashMap<>();
+    private final Clock clock;
+    private final Map<String,String> stockToCorpCode = new ConcurrentHashMap<>();
     private volatile Instant lastLoaded = Instant.EPOCH;
+    private boolean invalidNumericEntries;
     private final Object boundedCacheLock = new Object();
 
-    public DartCorpCodeMapper(DartProperties dartProperties, ObjectMapper objectMapper,
-                               @Value("${bitman.storage.data-dir:./data}") String dataDir) {
-        this.dartProperties = dartProperties;
-        this.objectMapper = objectMapper;
-        this.cacheFilePath = Path.of(dataDir, "dart_corp_codes.json");
+    @Autowired
+    public DartCorpCodeMapper(DartProperties properties, ObjectMapper mapper,
+        @Value("${bitman.storage.data-dir:./data}") String dataDir) {
+        this(properties, mapper, dataDir, Clock.systemUTC());
+    }
+    DartCorpCodeMapper(DartProperties properties, ObjectMapper mapper, String dataDir, Clock clock) {
+        this.objectMapper=mapper; this.cacheFilePath=Path.of(dataDir,"dart_corp_codes.json"); this.clock=clock;
     }
 
-    /**
-     * 6자리 종목코드 → 8자리 DART corp_code 변환.
-     * 매핑이 없으면 null 반환.
-     */
-    public String getCorpCode(String stockCode) {
-        ensureLoaded();
-        return stockToCorpCode.get(stockCode);
-    }
-
-    /** Lookup for bounded event evidence; must never download public mapping data. */
-    public String getCachedCorpCode(String stockCode) {
-        if (stockCode == null || !stockCode.matches("[0-9]{6}") || Thread.currentThread().isInterrupted()) return null;
-        Instant now = Instant.now();
-        String memory = stockToCorpCode.get(stockCode);
-        if (validCachedMapping(memory, now)) return memory;
-        // Never acquire the legacy download lock: its network operation has no bounded timeout.
-        synchronized (boundedCacheLock) {
-            memory = stockToCorpCode.get(stockCode);
-            if (validCachedMapping(memory, now)) return memory;
-            try {
-                if (!Files.isRegularFile(cacheFilePath) || Files.size(cacheFilePath) > 4 * 1_048_576L) return null;
-                Instant modified = Files.getLastModifiedTime(cacheFilePath).toInstant();
-                if (modified.isAfter(now) || !modified.isAfter(now.minus(7, ChronoUnit.DAYS))) return null;
-                byte[] bytes;
-                try (InputStream input = Files.newInputStream(cacheFilePath)) {
-                    bytes = input.readNBytes(4 * 1_048_576 + 1);
-                }
-                if (bytes.length > 4 * 1_048_576 || Thread.currentThread().isInterrupted()) return null;
-                Map<String, String> loaded = objectMapper.readValue(bytes, new TypeReference<Map<String, String>>() {});
-                if (loaded == null || loaded.isEmpty() || loaded.entrySet().stream().anyMatch(entry ->
-                    entry.getKey() == null || !entry.getKey().matches("[0-9]{6}")
-                        || entry.getValue() == null || !entry.getValue().matches("[0-9]{8}"))) return null;
-                // Replace the snapshot so removed, expired codes cannot inherit the new file's freshness.
-                lastLoaded = Instant.EPOCH;
-                stockToCorpCode.clear();
-                stockToCorpCode.putAll(loaded);
-                lastLoaded = modified;
-                return loaded.get(stockCode);
-            } catch (Exception error) {
-                log.debug("[DartCorpCode] 제한된 캐시 조회 실패: {}", error.getClass().getSimpleName());
-                return null;
-            }
-        }
-    }
-
-    private boolean validCachedMapping(String corpCode, Instant now) {
-        return corpCode != null && corpCode.matches("[0-9]{8}") && !lastLoaded.isAfter(now)
-            && lastLoaded.isAfter(now.minus(7, ChronoUnit.DAYS));
-    }
-
+    public String getCorpCode(String code) { return getCachedCorpCode(code); }
     public boolean isReady() {
-        ensureLoaded();
-        return !stockToCorpCode.isEmpty();
+        synchronized(boundedCacheLock) { if(!freshMemory()) loadFreshDisk(); return freshMemory(); }
     }
-
-    private void ensureLoaded() {
-        if (!stockToCorpCode.isEmpty() && lastLoaded.isAfter(Instant.now().minus(7, ChronoUnit.DAYS))) {
-            return; // 메모리 캐시 유효
-        }
-
-        synchronized (this) {
-            if (!stockToCorpCode.isEmpty() && lastLoaded.isAfter(Instant.now().minus(7, ChronoUnit.DAYS))) {
-                return;
-            }
-
-            // 1) 디스크 캐시에서 로드 시도
-            if (loadFromDisk()) {
-                return;
-            }
-
-            // 2) DART API에서 다운로드
-            downloadFromDart();
+    public String getCachedCorpCode(String code) {
+        if(!validStock(code)||Thread.currentThread().isInterrupted()) return null;
+        synchronized(boundedCacheLock) {
+            if(!freshMemory()&&!loadFreshDisk()) return null;
+            String corp=stockToCorpCode.get(code); return validCorp(corp)?corp:null;
         }
     }
-
-    private boolean loadFromDisk() {
+    boolean cacheNeedsRefresh() {
+        synchronized(boundedCacheLock) {
+            if(!freshMemory()) loadFreshDisk();
+            return !freshMemory() || invalidNumericEntries || !lastLoaded.isAfter(clock.instant().minus(Duration.ofDays(6)));
+        }
+    }
+    int cachedMappingCount() { synchronized(boundedCacheLock) { return freshMemory()?stockToCorpCode.size():0; } }
+    private boolean freshMemory() { return !stockToCorpCode.isEmpty()&&fresh(lastLoaded); }
+    private boolean fresh(Instant time) {
+        Instant now=clock.instant(); return !time.isAfter(now)&&time.isAfter(now.minus(Duration.ofDays(7)));
+    }
+    private boolean loadFreshDisk() {
         try {
-            if (!Files.exists(cacheFilePath)) return false;
-
-            Instant fileTime = Files.getLastModifiedTime(cacheFilePath).toInstant();
-            if (fileTime.isBefore(Instant.now().minus(7, ChronoUnit.DAYS))) {
-                log.info("[DartCorpCode] 디스크 캐시 만료 (7일 초과)");
-                return false;
+            if(!Files.isRegularFile(cacheFilePath)||Files.size(cacheFilePath)>MAX_BYTES) return false;
+            Instant modified=Files.getLastModifiedTime(cacheFilePath).toInstant(); if(!fresh(modified)) return false;
+            byte[] bytes;
+            try(InputStream input=Files.newInputStream(cacheFilePath)) { bytes=input.readNBytes(MAX_BYTES+1); }
+            if(bytes.length>MAX_BYTES||Thread.currentThread().isInterrupted()) return false;
+            JsonNode root;
+            try(JsonParser parser=objectMapper.getFactory().createParser(bytes)) {
+                parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION); root=objectMapper.readTree(parser);
             }
-
-            Map<String, String> loaded = objectMapper.readValue(
-                cacheFilePath.toFile(), new TypeReference<Map<String, String>>() {});
-            stockToCorpCode.putAll(loaded);
-            lastLoaded = Instant.now();
-            log.info("[DartCorpCode] 디스크 캐시 로드 완료: {}개 종목", loaded.size());
+            if(root==null||!root.isObject()||root.size()>20_000) return false;
+            Map<String,String> valid=new LinkedHashMap<>(); boolean invalidSupported=false;
+            var entries=root.fields();
+            while(entries.hasNext()) {
+                var entry=entries.next(); if(!validStock(entry.getKey())) continue;
+                JsonNode value=entry.getValue();
+                if(value.isTextual()&&validCorp(value.textValue())) valid.put(entry.getKey(),value.textValue());
+                else invalidSupported=true;
+            }
+            if(valid.isEmpty()||Thread.currentThread().isInterrupted()||!fresh(modified)) return false;
+            // All accesses and publications use this same lock: removed entries cannot inherit the new timestamp.
+            stockToCorpCode.clear(); stockToCorpCode.putAll(valid); lastLoaded=modified; invalidNumericEntries=invalidSupported;
             return true;
-        } catch (Exception e) {
-            log.warn("[DartCorpCode] 디스크 캐시 로드 실패: {}", e.getClass().getSimpleName());
-            return false;
+        } catch(Exception error) {
+            log.warn("[DartCorpCode] 캐시 확인 실패: {}",error.getClass().getSimpleName()); return false;
         }
     }
 
-    private void downloadFromDart() {
-        if (dartProperties.apiKey() == null || dartProperties.apiKey().isBlank()) {
-            log.warn("[DartCorpCode] DART API 키 미설정");
-            return;
-        }
-
-        try {
-            String url = DART_CORPCODE_URL + "?crtfc_key=" + dartProperties.apiKey();
-            log.info("[DartCorpCode] DART에서 corp_code 매핑 다운로드 중...");
-
-            HttpClient client = HttpClient.newBuilder().build();
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .GET()
-                .build();
-            HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
-
-            if (response.statusCode() != 200) {
-                log.error("[DartCorpCode] DART 응답 오류: {}", response.statusCode());
-                return;
-            }
-
-            // ZIP 스트리밍 → XML StAX 파싱 (메모리 최소화)
-            Map<String, String> mapping = parseZipXmlStream(response.body());
-            if (mapping.isEmpty()) {
-                log.error("[DartCorpCode] XML 파싱 결과 비어있음");
-                return;
-            }
-
-            stockToCorpCode.clear();
-            stockToCorpCode.putAll(mapping);
-            lastLoaded = Instant.now();
-
-            // 디스크에 저장
-            saveToDisk(mapping);
-
-            log.info("[DartCorpCode] DART corp_code 매핑 완료: {}개 종목", mapping.size());
-        } catch (Exception e) {
-            log.error("[DartCorpCode] DART 다운로드 실패: {}", e.getClass().getSimpleName());
+    /** Publish only after a successful full archive parse and atomic durable replacement. */
+    void publishVerifiedMapping(Map<String,String> verified, Instant captured, Runnable check) throws IOException {
+        if(verified==null||verified.isEmpty()||verified.size()>20_000||captured==null
+            ||captured.isAfter(clock.instant())||verified.entrySet().stream().anyMatch(e->!validStock(e.getKey())||!validCorp(e.getValue())))
+            throw new IOException("Invalid corporate mapping");
+        check.run();
+        byte[] bytes=objectMapper.writeValueAsBytes(new TreeMap<>(verified));
+        if(bytes.length>MAX_BYTES) throw new IOException("Corporate cache exceeds limit");
+        synchronized(boundedCacheLock) {
+            check.run();
+            Path parent=cacheFilePath.toAbsolutePath().getParent(); Files.createDirectories(parent);
+            Path temporary=Files.createTempFile(parent,"dart-corp-", ".tmp");
+            try {
+                Files.write(temporary,bytes); Files.setLastModifiedTime(temporary,FileTime.from(captured)); check.run();
+                Files.move(temporary,cacheFilePath.toAbsolutePath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
+                stockToCorpCode.clear(); stockToCorpCode.putAll(verified); lastLoaded=captured; invalidNumericEntries=false;
+            } finally { Files.deleteIfExists(temporary); }
         }
     }
-
-    /**
-     * StAX 스트리밍 파서로 ZIP InputStream 내 XML을 파싱.
-     * DOM 파서 대비 메모리 사용량 극소 (Render Free 512MB 대응).
-     */
-    private Map<String, String> parseZipXmlStream(InputStream inputStream) {
-        Map<String, String> mapping = new HashMap<>();
-        try (ZipInputStream zis = new ZipInputStream(inputStream)) {
-            var entry = zis.getNextEntry();
-            if (entry == null) return mapping;
-
-            XMLInputFactory xmlFactory = XMLInputFactory.newInstance();
-            xmlFactory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
-            xmlFactory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
-            XMLStreamReader reader = xmlFactory.createXMLStreamReader(zis, "UTF-8");
-
-            String corpCode = "";
-            String stockCode = "";
-            String currentElement = "";
-            boolean inList = false;
-
-            while (reader.hasNext()) {
-                int event = reader.next();
-                switch (event) {
-                    case XMLStreamConstants.START_ELEMENT:
-                        String name = reader.getLocalName();
-                        if ("list".equals(name)) {
-                            inList = true;
-                            corpCode = "";
-                            stockCode = "";
-                        }
-                        currentElement = name;
-                        break;
-
-                    case XMLStreamConstants.CHARACTERS:
-                        if (inList) {
-                            String text = reader.getText().trim();
-                            if ("corp_code".equals(currentElement)) {
-                                corpCode = text;
-                            } else if ("stock_code".equals(currentElement)) {
-                                stockCode = text;
-                            }
-                        }
-                        break;
-
-                    case XMLStreamConstants.END_ELEMENT:
-                        if ("list".equals(reader.getLocalName())) {
-                            if (!stockCode.isBlank() && stockCode.length() == 6 && !corpCode.isBlank()) {
-                                mapping.put(stockCode, corpCode);
-                            }
-                            inList = false;
-                        }
-                        currentElement = "";
-                        break;
-                }
-            }
-            reader.close();
-        } catch (Exception e) {
-            log.error("[DartCorpCode] ZIP/XML 파싱 실패: {}", e.getClass().getSimpleName());
-        }
-        return mapping;
-    }
-
-    private void saveToDisk(Map<String, String> mapping) {
-        try {
-            Files.createDirectories(cacheFilePath.getParent());
-            objectMapper.writeValue(cacheFilePath.toFile(), mapping);
-            log.info("[DartCorpCode] 디스크 캐시 저장: {}", cacheFilePath);
-        } catch (Exception e) {
-            log.warn("[DartCorpCode] 디스크 캐시 저장 실패: {}", e.getClass().getSimpleName());
-        }
-    }
+    static boolean validStock(String stock) { return stock!=null&&stock.matches("[0-9]{6}"); }
+    static boolean validCorp(String corp) { return corp!=null&&corp.matches("[0-9]{8}"); }
 }

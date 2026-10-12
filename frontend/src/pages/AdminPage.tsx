@@ -186,6 +186,16 @@ function publicationOutcomeLabel(outcome?: string, success?: boolean) {
   return labels[value] ?? value
 }
 
+function storedQuoteSourceLabel(source?: string | null) {
+  switch (source) {
+    case 'NAVER_FINANCE': case 'Naver Finance': return '네이버 금융'
+    case 'KIS': case 'KIS OpenAPI': case 'KIS_INTSTOCK_MULTPRICE_KRX': return 'KIS OpenAPI'
+    case 'KIWOOM_REST': return '키움 REST'
+    case 'KIWOOM_REST_MOCK': return '키움 REST (MOCK 시장조회)'
+    default: return '미확인'
+  }
+}
+
 function marketQueueLabel(status?: string) {
   return ({ COLLECTING: '순차 조회 중', READY: '확인된 근거 준비됨', COOLDOWN: '호출 간격 대기', FULL: '조회 대기열 가득 참',
     DISABLED: '조회 비활성', IDLE: '조회 요청 대기' } as Record<string, string>)[status || ''] || '진행 상태 미확인'
@@ -1033,7 +1043,7 @@ export default function AdminPage() {
                   <td>{{ BREAKOUT: '단타', REVERSAL_EDGE: '스윙', FLOW_LEADER: '주도주', CATALYST_BURST: '테마주' }[mode.mode] || mode.mode}</td>
                   <td>{stock.stockName} ({stock.stockCode})</td>
                   <td>{{ LIMITED_EVIDENCE: '근거 보완 필요', STALE: '오래된 저장 근거', REVIEW_REQUIRED: '검증 필요' }[stock.evidenceState] || stock.evidenceState}</td>
-                  <td>{stock.quoteVerified ? '저장 시세 확인' : '출처 확인 필요'}<br />{stock.quoteFresh ? '허용시간 이내 조회' : '재조회 필요'}<br />{formatDateTime(stock.quoteCheckedAt)}</td>
+                  <td>{stock.quoteVerified ? '저장 시세 확인' : '출처 확인 필요'}<br /><span>시세 출처 {storedQuoteSourceLabel(stock.quoteSource)}</span><br />{stock.quoteFresh ? '허용시간 이내 조회' : '재조회 필요'}<br />{formatDateTime(stock.quoteCheckedAt)}</td>
                   <td>{stock.analystCount}개 에이전트</td>
                   <td>{stock.issues.map(issue => ({
                     FINANCIAL_EVIDENCE_MISSING: '구조화 재무 근거 없음', CONSENSUS_UNAVAILABLE: '합의 근거 없음',
