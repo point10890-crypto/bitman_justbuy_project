@@ -67,7 +67,7 @@
 - [x] Implement adapter/CLI against tested task interfaces, immutable hashing and safe output boundary.
 - [x] Run actual saved public snapshot twice and verify digest/reuse; change a copied input to verify new fingerprint. Explain stale and legacy identity limits.
 - [x] Run whole backend suite, peer review and scoped repairs. No frontend edits require no browser proof.
-- [ ] Commit only task files after passing verification; push feature branch and integrate with current remote main when nonconflicting. No production deployment claim for standalone core.
+- [x] Commit only task files after passing verification; integrate with current remote main when nonconflicting and push main. No production deployment claim for standalone core.
 
 ## Execution record
 

@@ -62,6 +62,8 @@ JAVA_HOME="/c/Program Files/Microsoft/jdk-21.0.10.7-hotspot" ./backend/gradlew -
 
 최종 `researchCore` 실제 실행은 `savedSlots=9`, `uniqueStocks=4`, `measuredOutcomes=0`, `profitabilityStatus=INSUFFICIENT_EVIDENCE`, `productionActivationAllowed=false`로 종료했다. 동일 동결 입력의 재열기 재사용과 시각/입력 변경의 무효화는 실제 H2 회귀 검사로 확인했다. 운영 MiniPC·Pages·스케줄·회원 DB·키는 변경하지 않았다.
 
+소스 커밋 `8c09690`을 main에 fast-forward하고 원격 main으로 푸시했다. 동기화 중 추가된 원격 변경은 공개 health 스냅샷뿐이며 검증한 연구 소스는 동일했다. 원본 프로젝트의 별도 수정 파일을 보존했고, 연구 원장을 원본 작업 공간의 전용 build 디렉터리에 복사한 뒤 그 위치에서도 `researchCore`를 실행해 동일 9/4/0·실증 부족 결과를 확인했다.
+
 ## 구현 범위의 한계
 
 - 새 조건 엔진은 `COMPLETE`와 `KNOWN_SUBSET`을 구분한다. 증명하지 않은 `TOP_K_PROVEN`은 반환하지 않는다.
