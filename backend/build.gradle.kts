@@ -58,6 +58,15 @@ tasks.withType<Test> {
     useJUnitPlatform()
 }
 
+// Explicit offline research entrypoint; no service startup, provider request, or member DB.
+tasks.register<JavaExec>("researchCore") {
+    dependsOn(tasks.named("classes"))
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.bitman.justbuy.research.ResearchCoreCli")
+    args("--snapshot", (project.findProperty("researchSnapshot") ?: "../docs/DETECTED_STOCK_QUALITY_SNAPSHOT_2026_10_12.json").toString(),
+         "--workspace", (project.findProperty("researchWorkspace") ?: "build/research-core").toString())
+}
+
 // .env 파일에서 환경변수 로드 (개발용)
 tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
     val envFile = file(".env")

@@ -1,0 +1,142 @@
+{
+  "conditionDefinition" : "saved-price-distance >= 1; CURRENT_PRICE valid within 30 minutes; known subset only",
+  "conditionResult" : {
+    "coverage" : {
+      "completed" : 0,
+      "falseCount" : 0,
+      "investigated" : 4,
+      "matched" : 0,
+      "notInvestigated" : null,
+      "universeTotal" : null,
+      "unknown" : 4,
+      "unranked" : 4
+    },
+    "decisions" : [ {
+      "condition" : "UNKNOWN",
+      "eligibility" : "UNKNOWN",
+      "id" : "005830",
+      "rankValue" : null,
+      "reasons" : [ "CURRENT_PRICE:STALE", "REWARD_RISK:STALE" ]
+    }, {
+      "condition" : "UNKNOWN",
+      "eligibility" : "UNKNOWN",
+      "id" : "011200",
+      "rankValue" : null,
+      "reasons" : [ "CURRENT_PRICE:STALE", "REWARD_RISK:STALE" ]
+    }, {
+      "condition" : "UNKNOWN",
+      "eligibility" : "UNKNOWN",
+      "id" : "028670",
+      "rankValue" : null,
+      "reasons" : [ "CURRENT_PRICE:STALE", "REWARD_RISK:STALE" ]
+    }, {
+      "condition" : "UNKNOWN",
+      "eligibility" : "UNKNOWN",
+      "id" : "038500",
+      "rankValue" : null,
+      "reasons" : [ "CURRENT_PRICE:STALE", "REWARD_RISK:STALE" ]
+    } ],
+    "matched" : [ ],
+    "rankingScope" : "KNOWN_SUBSET"
+  },
+  "dataOrigin" : "ACTUAL_PUBLIC_SAVED_PICKS",
+  "decisionCutoff" : "2026-10-13T23:24:40.432897600Z",
+  "inputDigest" : "1b279fe8c4956c71972e0c8ae47a4187ed08871941e76debc1a0baa80fac9ce7",
+  "learningReview" : {
+    "baselineMeanNet" : null,
+    "challengerMeanNet" : null,
+    "completeDates" : 0,
+    "dailyComparisons" : [ ],
+    "eligiblePairs" : 0,
+    "expectedPairs" : 0,
+    "independentDates" : 0,
+    "meanPairedDelta" : null,
+    "productionActivationAllowed" : false,
+    "reasonCohorts" : {
+      "MISSING_DENOMINATOR" : 1,
+      "TOO_FEW_INDEPENDENT_DATES" : 1
+    },
+    "status" : "INSUFFICIENT_EVIDENCE",
+    "suppliedObservations" : 0
+  },
+  "limitations" : [ "PUBLIC_SAVED_PICKS_ONLY", "LEGACY_IDENTITY_NOT_POINT_IN_TIME_MASTER", "FIRST_AVAILABLE_AT_IMPORT", "PRICE_DISTANCE_IS_NOT_EXPECTED_RETURN", "NO_FUTURE_OUTCOMES_IN_PICK_SNAPSHOT" ],
+  "measuredOutcomes" : 0,
+  "outcomes" : [ {
+    "entryDate" : null,
+    "excessReturnPct" : null,
+    "exitDate" : null,
+    "exitPrice" : null,
+    "grossReturnPct" : null,
+    "horizonSessions" : 5,
+    "lowerReturnPct" : null,
+    "measurement" : "NEXT_SESSION_OPEN_SIMULATION",
+    "netReturnPct" : null,
+    "pathState" : "NOT_REQUESTED",
+    "policyVersion" : "NEXT_KRX_OPEN_5_CLOSE_V1",
+    "reasons" : [ "INVALID_SIGNAL" ],
+    "referencePrice" : null,
+    "signalId" : "archive-005830",
+    "state" : "UNMEASURABLE",
+    "upperReturnPct" : null
+  }, {
+    "entryDate" : null,
+    "excessReturnPct" : null,
+    "exitDate" : null,
+    "exitPrice" : null,
+    "grossReturnPct" : null,
+    "horizonSessions" : 5,
+    "lowerReturnPct" : null,
+    "measurement" : "NEXT_SESSION_OPEN_SIMULATION",
+    "netReturnPct" : null,
+    "pathState" : "NOT_REQUESTED",
+    "policyVersion" : "NEXT_KRX_OPEN_5_CLOSE_V1",
+    "reasons" : [ "INVALID_SIGNAL" ],
+    "referencePrice" : null,
+    "signalId" : "archive-011200",
+    "state" : "UNMEASURABLE",
+    "upperReturnPct" : null
+  }, {
+    "entryDate" : null,
+    "excessReturnPct" : null,
+    "exitDate" : null,
+    "exitPrice" : null,
+    "grossReturnPct" : null,
+    "horizonSessions" : 5,
+    "lowerReturnPct" : null,
+    "measurement" : "NEXT_SESSION_OPEN_SIMULATION",
+    "netReturnPct" : null,
+    "pathState" : "NOT_REQUESTED",
+    "policyVersion" : "NEXT_KRX_OPEN_5_CLOSE_V1",
+    "reasons" : [ "INVALID_SIGNAL" ],
+    "referencePrice" : null,
+    "signalId" : "archive-028670",
+    "state" : "UNMEASURABLE",
+    "upperReturnPct" : null
+  }, {
+    "entryDate" : null,
+    "excessReturnPct" : null,
+    "exitDate" : null,
+    "exitPrice" : null,
+    "grossReturnPct" : null,
+    "horizonSessions" : 5,
+    "lowerReturnPct" : null,
+    "measurement" : "NEXT_SESSION_OPEN_SIMULATION",
+    "netReturnPct" : null,
+    "pathState" : "NOT_REQUESTED",
+    "policyVersion" : "NEXT_KRX_OPEN_5_CLOSE_V1",
+    "reasons" : [ "INVALID_SIGNAL" ],
+    "referencePrice" : null,
+    "signalId" : "archive-038500",
+    "state" : "UNMEASURABLE",
+    "upperReturnPct" : null
+  } ],
+  "priceDistanceWarnings" : 4,
+  "productionActivationAllowed" : false,
+  "profitabilityStatus" : "INSUFFICIENT_EVIDENCE",
+  "resultDigest" : "2d2b035ef51038a0e81946f6b0b2cbce3cbb8ed90215c07a384c5bd259763bd7",
+  "reusedValidatedStage" : false,
+  "runId" : "72adceef8cda4bd266fa9ba11114054a75c5561d5dc2900ecf96108acd2dd985",
+  "savedSlots" : 9,
+  "schemaVersion" : "profit-research-core-v1",
+  "uniqueStocks" : 4
+}
