@@ -99,6 +99,37 @@ it('stops after three additional progress requests when the frozen flow work rem
   expect(engineState(result.current).combined?.map(row => row.code)).toEqual(['000003'])
 })
 
+it.each([
+  { retryAfterMs: 10_000, readyAfterMs: 40_000, finishAtMs: 60_000, requestTimes: [10_000, 30_000, 60_000] },
+  { retryAfterMs: 25_000, readyAfterMs: 65_000, finishAtMs: 80_000, requestTimes: [25_000, 50_000, 80_000] },
+])('captures late completed flow evidence with three bounded progress checks and provider minimum $retryAfterMs', async ({ retryAfterMs, readyAfterMs, finishAtMs, requestTimes }) => {
+  const initial = pending(['000003'], {
+    flowCoverage: { requestedCount: 20, availableCount: 2, pendingCount: 18, unavailableCount: 0 },
+    progress: { ...progress, retryAfterMs },
+  })
+  const observedTimes: number[] = []
+  const fetchMock = routes(initial, () => {
+    const elapsed = Date.now() - now.getTime()
+    observedTimes.push(elapsed)
+    return elapsed >= readyAfterMs ? response(['000001'], {
+      flowCoverage: { requestedCount: 20, availableCount: 20, pendingCount: 0, unavailableCount: 0 }, progress: null,
+    }) : initial
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  const { result } = renderHook(() => useSearchUpgrade('최근 1거래일 외국인 순매수 20일선 위', { result: refused, loading: false, error: null }))
+  await tick()
+  expect(engineState(result.current).combined?.map(row => row.code)).toEqual(['000003'])
+  await tick(finishAtMs)
+  expect(engineState(result.current).combined?.map(row => row.code)).toEqual(['000001'])
+  expect(engineState(result.current).realtime?.result?.flowCoverage?.pendingCount).toBe(0)
+  expect(engineState(result.current).realtime?.trackingExhausted).not.toBe(true)
+  expect(observedTimes).toEqual(requestTimes)
+  for (const path of ['/api/engine/translate', '/api/engine/screen', '/api/engine/backtest', '/api/analysis/keyword-search']) {
+    expect(requestPaths(fetchMock).filter(url => url.endsWith(path))).toHaveLength(1)
+  }
+  expect(requestPaths(fetchMock).filter(url => url.endsWith('/keyword-search/progress'))).toHaveLength(3)
+})
+
 it.each(['transport', 'UNAVAILABLE', 'UNSUPPORTED'] as const)('keeps confirmed intersection and daily evidence after a %s progress failure', async kind => {
   const fetchMock = routes(pending(), () => {
     if (kind === 'transport') throw new Error('진행 확인 연결 실패')
@@ -317,6 +348,8 @@ it('does not overlap progress requests while the preceding response is pending',
   await tick(30_000)
   expect(requestPaths(fetchMock).filter(url => url.endsWith('/keyword-search/progress'))).toHaveLength(1)
   await act(async () => { resolve(json(pending())); await Promise.resolve() })
+  await tick(10_000)
+  expect(requestPaths(fetchMock).filter(url => url.endsWith('/keyword-search/progress'))).toHaveLength(1)
   await tick(10_000)
   expect(requestPaths(fetchMock).filter(url => url.endsWith('/keyword-search/progress'))).toHaveLength(2)
 })

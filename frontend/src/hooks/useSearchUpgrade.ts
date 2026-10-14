@@ -148,7 +148,7 @@ export function useSearchUpgrade(
         if (!coverage?.pendingCount || !progress || ctl.signal.aborted) return
         const expiresAt = Math.min(Date.parse(originalProgress.expiresAt), Date.parse(progress.expiresAt))
         if (Date.now() >= expiresAt) { exhaust(); return }
-        const delay = Math.max(10_000, Math.min(30_000, progress.retryAfterMs))
+        const delay = Math.max(10_000, Math.min(30_000, progress.retryAfterMs), (attempt + 1) * 10_000)
         if (!await waitForProgress(delay, ctl.signal)) return
         if (Date.now() >= expiresAt) { exhaust(); return }
         try {
