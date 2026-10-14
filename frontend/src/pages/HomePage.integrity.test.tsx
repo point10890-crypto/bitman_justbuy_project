@@ -39,6 +39,12 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
+it('links to public event research without adding research stocks to existing ranking cards', () => {
+  render(tree())
+  expect(screen.getByRole('link', { name: '공개 사건 연구' }).getAttribute('href')).toBe('/research/events')
+  expect(screen.queryByRole('article', { name: /사건 연구/ })).toBeNull()
+})
+
 it('manual section rows use the same response timestamp and yield to a later feed response', async () => {
   vi.mocked(fetchConditionSection).mockResolvedValue(section('MANUAL_0900', '2026-05-18T09:00:00+09:00'))
   const { container, rerender } = render(tree())

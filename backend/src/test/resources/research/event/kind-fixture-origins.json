@@ -1,0 +1,23 @@
+[
+  {
+    "file": "kind-kosdaq-application-20261014.html",
+    "sourceUrl": "https://kind.krx.co.kr/external/2026/10/13/000734/20261013001629/70789.htm",
+    "capturedAt": "2026-10-14",
+    "sha256": "c6f51af53005465e64a34afa9ae2485a1b18892aabe9fec23d4107df10d747dd",
+    "content": "Unmodified official public HTML; bytes preserved"
+  },
+  {
+    "file": "kind-kosdaq-execution-20261013.html",
+    "sourceUrl": "https://kind.krx.co.kr/external/2026/10/13/000725/20261013001620/70800.htm",
+    "capturedAt": "2026-10-14",
+    "sha256": "e181e4dbd0e0f608146065efe8077949f601c7c29e6db70e037754b04e41e930",
+    "content": "Unmodified official public HTML; bytes preserved"
+  },
+  {
+    "file": "kind-kospi-execution-20261013.html",
+    "sourceUrl": "https://kind.krx.co.kr/external/2026/10/13/000724/20261013001619/99414.htm",
+    "capturedAt": "2026-10-14",
+    "sha256": "972cd2442ad4ff49b1880ab1ac5aa7f4085706fabfa0d1936ceb4f6db9f185ae",
+    "content": "Unmodified official public HTML; bytes preserved"
+  }
+]

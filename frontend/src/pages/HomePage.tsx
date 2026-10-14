@@ -433,6 +433,11 @@ export default function HomePage() {
         ))}
       </nav>
 
+      <div className="condition-track-summary" aria-label="공개 사건 연구 바로가기">
+        <Link to="/research/events">공개 사건 연구</Link>
+        <span>공식 공급 계약·자사주 근거와 발행 후 성과 관측</span>
+      </div>
+
       {conditionsError && (
         <div className="condition-feed-status">
           조건검색 결과를 불러오지 못해 기본 화면을 표시합니다.

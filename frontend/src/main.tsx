@@ -15,6 +15,7 @@ import PublicOnlyRoute from './components/guards/PublicOnlyRoute'
 import AdminPage from './pages/AdminPage'
 import ClosingBetHistoryPage from './pages/ClosingBetHistoryPage'
 import TrackRecordPage from './pages/TrackRecordPage'
+import EventResearchPage from './pages/EventResearchPage'
 import SubscriptionGateWatcher from './components/guards/SubscriptionGateWatcher'
 import LandingPage from './pages/LandingPage'
 import './index.css'
@@ -62,6 +63,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/supply" element={<SupplyPage />} />
             <Route path="/history/closing-bet" element={<ClosingBetHistoryPage />} />
             <Route path="/performance" element={<TrackRecordPage />} />
+            <Route path="/research/events" element={<EventResearchPage />} />
             <Route path="/my" element={<MyPage />} />
             <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
           </Route>

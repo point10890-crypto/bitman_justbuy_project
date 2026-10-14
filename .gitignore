@@ -74,6 +74,9 @@ backend/backend-bootrun.*
 backups/
 
 # Analysis caches (regenerable from market data) — keep out of git
+backend/data/.admin-bootstrap-password
+backend/data/analysis-evidence/
+backend/data/event-research/
 backend/data/*.json
 !backend/data/.gitkeep
 !backend/data/dart_corp_codes.json

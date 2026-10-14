@@ -1,0 +1,2 @@
+# Preserve captured official source bytes and provenance hashes.
+backend/src/test/resources/research/event/kind-*.html binary
