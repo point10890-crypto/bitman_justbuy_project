@@ -7,6 +7,7 @@ import { fetchConditionSection, type ConditionSectionResponse } from '../api/con
 import { AgentMascot } from '../components/app/AgentMascot'
 import { KeywordSearchPanel } from '../components/app/KeywordSearchPanel'
 import { EngineSearchSection } from '../components/app/ConditionEngineViews'
+import { ConditionLab } from './ConditionLabPage'
 import { searchKeywordStocks, type KeywordSearchResponse } from '../api/keywordSearchApi'
 import { formatConditionAsOf, latestAnalysisPresentation } from '../lib/conditionPresentation'
 import './HomePage.css'
@@ -432,6 +433,7 @@ export default function HomePage() {
         {sections.map(section => (
           <Link key={section.id} className={`agent-card-${section.icon}`} to={`/#${section.id}`}><span className="agent-mode-dot" aria-hidden="true" /><span>{section.title}</span></Link>
         ))}
+        <Link className="agent-card-ai" to="/#ai-search"><span className="agent-mode-dot" aria-hidden="true" /><span>AI 조건검색</span></Link>
       </nav>
 
       <div className="condition-track-summary" aria-label="공개 사건 연구 바로가기">
@@ -453,6 +455,8 @@ export default function HomePage() {
           {mainConditions.asOf && <span>{formatConditionAsOf(mainConditions.asOf)} 기준</span>}
         </div>
       )}
+
+      <ConditionLab embedded />
 
       <div className="agent-section-heading">
         <div><h2>조건별 관심 종목</h2><p>카드를 선택해 후보를 확인하고 상세 분석을 받아보세요.</p></div>

@@ -143,7 +143,7 @@
   color: #e4d6ad;
   font-size: 11px;
 }
-.agent-home .agent-mode-nav { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin: 18px 0 24px; }
+.agent-home .agent-mode-nav { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin: 18px 0 24px; }
 .agent-home .agent-mode-nav a {
   display: flex;
   align-items: center;
@@ -189,6 +189,8 @@
 .agent-home .agent-card-theme { --mode-accent: #d4aa88; --mode-tint: #33291f; }
 .agent-home .agent-card-close { --mode-accent: #b6bea0; --mode-tint: #2b3026; }
 .agent-home .agent-card-alert { --mode-accent: #a5b4c4; --mode-tint: #26303a; }
+.agent-home .agent-card-ai { --mode-accent: #f3cf45; --mode-tint: #3a321a; }
+.agent-home .agent-mode-nav a.agent-card-ai { border-color: #6b5a28; color: #f1d982; }
 .agent-home .rank-card-title-row { grid-template-columns: 48px minmax(0, 1fr) auto; gap: 12px; margin-bottom: 18px; }
 .agent-home .rank-card-title-row h2 { font-size: 25px; font-weight: 800; letter-spacing: -.04em; }
 .agent-home .rank-title-copy > span { margin-top: 5px; color: #a4adba; font-size: 11px; font-weight: 500; line-height: 1.45; }
@@ -273,7 +275,7 @@
   .agent-home .maker-search-box { grid-column: 1 / -1; gap: 8px; padding: 6px 6px 6px 11px; grid-template-columns: 14px minmax(0, 1fr) auto; width: 100%; }
   .agent-home .maker-search-box input { height: 40px; font-size: 16px; }
   .agent-home .maker-search-box button { min-height: 40px; font-size: 11px; padding: 0 10px; }
-  .agent-home .agent-mode-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin: 12px 0 18px; }
+  .agent-home .agent-mode-nav { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin: 12px 0 18px; }
   .agent-home .agent-mode-nav a { min-height: 42px; font-size: 12px; }
   .agent-home .condition-track-summary { gap: 9px 0; margin-bottom: 12px; padding: 12px 0; }
   .agent-home .condition-track-summary span { padding: 0 9px; font-size: 10px; }

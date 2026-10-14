@@ -317,7 +317,7 @@ export function EngineSearchSection({ query }: { query: string }) {
   }
 
   return (
-    <section className="engine-section" aria-label="AI 조건검색">
+    <section className="engine-section" aria-label="AI 조건검색 결과">
       <header>
         <h3>AI 조건검색 · 과거 성과 검증</h3>
         <p className="lab-muted">같은 질문을 조건식으로 바꿔 최근 확정 종가 기준으로 찾고, 같은 날 다른 종목과 비교한 과거 성과와 위험 등급을 보여드립니다.</p>

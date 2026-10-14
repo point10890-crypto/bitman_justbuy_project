@@ -171,3 +171,22 @@
 .engine-section .lab-panel { padding: 14px; background: #12171d; }
 .engine-section .lab-translation { margin-top: 0; padding-top: 0; border-top: 0; }
 .engine-section .lab-actions { margin: 12px 0; }
+
+/* 홈 카드로 들어간 AI 조건검색 — 홈의 조건 카드와 같은 표면·모서리·강조선 */
+.lab-page.lab-embedded {
+  position: relative; width: auto; min-height: 0; margin: 0 0 8px; padding: 22px;
+  background: #161b21; border: 1px solid #2c343e; border-radius: 16px; scroll-margin-top: 130px;
+}
+.lab-embedded::before { content: ''; position: absolute; top: 0; left: 22px; width: 38px; height: 3px; border-radius: 0 0 3px 3px; background: var(--lab-gold); }
+.lab-embedded-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.lab-embedded-head h2 { font-size: 25px; font-weight: 800; letter-spacing: -.04em; }
+.lab-embedded-head p { margin-top: 6px !important; max-width: 720px; color: #a4adba; font-size: 12.5px; line-height: 1.55; }
+.lab-embedded-head > span { flex-shrink: 0; color: #a99b76; font-size: 11px; white-space: nowrap; }
+.lab-embedded .lab-status-grid { margin-top: 16px; }
+.lab-embedded .lab-tabs { margin: 18px 0 14px; }
+.lab-embedded .lab-panel { background: #12171d; border-color: #2a323c; }
+@media (max-width: 760px) {
+  .lab-page.lab-embedded { padding: 18px 14px; border-radius: 14px; scroll-margin-top: 98px; }
+  .lab-embedded-head h2 { font-size: 21px; }
+  .lab-embedded-head > span { display: none; }
+}

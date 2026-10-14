@@ -159,13 +159,24 @@ it('the same question also runs through the AI condition engine with its evidenc
   render(tree())
   fireEvent.change(screen.getByRole('textbox', { name: '분석할 종목명 또는 조건' }), { target: { value: '20일선 위' } })
   fireEvent.submit(screen.getByRole('search'))
-  const section = await screen.findByRole('region', { name: 'AI 조건검색' })
+  const section = await screen.findByRole('region', { name: 'AI 조건검색 결과' })
   expect(await within(section).findByText('엔진 검색 종목')).toBeTruthy()
   expect(within(section).getByText('20일선 이격 +0.0% 초과', { selector: 'li' })).toBeTruthy()
   const screenCall = engine.mock.calls.find(([u]) => u.endsWith('/api/engine/screen'))
   expect(screenCall).toBeTruthy()
   const body = JSON.parse(String(fetchMock.mock.calls.find(([u]) => String(u).endsWith('/api/engine/screen'))![1]!.body))
   expect(body).toEqual({ strategy })                       // the validated DSL, never the raw sentence
+})
+
+it('the home carries the AI condition search card and a shortcut to it', async () => {
+  vi.stubGlobal('fetch', withEngine(vi.fn()))
+  render(tree())
+  const card = await screen.findByRole('region', { name: 'AI 조건검색' })
+  expect(within(card).getByLabelText('찾고 싶은 종목을 말로 적어 주세요')).toBeTruthy()
+  expect(within(card).getByRole('tab', { name: '검증된 전략' })).toBeTruthy()
+  expect(within(card).getByRole('tab', { name: '위험 점검' })).toBeTruthy()
+  const shortcut = within(screen.getByRole('navigation', { name: '조건검색 바로가기' })).getByRole('link', { name: 'AI 조건검색' })
+  expect(shortcut.getAttribute('href')).toBe('/#ai-search')
 })
 
 it('closing a keyword search aborts its request and rejects a late response after a newer search', async () => {
