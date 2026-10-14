@@ -188,7 +188,7 @@ it('a query the live search understands keeps its live results and gains daily r
   expect(await within(matches).findByText(/위험 낮음 · 5거래일 변동 보통 ±2.5%/)).toBeTruthy()  // daily evidence added
   expect(within(panel).getByRole('region', { name: '조건 과거 성과' }).textContent).toContain('양의 성과(통계적 확정 전)')
   expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith('/api/engine/screen'))).toBe(false)  // live search led
-  expect(within(screen.getByRole('search')).getAllByRole('button')).toHaveLength(1)               // still one box, one button
+  expect(within(screen.getByRole('search')).getAllByRole('button').map(b => b.textContent)).toEqual(['AI 조건검색'])  // one box, one button
 })
 
 it('a daily-bar query the live search refuses is answered by the engine in the same dialog', async () => {

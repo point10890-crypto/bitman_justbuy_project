@@ -415,7 +415,7 @@ export default function HomePage() {
               onChange={event => setQuery(event.target.value)}
               placeholder="종목·조건 검색"
             />
-            <button type="submit">실데이터 조건검색</button>
+            <button type="submit">AI 조건검색</button>
           </form>
           <div className="keyword-search-examples" aria-label="조건검색 예시">
             {keywordExamples.map(example => (
