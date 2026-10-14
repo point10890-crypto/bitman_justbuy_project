@@ -3,6 +3,13 @@
 .detection-evidence header > span, .detection-evidence small { color: #a9b7c8; font-size: 11px; }
 .detection-evidence p { margin: 8px 0; line-height: 1.6; white-space: pre-line; }
 .detection-category h3 { font-size: 14px; color: #f4d65c; margin: 18px 0 8px; }
+.detection-category { border-bottom: 1px solid #303b49; }
+.detection-category > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 48px; cursor: pointer; list-style: none; }
+.detection-category > summary::-webkit-details-marker { display: none; }
+.detection-category > summary h3 { margin: 0; }
+.detection-category > summary > span { color: #b9c6d7; font-size: 12px; }
+.detection-category > summary > span::after { content: ' ＋'; }
+.detection-category[open] > summary > span::after { content: ' −'; }
 .detection-check { padding: 10px 0; border-top: 1px solid #303b49; }
 .detection-check > div { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .check-status { display: inline-block; flex-shrink: 0; border-radius: 5px; padding: 2px 7px; font-size: 11px; background: #303b49; color: #dbe3ee; }

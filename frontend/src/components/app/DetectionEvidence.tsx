@@ -17,15 +17,16 @@ export function DetectionEvidence({ signal, onAnalyze }: { signal: ConditionSign
     <p>아래는 저장된 관측값의 판정입니다. 후보 편입이 모든 조건의 통과를 의미하지 않습니다. 거래대금 재조회 시각과 최초 포착 시각은 다를 수 있습니다.</p>
     {categories.map(([key, title]) => {
       const items = checks.filter(c => c.category === key)
-      return <div className="detection-category" key={key}>
-        <h3>{title}</h3>
+      const status = items.some(c => c.status === 'FAIL') ? '미충족 있음' : items.some(c => c.status === 'PASS') ? '확인된 근거' : '근거 미확인'
+      return <details className="detection-category" key={key} open={key === 'liquidity'}>
+        <summary><h3>{title}</h3><span>{status}</span></summary>
         {items.length ? items.map(item => <div className="detection-check" key={item.id}>
           <div><strong>{item.criterion}</strong><span className={`check-status check-${item.status}`}>
             {item.status === 'PASS' ? '통과' : item.status === 'FAIL' ? '미충족' : '미확인'}</span></div>
           <p>{item.observedValue || '관측값 없음'}</p>
           <small>출처: {item.source || '미확인'} · 기준 시각: {item.observedAt ? formatConditionAsOf(item.observedAt) : '미확인'}</small>
         </div>) : <div className="detection-check"><span className="check-status check-UNKNOWN">미확인</span><p>구조화된 조건·관측값이 없는 저장 결과입니다.</p></div>}
-      </div>
+      </details>
     })}
     <details className="detection-commentary"><summary>저장된 분석·엔진 설명 (통과 판정과 구분)</summary>
       <p>{signal.summary || '저장된 설명 없음'}</p>

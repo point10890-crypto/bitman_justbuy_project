@@ -462,7 +462,7 @@ export default function HomePage() {
       </section>
 
       <nav className="agent-mode-nav" aria-label="조건검색 바로가기">
-        {sections.map(section => (
+        {sections.filter(section => section.id !== 'alerts').map(section => (
           <Link key={section.id} className={`agent-card-${section.icon}`} to={`/#${section.id}`}><span className="agent-mode-dot" aria-hidden="true" /><span>{section.title}</span></Link>
         ))}
       </nav>
@@ -547,9 +547,9 @@ export default function HomePage() {
                     <span className="rank-evidence-hint">검출 근거 {expandedEvidence === `${section.id}-${row.code || row.name}` ? '접기' : '펼치기'}</span>
                   </span>
                 </span>
-                <span>{locked ? maskValue(row.a) : row.a}</span>
-                <span>{locked ? maskValue(row.b) : row.b}</span>
-                <span className={row.c.startsWith('+') ? 'profit-text' : ''}>{locked ? maskValue(row.c) : row.c}</span>
+                <span data-mobile-label={section.columns[1]}>{locked ? maskValue(row.a) : row.a}</span>
+                <span data-mobile-label={section.columns[2]}>{locked ? maskValue(row.b) : row.b}</span>
+                <span data-mobile-label={section.columns[3]} className={row.c.startsWith('+') ? 'profit-text' : ''}>{locked ? maskValue(row.c) : row.c}</span>
               </button>
               {!locked && row.signal && expandedEvidence === `${section.id}-${row.code || row.name}` &&
                 <DetectionEvidence signal={row.signal} onAnalyze={() => section.mode && runAnalysis(`${row.name} ${section.title} 상세 분석`, section.mode === 'JONGGA_V2' ? '분석해줘' : section.mode)} />}

@@ -18,6 +18,8 @@ it('distinguishes measured passes, failures and unverified AI assertions with pr
   }
   render(<DetectionEvidence signal={signal} onAnalyze={vi.fn()} />)
   const panel = within(screen.getByRole('region', { name: '테스트종목 검출 근거' }))
+  expect(panel.getByRole('heading', { name: '거래대금' }).closest('details')?.open).toBe(true)
+  expect(panel.getByRole('heading', { name: '기술적 분석' }).closest('details')?.open).toBe(false)
   expect(panel.getAllByText('통과')).toHaveLength(1)
   expect(panel.getAllByText('미충족')).toHaveLength(1)
   expect(panel.getAllByText('미확인')).toHaveLength(3)

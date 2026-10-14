@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import type { MainConditionResponse } from '../api/conditionApi'
 import { PWAInstallPrompt } from '../components/app/PWAInstallPrompt'
 import { useMarketData } from '../hooks/useMarketData'
 import { useMainConditions } from '../hooks/useMainConditions'
+import './MobileApp.css'
 
 const LAST_ALERT_EVENT_KEY = 'bitman_seen_alert_event_key'
 const KAKAO_URL = 'https://open.kakao.com/o/sJVLbWUe'
@@ -58,6 +59,15 @@ export default function AppLayout() {
   const isAdminPage = location.pathname.startsWith('/admin')
   const { data: conditionFeed, refetch: refetchConditions } = useMainConditions(isAdminPage ? 0 : 60_000)
   const [menuOpen, setMenuOpen] = useState(false)
+  const menuTrigger = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    if (!menuOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setMenuOpen(false); menuTrigger.current?.focus() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [menuOpen])
   const [seenAlertEventKey, setSeenAlertEventKey] = useState(getStoredAlertEventKey)
   const [notifiedAlertEventKey, setNotifiedAlertEventKey] = useState('')
   const [hasNewAlert, setHasNewAlert] = useState(false)
@@ -194,7 +204,7 @@ export default function AppLayout() {
   }
 
   return (
-    <div className={`search-app-shell${isAdminPage ? ' admin-mode-shell' : ''}${location.pathname === '/' ? ' agent-home-shell' : ''}`}>
+    <div className={`search-app-shell${isAdminPage ? ' admin-mode-shell' : ''}${location.pathname === '/' ? ' agent-home-shell' : ''}${menuOpen ? ' menu-open' : ''}`}>
       <header className="search-app-header">
         <div className="search-header-top">
           <button className="bitman-logo-lockup app-logo-lockup" type="button" onClick={() => navigate('/')}>
@@ -217,7 +227,7 @@ export default function AppLayout() {
                     type="button"
                     aria-label={menuOpen ? '메뉴 닫기' : '메뉴 열기'}
                     aria-expanded={menuOpen}
-                    onClick={() => setMenuOpen(open => !open)}
+                    onClick={event => { menuTrigger.current = event.currentTarget; setMenuOpen(open => !open) }}
                   >
                     <span />
                     <span />
@@ -225,7 +235,7 @@ export default function AppLayout() {
                   </button>
 
                   {menuOpen && (
-                    <div className="header-menu-panel" role="menu">
+                    <div className="header-menu-panel" role="menu" aria-label="더보기">
                       <span className="header-menu-label">조건검색</span>
                       <button type="button" role="menuitem" onClick={refreshMenuData} disabled={refreshingMenu}>
                         <strong>{refreshingMenu ? '갱신 중' : '새로고침'}</strong>
@@ -329,7 +339,7 @@ export default function AppLayout() {
 
       <Outlet />
 
-      {!isAdminPage && alertNotice && (
+      {!isAdminPage && !menuOpen && alertNotice && (
         <div className="event-alert-toast" role="status" aria-live="polite">
           <span className="event-alert-bell" />
           <div>
@@ -337,6 +347,7 @@ export default function AppLayout() {
             <p>{alertNotice}</p>
           </div>
           <button type="button" onClick={goAlerts}>보기</button>
+          <button type="button" aria-label="알림 안내 닫기" onClick={() => setAlertNotice(null)}>×</button>
         </div>
       )}
 
@@ -348,6 +359,15 @@ export default function AppLayout() {
         />
       )}
 
+      {!isAdminPage && (
+        <nav className="mobile-app-nav" aria-label="모바일 주요 메뉴">
+          <button type="button" aria-current={isHomeActive ? 'page' : undefined} onClick={goMain}><span className="nav-line-icon home-icon" aria-hidden="true" />홈</button>
+          <button type="button" aria-current={currentSection && currentSection !== 'alerts' ? 'page' : undefined} onClick={() => goHomeSection('short-term')}><span className="nav-line-icon target-icon" aria-hidden="true" />조건검색</button>
+          <button type="button" aria-current={isSectionActive('alerts') ? 'page' : undefined} onClick={goAlerts}><span className="nav-line-icon bell-icon" aria-hidden="true">{hasNewAlert && <i />}</span>알림</button>
+          <button type="button" aria-current={location.pathname === '/my' ? 'page' : undefined} onClick={() => goMenuRoute('/my')}><span className="nav-line-icon admin-icon" aria-hidden="true" />마이</button>
+          <button type="button" aria-expanded={menuOpen} aria-haspopup="menu" onClick={event => { menuTrigger.current = event.currentTarget; setMenuOpen(open => !open) }}><span className="mobile-more-icon" aria-hidden="true" />더보기</button>
+        </nav>
+      )}
       {!isAdminPage && (
         <nav className="search-bottom-nav" aria-label="주요 메뉴">
           <button className={isHomeActive ? 'active' : ''} aria-current={isHomeActive ? 'page' : undefined} type="button" onClick={goMain}>

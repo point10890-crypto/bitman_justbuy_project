@@ -1,0 +1,78 @@
+/* BitMan mobile: the stock name leads; numbers remain aligned beneath it. */
+.mobile-app-nav { display: none; }
+.mobile-more-icon::before { content: '···'; font-size: 26px; line-height: 20px; }
+.search-app-shell :is(button, a, summary):focus-visible { outline: 2px solid #f3cf48; outline-offset: 3px; }
+.search-app-shell .agent-home .agent-mode-nav { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+
+@media (max-width: 600px) {
+  .search-app-shell:not(.admin-mode-shell) { padding-bottom: calc(82px + env(safe-area-inset-bottom)); }
+  .search-app-shell .search-bottom-nav { display: none; }
+  .search-app-shell .mobile-app-nav { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); position: fixed; inset: auto 0 0; z-index: 120; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); background: #10151b; border-top: 1px solid #343c46; }
+  .mobile-app-nav button { min-height: 56px; min-width: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: transparent; border: 0; border-radius: 10px; color: #aeb9c8; font: inherit; font-size: 12px; }
+  .mobile-app-nav button[aria-current="page"], .mobile-app-nav button[aria-expanded="true"] { color: #f3cf48; background: #28261c; }
+  .mobile-app-nav button > span { position: relative; font-size: 23px; line-height: 24px; height: 24px; }
+  .mobile-app-nav i { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: #f3cf48; right: -4px; top: 0; }
+  .search-app-shell:not(.admin-mode-shell) .search-header-top { padding: 8px 16px; min-height: 56px; }
+  .search-app-shell .header-date, .search-app-shell .app-logo-lockup small { display: none; }
+  .search-app-shell .hamburger-button { width: 44px; height: 44px; }
+  .search-app-shell .header-menu-panel { position: fixed; top: auto; bottom: calc(76px + env(safe-area-inset-bottom)); left: 12px; right: 12px; width: auto; max-height: min(70dvh, 640px); overflow-y: auto; overscroll-behavior: contain; border-radius: 18px; padding: 12px; z-index: 140; }
+  .search-app-shell .header-menu-panel button { min-height: 52px; }
+  .search-app-shell .header-menu-panel strong { font-size: 15px; }
+  .search-app-shell .header-menu-panel button > span { font-size: 12px; }
+  .search-app-shell .header-menu-backdrop { z-index: 110; }
+  .search-app-shell.menu-open .search-app-header { z-index: 150; }
+  .search-app-shell.menu-open .header-menu { z-index: 140; }
+  .search-app-shell.menu-open .mobile-app-nav { z-index: 160; }
+  .search-app-shell .event-alert-toast { grid-template-columns: 32px minmax(0, 1fr) auto auto; }
+  .search-app-shell .event-alert-toast button { min-width: 44px; min-height: 44px; }
+  .search-app-shell .event-alert-toast { left: 12px; right: 12px; bottom: calc(84px + env(safe-area-inset-bottom)); width: auto; max-width: none; }
+  .search-app-shell .agent-home { padding: 14px 16px 28px; }
+  .search-app-shell .agent-home .agent-welcome { padding: 16px; grid-template-columns: minmax(0, 1fr) 72px; border-radius: 16px; }
+  .search-app-shell .agent-home .agent-welcome h1 { font-size: 24px; margin: 6px 0; line-height: 1.35; }
+  .search-app-shell .agent-home .agent-identity { display: none; }
+  .search-app-shell .agent-home .agent-welcome-art { min-height: 80px; grid-row: 1; }
+  .search-app-shell .agent-home .agent-welcome-art .bitman-mascot { width: 86px; height: 86px; }
+  .search-app-shell .agent-home .agent-orbit { width: 74px; height: 74px; }
+  .search-app-shell .agent-home .agent-welcome-copy > p { font-size: 14px; line-height: 1.6; margin: 10px 0 12px; }
+  .search-app-shell .agent-home .maker-search-box { min-height: 52px; }
+  .search-app-shell .agent-home .maker-search-box button { min-height: 44px; font-size: 13px; }
+  .search-app-shell .agent-home .keyword-search-examples { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+  .search-app-shell .agent-home .keyword-search-examples { scrollbar-width: none; }
+  .search-app-shell .agent-home .keyword-search-examples::-webkit-scrollbar { display: none; }
+  .search-app-shell .agent-home .keyword-search-examples button { flex-shrink: 0; min-height: 44px; font-size: 12px; }
+  .search-app-shell .agent-home .agent-mode-nav { display: flex; overflow-x: auto; gap: 6px; padding: 6px 0; margin: 12px 0; scroll-snap-type: x proximity; }
+  .search-app-shell .agent-home .agent-mode-nav a { flex: 1 0 64px; min-height: 46px; padding: 8px; font-size: 14px; white-space: nowrap; scroll-snap-align: start; }
+  .search-app-shell .agent-home .agent-mode-dot { display: none; }
+  .search-app-shell .agent-home .agent-section-heading p { font-size: 14px; line-height: 1.6; }
+  .search-app-shell .agent-home .agent-condition-grid { gap: 18px; }
+  .search-app-shell .agent-home .search-rank-card { padding: 16px; scroll-margin-top: 112px; }
+  .search-app-shell .agent-home .rank-card-title-row { grid-template-columns: 36px minmax(0, 1fr) auto; gap: 8px; }
+  .search-app-shell .agent-home .rank-card-title-row .category-icon { width: 36px; height: 36px; }
+  .search-app-shell .agent-home .rank-card-title-row h2 { font-size: 22px; }
+  .search-app-shell .agent-home .rank-title-copy > span { font-size: 12px; line-height: 1.6; }
+  .search-app-shell .agent-home .top3-badge { min-height: 44px; min-width: 48px; }
+  .search-app-shell .agent-home .condition-warning-strip { font-size: 13px; line-height: 1.65; padding: 10px 12px; }
+  .search-app-shell .agent-home .rank-table-head { display: none; }
+  .search-app-shell .agent-home .rank-table-row { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 14px 8px; padding: 16px 0; font-size: 16px; width: 100%; }
+  .search-app-shell .agent-home .rank-table-row .rank-name { grid-column: 1 / -1; width: 100%; text-align: left; gap: 8px; }
+  .search-app-shell .agent-home .rank-name-copy { width: 100%; }
+  .search-app-shell .agent-home .rank-name-copy > span:first-child { white-space: normal; overflow: visible; text-overflow: clip; font-size: 17px; font-weight: 750; line-height: 1.5; }
+  .search-app-shell .agent-home .rank-name-copy em { font-size: 12px; line-height: 1.6; }
+  .search-app-shell .agent-home .rank-evidence-hint { font-size: 12px; color: #dfc772; }
+  .search-app-shell .agent-home .rank-table-row > span[data-mobile-label] { white-space: normal; overflow-wrap: anywhere; overflow: visible; text-align: left; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .search-app-shell .agent-home .rank-table-row > span[data-mobile-label]::before { content: attr(data-mobile-label); display: block; font-size: 12px; font-weight: 400; color: #aeb9c8; margin-bottom: 3px; }
+  .search-app-shell .agent-home .section-endpoint-button { min-height: 48px; font-size: 14px; white-space: normal; }
+  .search-app-shell .detection-evidence { padding: 12px; font-size: 14px; }
+  .search-app-shell .detection-evidence header strong { font-size: 15px; line-height: 1.6; }
+  .search-app-shell .detection-evidence :is(header > span, small) { font-size: 12px; line-height: 1.6; }
+  .search-app-shell .detection-category > summary { min-height: 52px; }
+  .search-app-shell .detection-category h3 { font-size: 15px; }
+  .search-app-shell .detection-check > div { flex-wrap: wrap; }
+  .search-app-shell .check-status { font-size: 12px; }
+  .search-app-shell .detection-commentary > summary { min-height: 44px; line-height: 1.6; }
+  .search-app-shell .agent-home .condition-track-summary span { font-size: 12px; line-height: 1.6; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .search-app-shell * { scroll-behavior: auto !important; }
+  .search-app-shell .maker-market-track { animation: none; }
+}
