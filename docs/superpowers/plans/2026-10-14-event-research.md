@@ -72,4 +72,4 @@ Files: create `frontend/src/api/eventResearchApi.ts`, `pages/EventResearchPage.t
 - [x] Reproduce same contract/raw ZIP hash changes creating duplicate v2 publications after restart.
 - [x] RED/GREEN stable observed-content identity tests; preserve raw archive evidence and frozen results, separate v3 policy without backdating or migrating old cases.
 - [x] Independent correction review and full backend suite/bootJar, including transient financial-stage recovery (null/UNAVAILABLE/throw across restarts).
-- [ ] Commit/push/deploy correction; verify actual v3 collection, repeat/restart identity and exact live UI/API/hash evidence.
+- [x] Commit/push/deploy correction; verify actual v3 collection, repeat/restart identity and exact live UI/API/hash evidence. Concurrent home/engine commits were preserved and the integrated backend/frontend/Python checks passed. New KIS expansion permission, unavailable market-cap criteria and future profit measurements remain explicit limits.

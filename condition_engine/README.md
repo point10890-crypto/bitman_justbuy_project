@@ -1,10 +1,10 @@
-# condition_engine — 조건검색 엔진 (로컬)
+# condition_engine — 조건검색 엔진
 
-`docs/REDESIGN_AI_CONDITION_SEARCH_2026_10_12.md` 의 설계를 구현한 로컬 서비스.
+`docs/REDESIGN_AI_CONDITION_SEARCH_2026_10_12.md` 의 설계를 구현한 별도 서비스.
 회원의 자연어 요청을 **검증된 조건식(DSL)** 으로 바꾸고, 그 조건으로 오늘 종목을 찾고, 같은 날 다른 종목과 비교한 과거 성과를 보여준다.
 종목을 추천하거나 목표가를 만들지 않는다.
 
-운영(JUST BUY, 미니PC 8080)과는 분리돼 있다. 회원·구독 시스템, Spring Boot, Flask 를 건드리지 않는다.
+운영에서는 홈페이지 검색 화면과 Spring Boot의 PRO 접근 제어 프록시(`/api/engine/*`)로 연결된다. 엔진은 MiniPC의 `127.0.0.1:8090`에서 별도 실행하며 기존 회원·구독 DB와 별개인 저장소를 사용한다. 기존 종목 순위를 자동으로 교체하거나 주문을 실행하지 않는다.
 
 ## 구성
 
@@ -19,7 +19,7 @@
 | `evaluation.py` | 라벨, 탐색 70% / 확인 30% 분할, h일 간격 t값, 판정 |
 | `strategies.py` | 큐레이션 전략과 상태(후보 / 레짐 조건부 / 측정 중 / 검증 탈락) |
 | `agent.py` | 자연어 → DSL. OpenAI → Gemini → 규칙 번역 순서로 시도하고, 검증을 통과한 답만 쓴다 |
-| `ledger.py` | SQLite 원장. 모든 실행의 단계별 종목, 이후 실현 성과, LLM 호출 기록 |
+| `ledger.py` | SQLite 원장. 모든 실행의 단계별 종목, 이후 시세 기준 연구 성과, LLM 호출 기록 |
 | `api.py` | FastAPI (`127.0.0.1:8090`, `/engine/*`) |
 
 데이터는 `condition_engine/var/` 에 있다 (git 제외): `bars_daily.pkl`, `listing.pkl`, `names.pkl`, `ledger.db`.
@@ -48,7 +48,7 @@ PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -m condition_engine.cli serve --
 ```
 
 화면: 프론트 dev 서버(`npm run dev`, 3000)에서 `http://localhost:3000/lab`.
-Vite 가 `/engine` 을 8090 으로 프록시한다. `/lab` 라우트는 dev 빌드에만 있고, 운영 번들에는 들어가지 않는다.
+Vite 가 `/engine` 을 8090 으로 프록시한다. 독립 `/lab` 라우트는 dev 빌드에만 등록한다. 운영 홈페이지에는 같은 조건검색 화면을 제공하며, `/api/engine/*` 요청은 Spring Boot의 회원·구독 검사를 거쳐 엔진으로 전달된다.
 
 ## LLM 번역기
 
