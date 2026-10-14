@@ -125,6 +125,40 @@ const engineMiss = { strategy: null, source: 'rules', conditions: [], assumption
 const withEngine = (dataFetch: (url: string, init?: RequestInit) => Promise<Response>) =>
   vi.fn((url: string, init?: RequestInit) => String(url).includes('/api/engine/') ? Promise.resolve(asJson(engineMiss)) : dataFetch(url, init))
 
+it('engine-detected sections show their design columns, entry rule and an honest empty state', () => {
+  const sig = (name: string, code: string, a: string, b: string, c: string) => ({
+    stockName: name, stockCode: code, capturePrice: a, currentPrice: b, highPrice: b, stopLoss: c, section: 'leaders', mode: 'ENGINE_LEADERS',
+    rank: 1, maxReturnPct: c, status: '주도주 · 위험 낮음', ruleScore: 0, aiScore: 0, finalScore: 0, summary: '상대강도 상위 2%',
+    evidence: ['상대강도 상위 2%'], riskFlags: [], invalidation: '20거래일 보유 후 청산', capturedAt: '2026-10-13T15:30:00+09:00',
+  })
+  const engine = (key: string, slug: string, title: string, status: string, signals: ReturnType<typeof sig>[]) => ({
+    key, slug, title, mode: 'X', endpoint: `/api/conditions/${slug}`, asOf: '2026-10-13T15:30:00+09:00', sourceStatus: status, signals,
+  })
+  main = {
+    ...feed('MAIN_0850', '2026-10-13T15:30:00+09:00'),
+    sections: {
+      shortTerm: engine('shortTerm', 'short-term', '단타', 'ENGINE_NO_TRIGGER', []),
+      swing: engine('swing', 'swing', '스윙', 'ENGINE_SIGNAL', [sig('눌림 리더', '096530', '36,550', '고점 대비 -9.6%', '10거래일')]),
+      leaders: engine('leaders', 'leaders', '주도주', 'ENGINE_SIGNAL', [sig('주도 종목', '064290', '61,700', '62,000', '상위 2%')]),
+      themes: engine('themes', 'themes', '테마주', 'ENGINE_NEAR_CLOSE', []),
+      closingBet: engine('closingBet', 'closing-bet', '종가매매', 'ENGINE_NEAR_CLOSE', []),
+      alerts: { ...section('x', '2026-10-13T15:30:00+09:00'), signals: [] },
+    },
+  } as unknown as MainConditionResponse
+  vi.stubGlobal('fetch', withEngine(vi.fn()))
+  render(tree())
+  const leaders = document.getElementById('leaders')!
+  expect(within(leaders).getByText('상대강도')).toBeTruthy()
+  expect(within(leaders).getByText('상위 2%')).toBeTruthy()
+  expect(within(leaders).getByText(/20거래일 보유/)).toBeTruthy()
+  const swing = document.getElementById('swing')!
+  expect(within(swing).getByText('눌림 폭')).toBeTruthy()
+  expect(within(swing).getByText('고점 대비 -9.6%')).toBeTruthy()
+  expect(within(document.getElementById('short-term')!).getByText('오늘 시가 갭 하락으로 출발한 관찰 종목이 없습니다.')).toBeTruthy()
+  expect(within(document.getElementById('closing-bet')!).getByText('오늘은 테마가 점화된 업종이 없습니다.')).toBeTruthy()
+  expect(within(document.getElementById('themes')!).getByText(/대장주 추격은 과거 손실/)).toBeTruthy()
+})
+
 it('hero searches the original condition through the data API without asking an AI to originate stocks', async () => {
   const fetchMock = vi.fn().mockResolvedValue(asJson(keywordResponse('가격 5만원 이하')))
   vi.stubGlobal('fetch', withEngine(fetchMock))

@@ -113,8 +113,38 @@ function usesRiskPriceColumns(section: ConditionSectionResponse) {
   return section.mode === 'REVERSAL_EDGE' || section.mode === 'JONGGA_V2' || section.slug === 'swing' || section.slug === 'closing-bet'
 }
 
+// 정석 검출기(조건검색 엔진) 섹션. 설계: docs/SECTION_DETECTION_DESIGN_2026_10_14.md
+const isEngineSection = (section: ConditionSectionResponse | undefined) => !!section?.sourceStatus?.startsWith('ENGINE_')
+
+const ENGINE_COLUMNS: Record<string, string[]> = {
+  'short-term': ['종목명', '전일 종가', '현재가', '시가 갭'],
+  swing: ['종목명', '기준가', '눌림 폭', '보유'],
+  leaders: ['종목명', '기준가', '현재가', '상대강도'],
+  themes: ['대장주', '가격', '당일', '테마'],
+  'closing-bet': ['종목명', '진입가', '청산', '테마'],
+}
+
+const ENGINE_RULES: Record<string, string> = {
+  'short-term': '갭 하락 출발 시 시가 매수 · 당일 종가 청산 · 전날 급등주의 갭 상승 추격 금지',
+  swing: '주도주 눌림 · 다음 날 시가 매수 · 10거래일 보유',
+  leaders: '다음 날 시가 매수 · 20거래일 보유 · 하락 국면에서는 약함',
+  themes: '대장주 추격은 과거 손실 — 같은 테마 후발주는 종가매매 카드',
+  'closing-bet': '테마 후발주 · 종가(동시호가) 매수 · 다음 날 종가 청산',
+}
+
+function engineEmptyMessage(slug: string, status: string) {
+  if (slug === 'themes' || slug === 'closing-bet') return '오늘은 테마가 점화된 업종이 없습니다.'
+  if (status === 'ENGINE_NO_TRIGGER') return '오늘 시가 갭 하락으로 출발한 관찰 종목이 없습니다.'
+  return '오늘 조건을 통과한 종목이 없습니다.'
+}
+
 function sectionSourceStatus(section: ConditionSectionResponse | undefined) {
   if (!section) return '데이터 준비 중'
+  if (section.sourceStatus === 'ENGINE_SIGNAL') return '정석 검출 · 종가 기준'
+  if (section.sourceStatus === 'ENGINE_WATCHLIST') return '관찰 종목 · 09:00 시가 확인'
+  if (section.sourceStatus === 'ENGINE_TRIGGERED') return '시가 조건 충족'
+  if (section.sourceStatus === 'ENGINE_NO_TRIGGER') return '시가 조건 미충족'
+  if (section.sourceStatus === 'ENGINE_NEAR_CLOSE') return '장 마감 전 계산'
   if (section.sourceStatus === 'REALTIME_SCAN') return '실시간 포착'
   if (section.sourceStatus === 'PRECOMPUTED') return '실시간 캐시'
   if (section.sourceStatus === 'STALE_CACHE') return '최근 저장 결과'
@@ -138,6 +168,7 @@ function formatKstTime(value?: string) {
 
 function sectionWarning(section: ConditionSectionResponse | undefined) {
   if (!section) return ''
+  if (isEngineSection(section)) return ENGINE_RULES[section.slug] ?? ''
   if (section.sourceStatus === 'STALE_CACHE') return '정규장 실시간 결과가 아니며 최근 저장 결과입니다.'
   if (section.sourceStatus === 'REALTIME_WAITING') return '정규장 시작 후 실시간 포착이 자동 갱신됩니다.'
   if (section.sourceStatus === 'REALTIME_EMPTY') return '현재 조건을 통과한 실시간 종목이 없습니다.'
@@ -382,8 +413,8 @@ export default function HomePage() {
     const rows = rowsFromCondition(apiSection, section.rows)
     const observedChange = (section.id === 'short-term' && apiSection?.sourceStatus === 'REALTIME_SCAN')
       || (section.id === 'leaders' && apiSection?.sourceStatus === 'LEADER_SCAN')
-    const columns = [...section.columns]
-    if ((section.id === 'short-term' || section.id === 'leaders') && apiSection && !observedChange) {
+    const columns = isEngineSection(apiSection) ? [...(ENGINE_COLUMNS[section.id] ?? section.columns)] : [...section.columns]
+    if ((section.id === 'short-term' || section.id === 'leaders') && apiSection && !observedChange && !isEngineSection(apiSection)) {
       columns[3] = '목표 상승 여력'
     }
 
@@ -395,7 +426,8 @@ export default function HomePage() {
         ? latestAnalysis.label : (usesManual ? endpointStatus[section.id] : undefined) || sectionSourceStatus(apiSection),
       asOf: apiSection?.asOf,
       asOfLabel: rows.length === 0 && latestAnalysis ? '' : formatConditionAsOf(apiSection?.asOf),
-      latestAnalysisMessage: latestAnalysis?.message,
+      latestAnalysisMessage: isEngineSection(apiSection) && rows.length === 0
+        ? engineEmptyMessage(section.id, apiSection!.sourceStatus) : latestAnalysis?.message,
       warning: sectionWarning(apiSection),
     }
   })

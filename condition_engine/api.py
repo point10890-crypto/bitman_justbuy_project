@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from . import config, dsl
 from .agent import build_translator
+from .detectors import SectionDetectors
 from .engine import Engine
 from .features import catalogue
 from .ledger import Ledger
@@ -42,6 +43,9 @@ class EngineService:
         self.error: str | None = None
         self.loaded_at: float | None = time.time() if engine else None
         self.update_job: dict = {"state": "idle"}
+        self.near_close_job: dict = {"state": "idle"}
+        self._detectors: SectionDetectors | None = None
+        self._sections_cache: tuple[float, str, dict] | None = None
         self._lock = threading.Lock()
 
     def load(self) -> None:
@@ -50,6 +54,8 @@ class EngineService:
             try:
                 started = time.time()
                 self.engine = Engine.from_store(self.store)
+                self._detectors = SectionDetectors(self.engine, self.store)
+                self._sections_cache = None
                 self.loaded_at = time.time()
                 self.state = "ready"
                 log.info("engine ready in %.1fs (%s)", self.loaded_at - started, self.engine.data_version)
@@ -65,6 +71,60 @@ class EngineService:
             raise HTTPException(503, {"state": self.state, "error": self.error,
                                       "message": "엔진이 데이터를 불러오는 중입니다"})
         return self.engine
+
+    def detectors(self) -> SectionDetectors:
+        eng = self.require()
+        if self._detectors is None or self._detectors.eng is not eng:
+            self._detectors = SectionDetectors(eng, self.store)
+        return self._detectors
+
+    def sections(self, ttl: float = 60.0) -> dict:
+        det = self.detectors()
+        self.maybe_start_near_close(det)
+        key = f"{det.eng.data_version}|{(det.near_close or {}).get('computed_at')}"
+        cached = self._sections_cache
+        if cached and cached[1] == key and time.time() - cached[0] < ttl:
+            return cached[2]
+        payload = det.all_sections()
+        payload["near_close"] = {k: v for k, v in self.near_close_job.items() if k != "report"}
+        self._sections_cache = (time.time(), key, payload)
+        return payload
+
+    def maybe_start_near_close(self, det: SectionDetectors) -> None:
+        """15:00~15:40 on a session day: build the near-close snapshot once."""
+        now = det.clock()
+        if not ((15, 0) <= (now.hour, now.minute) < (15, 40)) or now.weekday() >= 5:
+            return
+        if now.date() <= det.eng.panel.dates[-1].date():
+            return
+        snap = det.near_close
+        if (snap and snap.get("date") == now.date()) or self.near_close_job.get("state") == "running":
+            return
+        job = self.near_close_job
+        if job.get("date") == str(now.date()) and job.get("state") == "error" and time.time() - job.get("finished", 0) < 300:
+            return                                   # retry a failed snapshot at most every 5 minutes
+        self.start_near_close(det)
+
+    def start_near_close(self, det: SectionDetectors | None = None) -> dict:
+        det = det or self.detectors()
+        if self.near_close_job.get("state") == "running":
+            return self.near_close_job
+        today = str(det.clock().date())
+        self.near_close_job = {"state": "running", "date": today, "started": time.time()}
+
+        def work():
+            try:
+                report = det.compute_near_close()
+                self.near_close_job = {"state": report.get("state", "done"), "date": today, "report": report,
+                                       "finished": time.time()}
+            except Exception as exc:
+                log.error("near-close failed: %s", traceback.format_exc())
+                self.near_close_job = {"state": "error", "date": today, "error": f"{type(exc).__name__}: {exc}",
+                                       "finished": time.time()}
+            self._sections_cache = None
+
+        threading.Thread(target=work, daemon=True).start()
+        return self.near_close_job
 
     def run_update(self) -> None:
         self.update_job = {"state": "running", "started": time.time()}
@@ -172,6 +232,18 @@ def create_app(service: EngineService | None = None, autoload: bool = True) -> F
     @app.post("/engine/risk")
     def risk(req: RiskRequest):
         return guarded(lambda: svc.require().risk_check(req.codes, req.as_of))
+
+    @app.get("/engine/sections")
+    def sections():
+        return svc.sections()
+
+    @app.post("/engine/admin/near-close")
+    def near_close():
+        return svc.start_near_close()
+
+    @app.get("/engine/admin/near-close")
+    def near_close_status():
+        return svc.near_close_job
 
     @app.get("/engine/regime")
     def regime():

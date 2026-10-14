@@ -48,10 +48,17 @@ public class MainConditionService {
     private final LeaderConditionEngine leaderConditionEngine;
     private final TrackRecordService trackRecordService;
     private ConditionRunService conditionRunService;
+    private ConditionEngineSectionService engineSections;
 
     @Autowired(required = false)
     void configureConditionRuns(ConditionRunService conditionRunService) {
         this.conditionRunService = conditionRunService;
+    }
+
+    /** 정석 검출기(조건검색 엔진). 응답이 없으면 아래 기존 원천을 그대로 쓴다. */
+    @Autowired(required = false)
+    void configureEngineSections(ConditionEngineSectionService engineSections) {
+        this.engineSections = engineSections;
     }
 
     public MainConditionService(ConditionSearchPipeline conditionSearchPipeline) {
@@ -254,6 +261,11 @@ public class MainConditionService {
             signals.addAll(themes.signals());
             signals.addAll(closingBet.signals());
             return alertsSection(signals, alertSourceStatus(shortTerm, swing, leaders, themes, closingBet));
+        }
+
+        if (engineSections != null) {
+            Optional<ConditionSectionResponse> fromEngine = engineSections.section(section);
+            if (fromEngine.isPresent()) return fromEngine.get();
         }
 
         if (section == ConditionSection.SHORT_TERM) {

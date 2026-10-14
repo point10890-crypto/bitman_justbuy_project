@@ -139,6 +139,38 @@ public class TrackRecordService {
         return recorded;
     }
 
+    /**
+     * 정석 검출기(조건검색 엔진) 섹션 종목을 원장에 남긴다.
+     *
+     * <p>분석일은 신호가 나온 거래일, 기준가는 그날 종가(카드의 기준가)다. 섹션마다 진입·청산 규칙이 다르므로
+     * 설계 기준 성과는 엔진이 같은 원장으로 다시 잰다. 같은 모드·날짜·종목은 한 번만 기록한다.
+     */
+    @Transactional
+    public int recordEngineSignals(String mode, LocalDate signalDate, List<ConditionSignalDto> signals) {
+        if (mode == null || signalDate == null || signals == null || signals.isEmpty()) return 0;
+        Set<String> seenInBatch = new HashSet<>();
+        int recorded = 0;
+        for (ConditionSignalDto signal : signals) {
+            if (signal == null || signal.stockCode() == null || !signal.stockCode().matches("\\d{6}")) continue;
+            if (!seenInBatch.add(signal.stockCode())) continue;
+            if (repository.existsByModeAndAnalysisDateAndStockCode(mode, signalDate, signal.stockCode())) continue;
+            Long reference = parsePrice(signal.capturePrice());
+            if (reference == null || reference <= 0) continue;
+
+            var record = new AnalysisTrackRecord();
+            record.setMode(mode);
+            record.setAnalysisDate(signalDate);
+            record.setStockCode(signal.stockCode());
+            record.setStockName(signal.stockName());
+            record.setAction(firstNonBlank(signal.status(), "정석 검출"));
+            record.setConsensusScore(signal.rank());
+            record.setPriceAtAnalysis(reference);
+            repository.save(record);
+            recorded++;
+        }
+        return recorded;
+    }
+
     /** 단타는 당일 마감 후 바로 성과를 검증한다. */
     @Scheduled(cron = "0 40 15 * * MON-FRI", zone = "Asia/Seoul")
     @Transactional
