@@ -52,6 +52,18 @@ class ConditionEngineSectionServiceTest {
     }
 
     @Test
+    void disabledByDefaultSoTheLegacySourcesServeTheHomeAndNothingIsRecorded() {
+        AtomicInteger calls = new AtomicInteger();
+        TrackRecordService ledger = mock(TrackRecordService.class);
+        var off = new ConditionEngineSectionService(mapper, () -> { calls.incrementAndGet(); return sampleUnchecked(); }, false);
+        off.configureTrackRecords(ledger);
+        assertThat(off.section(ConditionSection.LEADERS)).isEmpty();
+        off.refreshDuringSession();
+        assertThat(calls.get()).isZero();
+        verifyNoInteractions(ledger);
+    }
+
+    @Test
     void engineOutageYieldsNothingSoTheLegacySourceIsUsed() {
         var service = new ConditionEngineSectionService(mapper, () -> { throw new IllegalStateException("refused"); });
         assertThat(service.section(ConditionSection.LEADERS)).isEmpty();

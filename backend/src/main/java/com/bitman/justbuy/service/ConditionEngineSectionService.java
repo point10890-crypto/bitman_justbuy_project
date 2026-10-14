@@ -58,20 +58,31 @@ public class ConditionEngineSectionService {
 
     private final ObjectMapper mapper;
     private final Supplier<String> fetcher;
+    private final boolean enabled;
     private TrackRecordService trackRecords;
 
     private volatile Map<ConditionSection, ConditionSectionResponse> cached;
     private volatile long cachedAt;
 
+    /**
+     * 기본은 꺼짐: 홈 섹션은 기존 원천을 쓴다. 2026-10-14 엔진 검출기를 운영에 붙였으나 기존 방식보다 낮은 품질로
+     * 판정돼 되돌렸다. 다시 켜려면 {@code bitman.engine.sections.enabled=true}.
+     */
     @Autowired
     public ConditionEngineSectionService(ObjectMapper mapper,
-                                         @Value("${bitman.engine.url:http://127.0.0.1:8090}") String engineUrl) {
-        this(mapper, httpFetcher(engineUrl));
+                                         @Value("${bitman.engine.url:http://127.0.0.1:8090}") String engineUrl,
+                                         @Value("${bitman.engine.sections.enabled:false}") boolean enabled) {
+        this(mapper, httpFetcher(engineUrl), enabled);
     }
 
     ConditionEngineSectionService(ObjectMapper mapper, Supplier<String> fetcher) {
+        this(mapper, fetcher, true);
+    }
+
+    ConditionEngineSectionService(ObjectMapper mapper, Supplier<String> fetcher, boolean enabled) {
         this.mapper = mapper;
         this.fetcher = fetcher;
+        this.enabled = enabled;
     }
 
     @Autowired(required = false)
@@ -80,7 +91,7 @@ public class ConditionEngineSectionService {
     }
 
     public Optional<ConditionSectionResponse> section(ConditionSection section) {
-        if (!ENGINE_KEY.containsKey(section)) return Optional.empty();
+        if (!enabled || !ENGINE_KEY.containsKey(section)) return Optional.empty();
         Map<ConditionSection, ConditionSectionResponse> all = sections();
         return all == null ? Optional.empty() : Optional.ofNullable(all.get(section));
     }
@@ -88,6 +99,7 @@ public class ConditionEngineSectionService {
     /** 장중에는 방문이 없어도 원장이 채워지도록 10분마다 갱신한다. */
     @Scheduled(cron = "0 */10 9-15 * * MON-FRI", zone = "Asia/Seoul")
     public void refreshDuringSession() {
+        if (!enabled) return;
         cachedAt = 0;
         sections();
     }
