@@ -99,6 +99,42 @@ describe('stored public event research', () => {
     expect(within(card).getByText('2027-10-13')).toBeTruthy()
   })
 
+  it('widens modeled money to whole won exactly while preserving observed facts beyond JavaScript safe integers', async () => {
+    vi.mocked(fetch).mockResolvedValue(json({ ...snapshot(), candidates: [{
+      ...candidate, contractAmountWon: '9007199254740993.25',
+      financial: { ...candidate.financial, facts: { ...candidate.financial.facts, revenue: '9007199254740997.123456' } },
+      scenario: { ...candidate.scenario, recognizedRevenueWon: { lower: '9007199254740993.25', upper: '9007199254740995.0001' }, operatingProfitWon: { lower: '-30926067.86005439953217772439388422', upper: '-15463033.93002719926380065258995521' }, cashFlowWon: { lower: '0.0000001', upper: '0.0000002' } },
+    }] }))
+    renderPage()
+    const card = await screen.findByRole('article', { name: '공시 공급사 사건 연구' })
+    expect(within(card).getByText('9,007,199,254,740,993원 ~ 9,007,199,254,740,996원')).toBeTruthy()
+    expect(within(card).getByText('-30,926,068원 ~ -15,463,033원')).toBeTruthy()
+    expect(within(card).getByText('0원 ~ 1원')).toBeTruthy()
+    expect(within(card).getByText('9,007,199,254,740,993.25원')).toBeTruthy()
+    expect(within(card).getByText('9,007,199,254,740,997.123456원')).toBeTruthy()
+  })
+
+  it('widens modeled percentage bounds to at most four decimal places without shrinking losses or tiny positive values', async () => {
+    vi.mocked(fetch).mockResolvedValue(json({ ...snapshot(), candidates: [{ ...candidate, scenario: { ...candidate.scenario, assumptions: { supplierAllocation: { lower: '0.333333333333333333333', upper: '0.666666666666666666666' }, periodRecognition: { lower: '1', upper: '1' }, operatingMargin: { lower: '-0.069868995633187773', upper: '0.0000000000000001' }, marginBasis: 'HISTORICAL_ISSUER_MARGIN_PROXY' } } }] }))
+    renderPage()
+    const card = await screen.findByRole('article', { name: '공시 공급사 사건 연구' })
+    expect(within(card).getByText('33.3333% ~ 66.6667%')).toBeTruthy()
+    expect(within(card).getByText('-6.9869% ~ 0.0001%')).toBeTruthy()
+    expect(within(card).getByText('100% ~ 100%')).toBeTruthy()
+  })
+
+  it('collapses collection limitations and translates the actual assumptions instead of filling the header with internal codes', async () => {
+    vi.mocked(fetch).mockResolvedValue(json({ ...snapshot(), issues: ['DISCLOSURE_PAGE_LIMIT', 'ORIGINAL_DOCUMENT_LIMIT', '20261014000123:AMENDMENT_PRIOR_AMOUNT_UNKNOWN'], candidates: [{ ...candidate, scenario: { ...candidate.scenario, issues: ['FINANCIAL_FILING_DATE_UNKNOWN_CAPTURE_TIME_USED', 'STRAIGHT_LINE_TIME_SHARE_ASSUMPTION', 'ISSUER_CONTRACT_SHARE_ASSUMPTION'] } }] }))
+    renderPage()
+    const summary = await screen.findByText('자료 확인 제약 3건')
+    expect(summary.closest('details')?.hasAttribute('open')).toBe(false)
+    expect(screen.getByText('공시 목록은 회차별 최대 3페이지까지만 확인했습니다.').closest('details')).toBe(summary.closest('details'))
+    expect(screen.getByText('정정 전 계약액 미확인 (공시 20261014000123)')).toBeTruthy()
+    expect(screen.getByText('재무 공시일 미확인 · 자료 조회 시각을 기준으로 사용')).toBeTruthy()
+    expect(screen.getByText('계약 기간에 매출이 고르게 발생한다고 가정')).toBeTruthy()
+    expect(screen.getByText('공시 계약액이 해당 공급사에 귀속된다고 가정')).toBeTruthy()
+  })
+
   it('withholds quotes without provider provenance while displaying timestamped official data', async () => {
     vi.mocked(fetch).mockResolvedValue(json({ ...snapshot(), candidates: [{ ...candidate, market: { kis: { source: 'KIS', quote: { currentPrice: '25000' } }, kiwoom: { source: 'KIWOOM_REST', environment: 'REAL', quote: { currentPrice: '30000', observedAt: '2026-10-14T15:30:00+09:00', fetchedAt: '2026-10-14T16:00:00+09:00', status: 'AVAILABLE' } } } }] }))
     renderPage()
@@ -324,7 +360,7 @@ describe('stored public event research', () => {
   it('shows actual provider coverage and separate official application and execution sources', async () => {
     const application = 'https://kind.krx.co.kr/external/2026/10/13/000734/20261013001629/70789.htm'
     const execution = 'https://kind.krx.co.kr/external/2026/10/13/000725/20261013001620/70800.htm'
-    vi.mocked(fetch).mockResolvedValue(json({ ...snapshot(), candidates: [], coverage: { contracts: 12, maxContracts: 12, financialReferences: 7, kisCandidates: 8, kiwoomCandidates: 5 }, buybacks: { status: 'PARTIAL', asOf: '2026-10-14', issues: ['HISTORY_WINDOW_MAX_THREE_REPORT_DAYS', 'BUYBACK_ROW_LIMIT'], rows: [{ stockCode: '014100', stockName: '실제 표 회사', applicationDate: '2026-10-14', applicationQuantity: '10000', executionDate: '2026-10-13', executionQuantity: '9871', executionAmountWon: '16812619', sourceUrl: application, executionSourceUrl: execution, historyDays: 1 }] } }))
+    vi.mocked(fetch).mockResolvedValue(json({ ...snapshot(), candidates: [], coverage: { contracts: 12, maxContracts: 12, financialReferences: 7, kisCandidates: 8, kiwoomCandidates: 5 }, buybacks: { status: 'PARTIAL', asOf: '2026-10-14', issues: ['HISTORY_WINDOW_MAX_THREE_REPORT_DAYS', 'BUYBACK_ROW_LIMIT'], rows: [{ market: 'KOSDAQ', category: '직접', stockCode: '014100', stockName: '실제 표 회사', applicationDate: '2026-10-14', applicationQuantity: '10000', executionDate: '2026-10-13', executionQuantity: '9871', executionAmountWon: '16812619', sourceUrl: application, executionSourceUrl: execution, historyDays: 1 }] } }))
     renderPage()
     expect(await screen.findByText(/계약 수집 12건 · 회차 상한 12건/)).toBeTruthy()
     expect(screen.getByText(/재무 근거 7건 · KIS 가격 8건 · 키움 조회 5건/)).toBeTruthy()
@@ -332,6 +368,7 @@ describe('stored public event research', () => {
     expect(screen.getByRole('link', { name: 'KIND 체결 원문' }).getAttribute('href')).toBe(execution)
     expect(screen.getByText('최근 최대 3개 공시일의 이행률 자료만 조회')).toBeTruthy()
     expect(screen.getByText('자사주 표시 상한 80건 · 시장별 최대 40건')).toBeTruthy()
+    expect(screen.getByText('KOSDAQ 014100 · 직접')).toBeTruthy()
   })
 
   it('does not treat a next-day buyback application as completed execution', async () => {

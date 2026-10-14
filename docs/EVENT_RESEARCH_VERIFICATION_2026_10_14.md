@@ -30,7 +30,7 @@ This release measures evidence and future reference-price outcomes; it does not 
 Local verification passed before commit:
 
 - Backend: `gradlew test bootJar --no-daemon`, 123 test classes, **1,177 tests: 1,176 passed, zero failures/errors, one existing Windows symlink-privilege skip**. Event/controller tests account for 124 tests. The complete run finished in 1m42s after all runtime adapter corrections.
-- Frontend: **24 files / 244 tests passed**, TypeScript and Vite build passed; JS `index-BbECemln.js`, CSS `index-YeJYe1Tn.css`.
+- Frontend: **24 files / 247 tests passed**, TypeScript and Vite build passed; JS `index-BWKrGJtC.js`, CSS `index-YeJYe1Tn.css`, service-worker cache `bitman-v20261014-event-research-r13`. The final independent review found no blocking issue in signed BigInt outward rounding, exact observed values, collapsed source constraints or KIND direct/trust category labels.
 - Exact actual-format KIND regressions: 5 tests passed. Supply graph regression cycles reproduced changed-product/unknown-customer tombstones (16 tests / 2 failures), then late historical re-discovery (17 tests / 1 failure); the final full suite passed all 17.
 - Pipeline recovery: 15 tests passed; Store recovery/capacity: 14 tests passed. No live keys or member databases are fixtures.
 - Independent final review found no remaining release-blocking correctness/security issues. `git diff --check` passed.

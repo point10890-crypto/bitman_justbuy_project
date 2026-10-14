@@ -21,7 +21,22 @@ const money = (value: unknown) => { const amount = numberText(value); return amo
 const percent = (value: unknown) => { const amount = numberText(value); return amount === null ? '자료 없음' : `${amount}%` }
 const percentPoints = (value: unknown) => { const amount = numberText(value); return amount === null ? '자료 없음' : `${amount}%p` }
 
-function fractionPercent(value: unknown): string {
+/** Rounds decimal strings outward without converting monetary values to floating point. */
+function outwardDecimal(value: unknown, places: number, bound: 'lower' | 'upper'): string | null {
+  const raw = scalar(value)
+  if (!raw || !/^[+-]?\d+(?:\.\d+)?$/.test(raw)) return null
+  const negative = raw.startsWith('-')
+  const [integer, fraction = ''] = raw.replace(/^[+-]/, '').split('.')
+  let magnitude = BigInt(integer + fraction.slice(0, places).padEnd(places, '0'))
+  const discarded = /[1-9]/.test(fraction.slice(places))
+  if (discarded && (bound === 'lower' ? negative : !negative)) magnitude += 1n
+  const digits = magnitude.toString().padStart(places + 1, '0')
+  const decimals = places ? digits.slice(-places).replace(/0+$/, '') : ''
+  const whole = places ? digits.slice(0, -places) : digits
+  return `${negative && magnitude !== 0n ? '-' : ''}${whole}${decimals ? `.${decimals}` : ''}`
+}
+
+function fractionPercent(value: unknown, bound: 'lower' | 'upper'): string {
   const raw = scalar(value)
   if (!raw || !/^[+-]?\d+(?:\.\d+)?$/.test(raw)) return '자료 없음'
   const sign = raw.startsWith('-') ? '-' : ''
@@ -29,12 +44,44 @@ function fractionPercent(value: unknown): string {
   const padded = decimal.padEnd(2, '0')
   const shiftedInteger = `${integer}${padded.slice(0, 2)}`.replace(/^0+(?=\d)/, '')
   const shiftedDecimal = padded.slice(2).replace(/0+$/, '')
-  return percent(`${sign}${shiftedInteger}${shiftedDecimal ? `.${shiftedDecimal}` : ''}`)
+  return percent(outwardDecimal(`${sign}${shiftedInteger}${shiftedDecimal ? `.${shiftedDecimal}` : ''}`, 4, bound))
 }
 
 const issueLabels: Record<string, string> = {
   HISTORY_WINDOW_MAX_THREE_REPORT_DAYS: '최근 최대 3개 공시일의 이행률 자료만 조회',
   BUYBACK_ROW_LIMIT: '자사주 표시 상한 80건 · 시장별 최대 40건',
+  FINANCIAL_FILING_DATE_UNKNOWN_CAPTURE_TIME_USED: '재무 공시일 미확인 · 자료 조회 시각을 기준으로 사용',
+  STRAIGHT_LINE_TIME_SHARE_ASSUMPTION: '계약 기간에 매출이 고르게 발생한다고 가정',
+  ISSUER_CONTRACT_SHARE_ASSUMPTION: '공시 계약액이 해당 공급사에 귀속된다고 가정',
+  DISCLOSURE_PAGE_LIMIT: '공시 목록은 회차별 최대 3페이지까지만 확인했습니다.',
+  DISCLOSURE_ROW_LIMIT: '공시 목록은 페이지당 최대 100건까지만 확인했습니다.',
+  ORIGINAL_DOCUMENT_LIMIT: '공시 원문은 회차별 최대 12건까지만 확인했습니다.',
+  AMENDMENT_PRIOR_AMOUNT_UNKNOWN: '정정 전 계약액 미확인',
+  CUMULATIVE_CHANGED_CONTRACT: '이전 계약의 누적 변경 공시',
+  WITHDRAWN_CONTRACT: '철회된 계약',
+  AMOUNT_UNKNOWN: '계약 금액 미확인',
+  AMBIGUOUS_AMOUNT: '공시 안의 계약 금액이 서로 달라 확정할 수 없음',
+  CUSTOMER_UNKNOWN: '계약 상대방 미공개 또는 미확인',
+  PRODUCT_UNKNOWN: '계약 제품·내용 미확인',
+  INVALID_CONTRACT_PERIOD: '계약 기간을 확인하지 못함',
+  AMBIGUOUS_CONTRACT_PERIOD: '공시 안의 계약 기간이 서로 다름',
+  SUBSIDIARY_SUPPLIER_IDENTITY_UNVERIFIED: '자회사 계약의 실제 공급사를 확인하지 못해 제외',
+  INVALID_DISCLOSURE_IDENTITY_OR_DATE: '공시 회사·접수 번호·날짜를 확인하지 못해 제외',
+  CONFLICTING_DISCLOSURE_METADATA: '동일 공시의 회사·날짜 정보가 서로 달라 제외',
+  CONFLICTING_CACHED_DISCLOSURE_METADATA: '저장된 원문과 공시 정보가 서로 달라 확인 보류',
+  BUDGET_EXHAUSTED: '정해진 조회 시간 안에 확인하지 못한 자료가 있습니다.',
+  RESPONSE_SIZE_LIMIT: '원문 크기가 조회 상한을 넘어 확인하지 못함',
+  ARCHIVE_SIZE_LIMIT: '압축 원문 크기가 조회 상한을 넘어 확인하지 못함',
+  PROVIDER_RATE_LIMIT: '공식 공시 제공자의 조회 제한으로 일부 자료 미확인',
+  PROVIDER_KEY_REJECTED: '공식 공시 연결 설정을 확인하지 못함',
+  MISSING_KEY: '공식 공시 연결 설정 미확인',
+  INVALID_JSON_SCHEMA: '공식 자료의 응답 형식을 확인하지 못함',
+  INVALID_ORIGINAL_DOCUMENT: '공식 원문 내용을 확인하지 못함',
+  TRANSPORT_OR_PARSE_ERROR: '공식 자료 연결 또는 원문 해석 실패',
+  EMPTY_HTTP_BODY: '공식 자료 응답이 비어 있음',
+  HTTP_STATUS_ERROR: '공식 자료 제공자가 정상 응답을 반환하지 않음',
+  PROVIDER_STATUS_ERROR: '공식 공시 제공자가 자료를 반환하지 않음',
+  INTERRUPTED: '자료 확인이 중단되어 일부 근거 미확인',
   CASH_INPUTS_UNKNOWN: '세금·현금 전환·운전자본·설비투자 입력 미확인',
   CASH_INPUTS_INVALID: '현금 계산 입력을 검증하지 못함',
   HISTORICAL_ISSUER_MARGIN_PROXY: '과거 전사 영업이익률을 대용치로 사용',
@@ -122,6 +169,7 @@ function EvidenceList({ values, empty }: { values: unknown; empty?: string }) {
   const label = (item: string) => {
     if (issueLabels[item]) return issueLabels[item]
     const [reason, stockCode] = item.split(':')
+    if (/^\d{14}$/.test(reason) && issueLabels[stockCode]) return `${issueLabels[stockCode]} (공시 ${reason})`
     return issueLabels[reason] && /^\d{6}$/.test(stockCode ?? '') ? `${issueLabels[reason]} (${stockCode})` : item
   }
   return items.length ? <ul className="event-evidence-list">{items.map((item, index) => <li key={`${index}-${item}`}>{label(item)}</li>)}</ul> : empty ? <p className="event-muted">{empty}</p> : null
@@ -130,7 +178,7 @@ function EvidenceList({ values, empty }: { values: unknown; empty?: string }) {
 function Range({ value }: { value: unknown }) {
   const bounds = record(value)
   if (scalar(bounds.lower) === null || scalar(bounds.upper) === null) return <>자료 없음</>
-  return <>{money(bounds.lower)} ~ {money(bounds.upper)}</>
+  return <>{money(outwardDecimal(bounds.lower, 0, 'lower'))} ~ {money(outwardDecimal(bounds.upper, 0, 'upper'))}</>
 }
 
 function FinancialReference({ value }: { value: Evidence | null }) {
@@ -158,10 +206,11 @@ function Scenario({ value }: { value: Evidence | null }) {
   const assumptions = record(value.assumptions)
   const fractionRange = (value: unknown) => {
     const range = record(value)
-    return scalar(range.lower) === null || scalar(range.upper) === null ? '자료 없음' : `${fractionPercent(range.lower)} ~ ${fractionPercent(range.upper)}`
+    return scalar(range.lower) === null || scalar(range.upper) === null ? '자료 없음' : `${fractionPercent(range.lower, 'lower')} ~ ${fractionPercent(range.upper, 'upper')}`
   }
   return <>
     <p className="event-note">추정 범위는 입력 가정에 따른 계산입니다. 실제 이익이나 현금 유입이 확정된 값은 아닙니다.</p>
+    <p className="event-note">금액은 원 단위, 비율은 소수점 4자리까지 범위를 넓혀 표시합니다.</p>
     {value.status === 'INVALIDATED' && <p className="event-stale">시나리오 무효 · 계약·기간·생산 능력 조건 확인 필요</p>}
     {value.status === 'UNKNOWN' && <p className="event-muted">계산에 필요한 근거 부족</p>}
     <dl className="event-facts">
@@ -303,7 +352,7 @@ function Buybacks({ value }: { value: EventResearchSnapshot['buybacks'] }) {
     <p className="event-note">다음 거래일 신청은 실제 매수가 아닙니다. 과거 이행률과 예상 참여량은 보장된 수량이나 지지 가격을 뜻하지 않습니다.</p>
     <EvidenceList values={value.issues} />
     {value.rows.length === 0 ? <p className="event-empty">저장된 공식 자사주 자료가 없습니다.</p> : <div className="event-buyback-grid">{value.rows.map((row, index) => <div className="event-buyback-row" key={`${text(row.stockCode)}-${index}`}>
-      <h3>{text(row.stockName, '회사명 미확인')} <span>{text(row.market, '')} {text(row.stockCode, '')}</span></h3>
+      <h3>{text(row.stockName, '회사명 미확인')} <span>{text(row.market, '')} {text(row.stockCode, '')}{scalar(row.category) !== null ? ` · ${text(row.category)}` : ''}</span></h3>
       <p>신청일 {time(row.applicationDate)} · {numberText(row.applicationQuantity) === null ? '신청 수량 자료 없음' : `신청 수량 ${numberText(row.applicationQuantity)}주`}</p>
       <p>{numberText(row.executionQuantity) === null ? '실제 체결 자료 없음' : `실제 체결 ${numberText(row.executionQuantity)}주 · ${time(row.executionDate)}`}</p>
       <dl className="event-facts">
@@ -432,7 +481,7 @@ export default function EventResearchPage() {
         <p>공급 계약 연구 {data.candidates.length}건{scalar(originals) !== null ? ` · 원문 확인 ${text(originals)}건` : ''}{scalar(data.coverage?.originalLimit) !== null ? ` · 회차별 원문 확인 상한 ${text(data.coverage.originalLimit)}건` : ''}</p>
         {scalar(data.coverage?.contracts) !== null && <p>계약 수집 {text(data.coverage.contracts)}건 · 회차 상한 {text(data.coverage.maxContracts)}건</p>}
         {scalar(data.coverage?.financialReferences) !== null && <p>재무 근거 {text(data.coverage.financialReferences)}건 · KIS 가격 {text(data.coverage.kisCandidates)}건 · 키움 조회 {text(data.coverage.kiwoomCandidates)}건</p>}
-        <EvidenceList values={data.issues} />
+        {strings(data.issues).length > 0 && <details className="event-comparison-reasons"><summary>자료 확인 제약 {strings(data.issues).length}건</summary><EvidenceList values={data.issues} /></details>}
       </section>
       {data.candidates.length === 0 ? <div className="event-empty"><h2>저장된 공급 계약 연구가 없습니다.</h2><p>공식 자료가 수집되고 근거가 확인되면 이곳에 표시됩니다.</p></div> : <div className="event-cases">{data.candidates.map(candidate => <Candidate key={candidate.caseId} value={candidate} />)}</div>}
       <Buybacks value={data.buybacks} />
