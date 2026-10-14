@@ -8,12 +8,20 @@ import java.util.List;
 public record KeywordSearchResponse(
     String query, String outcome, List<String> appliedConditions, List<String> unsupportedTerms,
     Scope scope, Instant fetchedAt, String sourceStatus, List<String> warnings, List<Match> matches,
-    List<ProviderStatus> providers
+    List<ProviderStatus> providers,
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) FlowCoverage flowCoverage,
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Progress progress
 ) {
+    public KeywordSearchResponse(String query,String outcome,List<String> appliedConditions,List<String> unsupportedTerms,
+        Scope scope,Instant fetchedAt,String sourceStatus,List<String> warnings,List<Match> matches,List<ProviderStatus> providers) {
+        this(query,outcome,appliedConditions,unsupportedTerms,scope,fetchedAt,sourceStatus,warnings,matches,providers,null,null);
+    }
     public KeywordSearchResponse(String query,String outcome,List<String> appliedConditions,List<String> unsupportedTerms,
         Scope scope,Instant fetchedAt,String sourceStatus,List<String> warnings,List<Match> matches) {
         this(query,outcome,appliedConditions,unsupportedTerms,scope,fetchedAt,sourceStatus,warnings,matches,List.of());
     }
+    public record FlowCoverage(int requestedCount,int availableCount,int pendingCount,int unavailableCount) {}
+    public record Progress(String id,Instant expiresAt,int retryAfterMs) {}
     public record ProviderStatus(String source,String environment,String status,Instant checkedAt,String scope,
         Integer requestedCount,Integer availableCount,Integer pendingCount) {
         public ProviderStatus(String source,String environment,String status,Instant checkedAt,String scope) {

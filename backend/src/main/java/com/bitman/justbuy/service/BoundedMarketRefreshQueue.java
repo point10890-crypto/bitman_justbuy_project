@@ -51,12 +51,18 @@ final class BoundedMarketRefreshQueue implements AutoCloseable {
         synchronized(this){pending.clear();active=null;draining=false;}
     }
     synchronized Set<String> keys() {
+        pruneExpired();
         Set<String> keys=new LinkedHashSet<>();if(active!=null)keys.add(active);keys.addAll(pending.keySet());return Collections.unmodifiableSet(keys);
     }
     synchronized Map<String,Object> snapshot() {
+        pruneExpired();
         return Map.ofEntries(Map.entry("queueDepth",pending.size()),Map.entry("pendingJobs",pending.size()+(active==null?0:1)),
             Map.entry("workerActive",active!=null),Map.entry("capacity",capacity),Map.entry("enqueued",enqueued),
             Map.entry("completed",completed),Map.entry("failed",failed),Map.entry("expired",expired),Map.entry("rejected",rejected));
+    }
+    private void pruneExpired() {
+        var iterator=pending.values().iterator();Instant now=clock.instant();
+        while(iterator.hasNext())if(!now.isBefore(iterator.next().expiresAt())){iterator.remove();expired++;}
     }
     @Override public synchronized void close(){closed=true;pending.clear();executor.shutdownNow();}
 }

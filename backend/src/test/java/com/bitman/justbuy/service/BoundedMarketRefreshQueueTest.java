@@ -50,6 +50,12 @@ class BoundedMarketRefreshQueueTest {
         queue.offer("old",calls::incrementAndGet);clock.value=clock.value.plusSeconds(121);executor.drain();
         assertThat(calls).hasValue(0);assertThat(queue.snapshot()).containsEntry("expired",1L);assertThat(queue.keys()).isEmpty();
     }
+    @Test void observingTheQueueDropsExpiredWaitingKeysEvenBeforeTheWorkerReachesThem() {
+        var executor=new ManualExecutor();var clock=new MutableClock();var queue=new BoundedMarketRefreshQueue(2,clock,executor);var calls=new AtomicInteger();
+        queue.offer("investorDaily/005930/2026-10-08",calls::incrementAndGet);clock.value=clock.value.plusSeconds(120);
+        assertThat(queue.keys()).isEmpty();assertThat(queue.snapshot()).containsEntry("expired",1L).containsEntry("pendingJobs",0);
+        executor.drain();assertThat(calls).hasValue(0);assertThat(queue.snapshot()).containsEntry("expired",1L);
+    }
     @Test void ShutdownCancelsQueuedWorkAndRejectsNewJobs() {
         var executor=new ManualExecutor();var queue=new BoundedMarketRefreshQueue(2,Clock.systemUTC(),executor);var calls=new AtomicInteger();
         queue.offer("cancelled",calls::incrementAndGet);queue.close();executor.drain();

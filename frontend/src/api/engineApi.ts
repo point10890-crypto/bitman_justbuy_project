@@ -202,5 +202,5 @@ export const engineApi = {
   translate: (text: string, signal?: AbortSignal) => post<Translation>('/translate', { text }, signal),
   screen: (req: { strategy?: Strategy; strategy_id?: string }, signal?: AbortSignal) => post<ScreenResult>('/screen', req, signal),
   backtest: (req: { strategy?: Strategy; strategy_id?: string }) => post<BacktestResult>('/backtest', req),
-  risk: (codes: string[]) => post<{ as_of: string; items: RiskCheckItem[] }>('/risk', { codes }),
+  risk: (codes: string[], asOf?: string) => post<{ as_of: string; items: RiskCheckItem[] }>('/risk', { codes, as_of: asOf }),
 }

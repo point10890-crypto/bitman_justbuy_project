@@ -212,6 +212,55 @@ class KiwoomExpandedCollectionTest {
             assertThat(fixture.calls).hasSize(61);
         }finally{fixture.service.close();}
     }
+    @Test void cachedInvestorProgressReadsOnlyLiveDemandAndValidatedSameSessionCacheWithoutRequests(){
+        Fixture fixture=new Fixture();var executor=new BoundedMarketRefreshQueueTest.ManualExecutor();
+        var queue=new BoundedMarketRefreshQueue(128,fixture.clock,executor);setField(fixture.service,"refreshQueue",queue);
+        LocalDate expected=LocalDate.of(2026,10,8);String code=code(1);
+        try {
+            assertThat(part(fixture.service.cachedInvestorEvidence(List.of(code),expected),code,"investorDaily")).containsEntry("status","UNAVAILABLE");
+            assertThat(fixture.calls).isEmpty();assertThat(queue.snapshot()).containsEntry("enqueued",0L);
+            fixture.deferForeground();fixture.service.fetchEvidence(List.of(code),Map.of(code,List.of("investorDaily")));
+            for(int i=0;i<3;i++)assertThat(part(fixture.service.cachedInvestorEvidence(List.of(code),expected),code,"investorDaily")).containsEntry("status","PENDING");
+            assertThat(fixture.calls).isEmpty();assertThat(queue.snapshot()).containsEntry("enqueued",1L);
+            fixture.allowImmediateRequests();executor.drain();int calls=fixture.calls.size();
+            var verified=part(fixture.service.cachedInvestorEvidence(List.of(code),expected),code,"investorDaily");
+            assertThat(verified).containsEntry("status","AVAILABLE").containsEntry("requestedStockCode",code).containsEntry("fetchedAt",NOW.toString());
+            assertThat((List<?>)verified.get("observations")).hasSize(5);
+            assertThat(fixture.calls).hasSize(calls);assertThat(queue.snapshot()).containsEntry("enqueued",1L);
+            fixture.clock.advance(Duration.ofSeconds(600));
+            assertThat(part(fixture.service.cachedInvestorEvidence(List.of(code),expected),code,"investorDaily")).containsEntry("status","UNAVAILABLE");
+            assertThat(fixture.calls).hasSize(calls);assertThat(queue.snapshot()).containsEntry("enqueued",1L);
+        }finally{fixture.service.close();}
+    }
+    @Test void twentyFlowCandidatesNeedOnlyOneSharedQuoteAndTwentyInvestorJobs(){
+        Fixture fixture=new Fixture();var executor=new BoundedMarketRefreshQueueTest.ManualExecutor();
+        var queue=new BoundedMarketRefreshQueue(128,fixture.clock,executor);setField(fixture.service,"refreshQueue",queue);
+        List<String> selected=codes(1,20);Map<String,List<String>> required=new LinkedHashMap<>();
+        selected.forEach(code->required.put(code,List.of("quote","investorDaily")));fixture.deferForeground();
+        try {
+            var first=fixture.service.fetchEvidence(selected,required);
+            assertThat(first).containsEntry("pendingFacts",40);assertThat(queue.snapshot()).containsEntry("enqueued",21L);
+            for(String code:selected)for(String unrequested:List.of("valuation","technical"))
+                assertThat(part(first,code,unrequested)).containsEntry("status","NOT_REQUESTED");
+            fixture.allowImmediateRequests();executor.drain();
+            assertThat(fixture.calls).hasSize(21);assertThat(fixture.calls.stream().map(Call::api).toList()).containsOnly("ka10095","ka10059");
+            assertThat(fixture.calls.stream().filter(call->call.api().equals("ka10059")).count()).isEqualTo(20);
+            fixture.service.cachedInvestorEvidence(selected,LocalDate.of(2026,10,8));assertThat(fixture.calls).hasSize(21);
+        }finally{fixture.service.close();}
+    }
+    @Test void cachePeekNeverConvertsExpiredDemandOrTheNextTradingSessionIntoAnotherPendingQuery(){
+        Fixture fixture=new Fixture();var executor=new BoundedMarketRefreshQueueTest.ManualExecutor();
+        var queue=new BoundedMarketRefreshQueue(128,fixture.clock,executor);setField(fixture.service,"refreshQueue",queue);
+        String code=code(1);LocalDate expected=LocalDate.of(2026,10,8);fixture.deferForeground();
+        try {
+            fixture.service.fetchEvidence(List.of(code),Map.of(code,List.of("investorDaily")));fixture.clock.advance(Duration.ofSeconds(120));
+            assertThat(part(fixture.service.cachedInvestorEvidence(List.of(code),expected),code,"investorDaily")).containsEntry("status","UNAVAILABLE");
+            assertThat(queue.snapshot()).containsEntry("expired",1L).containsEntry("pendingJobs",0);
+            fixture.clock.advance(Duration.ofDays(1));
+            assertThat(part(fixture.service.cachedInvestorEvidence(List.of(code),expected),code,"investorDaily")).containsEntry("status","STALE_DATE");
+            assertThat(fixture.calls).isEmpty();executor.drain();assertThat(fixture.calls).isEmpty();
+        }finally{fixture.service.close();}
+    }
 
     @Test void aFullQueueKeepsRejectedFactsUnconfirmedAndNeverExceedsItsCapacity(){
         Fixture fixture=new Fixture();var executor=new BoundedMarketRefreshQueueTest.ManualExecutor();

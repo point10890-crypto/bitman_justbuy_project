@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import type { KeywordSearchMatch, KeywordSearchResponse } from '../../api/keywordSearchApi'
+import { getFlowCoverage, getSearchProgress, type KeywordSearchMatch, type KeywordSearchResponse } from '../../api/keywordSearchApi'
 import type { RiskCheckItem } from '../../api/engineApi'
 import { fellBackToNameSearch, type SearchUpgrade } from '../../hooks/useSearchUpgrade'
 import { DailyEvidence, EngineMatchCard, PastPerformance } from './SearchUpgradeViews'
@@ -64,6 +64,33 @@ function providerCoverage(provider: NonNullable<KeywordSearchResponse['providers
   if (!validCount(requestedCount) || !validCount(availableCount) || !validCount(pendingCount)
     || availableCount! > requestedCount! || pendingCount! > requestedCount!) return null
   return `근거 확인 ${availableCount} / 요청 ${requestedCount}종목 · 추가 확인 대기 ${pendingCount}종목`
+}
+
+function flowReadinessLabel(result: KeywordSearchResponse | null, shown: number, trackingError?: string | null, exhausted = false) {
+  const coverage = getFlowCoverage(result)
+  if (!coverage) return null
+  if (coverage.pendingCount > 0) return trackingError ? '수급 추가 확인 중단' : exhausted ? '수급 자동 확인 종료' : '수급 조회 진행 중'
+  if (coverage.unavailableCount > 0) return '수급 일부 자료 미확인'
+  return shown === 0 ? '확인된 범위 조건 일치 0건' : null
+}
+
+function FlowReadiness({ result, trackingError, exhausted = false }: {
+  result: KeywordSearchResponse | null; trackingError?: string | null; exhausted?: boolean
+}) {
+  const coverage = getFlowCoverage(result)
+  if (!coverage) return null
+  return (
+    <section className="keyword-search-scope" aria-label="수급 근거 확인 상태">
+      <p>수급 근거 확인 {coverage.availableCount} / 요청 {coverage.requestedCount}종목 · 추가 확인 대기 {coverage.pendingCount}종목 · 미확인 {coverage.unavailableCount}종목</p>
+      {trackingError && <p>{trackingError} 확인된 결과는 유지합니다.</p>}
+      {coverage.pendingCount > 0 && (exhausted
+        ? <p>자동 확인을 마쳤습니다. 추가 자료의 확인 여부는 같은 조건으로 다시 검색해 주세요.</p>
+        : !trackingError && <p>{getSearchProgress(result)
+          ? '확인된 종목은 먼저 표시합니다. 수급 추가 확인 결과를 자동으로 갱신합니다.'
+          : '수급 추가 조회가 진행 중입니다. 자동 확인 정보가 없어 같은 조건으로 다시 검색해 주세요.'}</p>)}
+      {coverage.pendingCount === 0 && coverage.unavailableCount > 0 && <p>추가 조회는 종료됐습니다. 미확인 수급을 조건 미충족으로 간주하지 않습니다.</p>}
+    </section>
+  )
 }
 
 function observationSourceLabel(source: string | null | undefined, environment: string | null | undefined) {
@@ -131,15 +158,23 @@ function LiveMatchCard({ match, daily, dailyAsOf }: { match: KeywordSearchMatch;
   )
 }
 
-function KeywordBody({ result, upgrade }: { result: KeywordSearchResponse; upgrade?: SearchUpgrade }) {
+function KeywordBody({ result: initialResult, upgrade }: { result: KeywordSearchResponse; upgrade?: SearchUpgrade }) {
   const enriched = upgrade?.status === 'done' && upgrade.mode === 'keyword' ? upgrade : null
+  const result = enriched?.updatedResult ?? initialResult
+  const coverage = getFlowCoverage(result)
+  const flowUnconfirmed = coverage !== null && (coverage.pendingCount > 0 || coverage.unavailableCount > 0)
+  const canUseFlowLabel = result.outcome !== 'UNSUPPORTED' && (flowUnconfirmed || result.outcome === 'EMPTY' || result.outcome === 'COMPLETE')
+  const label = canUseFlowLabel
+    ? flowReadinessLabel(result, result.matches.length, enriched?.trackingError, enriched?.trackingExhausted) ?? outcomeLabel[result.outcome]
+    : outcomeLabel[result.outcome]
   return (
     <>
       <div className="keyword-search-status" role="status">
-        <strong>{outcomeLabel[result.outcome]}</strong>
+        <strong>{label}</strong>
         <span>조회 시각 {formatKstTimestamp(result.fetchedAt)}</span>
       </div>
       {outcomeMessage[result.outcome] && <p className="keyword-search-empty">{outcomeMessage[result.outcome]}</p>}
+      <FlowReadiness result={result} trackingError={enriched?.trackingError} exhausted={enriched?.trackingExhausted} />
       {result.providers && result.providers.length > 0 && (
         <section className="keyword-search-scope" aria-label="조회 출처와 상태">
           <h3>조건검색 데이터 출처</h3>
@@ -151,7 +186,7 @@ function KeywordBody({ result, upgrade }: { result: KeywordSearchResponse; upgra
               <p>조회 결과 확인 {formatKstTimestamp(provider.checkedAt)}</p>
             </div>
           ))}
-          {result.providers.some(provider => provider.status === 'PENDING' || provider.status === 'QUEUED'
+          {!getFlowCoverage(result) && result.providers.some(provider => provider.status === 'PENDING' || provider.status === 'QUEUED'
             || validCount(provider.pendingCount) && provider.pendingCount! > 0) && (
             <p>확인된 종목은 먼저 표시합니다. 추가 조회가 끝난 뒤 같은 조건으로 다시 검색해 주세요.</p>
           )}
@@ -193,9 +228,11 @@ function EngineBody({ up }: { up: Extract<SearchUpgrade, { mode: 'engine' }> }) 
   const live = realtime?.result ?? null
   const mixed = !!t.realtime_query
   const shown = mixed ? combined?.length ?? 0 : s.results.length
+  const flowLabel = mixed ? flowReadinessLabel(live, shown, realtime?.trackingError, realtime?.trackingExhausted) : null
   const label = realtime?.error ? '수급 조건 조회 실패'
     : s.regime_blocked ? '현재 시장 국면에서 쓰지 않는 조건'
-    : mixed && live?.outcome === 'PARTIAL' && shown === 0 ? '수급 조건 일부 자료 확인 중'
+    : flowLabel ? flowLabel
+    : mixed && live?.outcome === 'PARTIAL' && shown === 0 ? '확인된 결과에서 조건 일치 0건 · 일부 자료 미확인'
     : shown > 0 ? (combined ? '검색 완료 · 수급과 일봉 조건 결합' : '검색 완료 · AI 조건 해석') : '조건 일치 0건'
   const notes = [
     ...(t.fallback_reason ? [t.fallback_reason] : []),
@@ -219,6 +256,7 @@ function EngineBody({ up }: { up: Extract<SearchUpgrade, { mode: 'engine' }> }) 
         <strong>{label}</strong>
         <span>일봉 {s.as_of} 확정 종가{live ? ` · 수급 조회 ${formatKstTimestamp(live.fetchedAt)}` : ''}</span>
       </div>
+      <FlowReadiness result={live} trackingError={realtime?.trackingError} exhausted={realtime?.trackingExhausted} />
       <section className="keyword-search-scope" aria-label="검색 조건과 범위">
         <h3>적용한 조건</h3>
         <ul>

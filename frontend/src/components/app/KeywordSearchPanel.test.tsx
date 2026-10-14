@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KeywordSearchPanel } from './KeywordSearchPanel'
 import type { KeywordSearchResponse } from '../../api/keywordSearchApi'
+import type { SearchUpgrade } from '../../hooks/useSearchUpgrade'
 
 const result: KeywordSearchResponse = {
   query: '가격 5만원 이하', outcome: 'COMPLETE', appliedConditions: ['현재가 50,000원 이하'], unsupportedTerms: [],
@@ -152,5 +153,124 @@ describe('keyword search evidence presentation', () => {
     expect(screen.queryByText(/AI 에이전트 병렬/)).toBeNull()
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})
+
+const mixed = (live: KeywordSearchResponse): Extract<SearchUpgrade, { mode: 'engine' }> => ({
+  status: 'done', mode: 'engine',
+  translation: {
+    strategy: { title: '20일선 위', when: { f: 'gap_ma20', op: '>', v: 0 }, rank_by: { f: 'quality_score', desc: true }, top_n: 3 },
+    source: 'rules', conditions: ['20일선 위'], assumptions: [], warnings: [], unsupported: [], unparsed: [], error: null,
+    fallback_reason: null, realtime_query: '최근 1거래일 외국인 순매수',
+  },
+  screen: {
+    strategy: { title: '20일선 위', when: { f: 'gap_ma20', op: '>', v: 0 }, rank_by: { f: 'quality_score', desc: true }, top_n: 3 },
+    conditions: ['20일선 위'], as_of: '2026-10-13', regime: { code: 'UP_TREND', label: '상승 국면' }, regime_blocked: false,
+    counts: { universe: 868, passing: 3, guard_excluded: 0, eligible: 3, published: 0 },
+    results: [], excluded: [], below_top_n: [], excluded_codes: {}, data_version: 'v',
+  },
+  backtest: null, realtime: { query: '최근 1거래일 외국인 순매수', result: live, error: null },
+  combined: [], combinedExcluded: [], riskError: null,
+})
+const showMixed = (response: KeywordSearchResponse, upgrade = mixed(response)) => render(
+  <KeywordSearchPanel query="최근 1거래일 외국인 순매수 20일선 위 3개" result={null} loading={false} error={null} onClose={vi.fn()} upgrade={upgrade} />,
+)
+
+describe('required flow readiness presentation', () => {
+  it('does not call a completed partial search processing when only optional provider work is pending', () => {
+    const live = { ...result, outcome: 'PARTIAL' as const,
+      flowCoverage: { requestedCount: 20, availableCount: 20, pendingCount: 0, unavailableCount: 0 },
+      providers: [{ source: 'KIWOOM_REST_MOCK', environment: 'MOCK', status: 'PARTIAL', checkedAt: result.fetchedAt,
+        scope: '시세·일봉 추가 조회', requestedCount: 20, availableCount: 6, pendingCount: 14 }],
+    }
+    showMixed(live)
+    expect(screen.getByRole('status').textContent).toContain('확인된 범위 조건 일치 0건')
+    expect(screen.getByRole('status').textContent).not.toMatch(/확인 중|진행 중/)
+    expect(screen.queryByRole('region', { name: '조건 일치 종목' })).toBeNull()
+    expect(screen.getByText('수급 근거 확인 20 / 요청 20종목 · 추가 확인 대기 0종목 · 미확인 0종목')).toBeTruthy()
+  })
+
+  it('shows actual missing required flow jobs as processing rather than verified zero', () => {
+    const live = { ...result, outcome: 'PARTIAL' as const, matches: [], scope: { ...result.scope, matchedCount: 0 },
+      flowCoverage: { requestedCount: 20, availableCount: 0, pendingCount: 20, unavailableCount: 0 },
+    }
+    showMixed(live)
+    expect(screen.getByRole('status').textContent).toContain('수급 조회 진행 중')
+    expect(screen.getByRole('status').textContent).not.toContain('조건 일치 0건')
+  })
+
+  it('treats missing flow after the queue stops as unavailable evidence rather than continuing work', () => {
+    const live = { ...result, outcome: 'PARTIAL' as const,
+      flowCoverage: { requestedCount: 20, availableCount: 6, pendingCount: 0, unavailableCount: 14 },
+    }
+    showMixed(live)
+    expect(screen.getByRole('status').textContent).toContain('수급 일부 자료 미확인')
+    expect(screen.getByRole('status').textContent).not.toMatch(/확인 중|진행 중/)
+  })
+
+  it('does not infer active flow work from a legacy partial outcome without coverage', () => {
+    showMixed({ ...result, outcome: 'PARTIAL' })
+    expect(screen.getByRole('status').textContent).not.toMatch(/확인 중|진행 중/)
+    expect(screen.getByRole('status').textContent).toContain('일부 자료 미확인')
+  })
+
+  it('also distinguishes required flow processing in a keyword-led response', () => {
+    const live = { ...result, outcome: 'PARTIAL' as const, matches: [], scope: { ...result.scope, matchedCount: 0 },
+      flowCoverage: { requestedCount: 20, availableCount: 0, pendingCount: 20, unavailableCount: 0 },
+    }
+    show(live)
+    expect(screen.getByRole('status').textContent).toContain('수급 조회 진행 중')
+  })
+
+  it('does not turn missing research evidence into proven zero when all required flow facts are available', () => {
+    const live = { ...result, query: '외국인 순매수 PER 15 이하', outcome: 'UNAVAILABLE' as const, sourceStatus: 'UNAVAILABLE',
+      appliedConditions: ['외국인 순매수 > 0', 'PER 15 이하'], matches: [], scope: { ...result.scope, matchedCount: 0 },
+      warnings: ['PER 실측 근거 미확인 종목은 제외했습니다.'],
+      flowCoverage: { requestedCount: 1, availableCount: 1, pendingCount: 0, unavailableCount: 0 },
+    }
+    show(live)
+    expect(screen.getByRole('status').textContent).toContain('데이터 조회 불가')
+    expect(screen.getByRole('status').textContent).not.toContain('조건 일치 0건')
+    expect(screen.getByText('PER 실측 근거 미확인 종목은 제외했습니다.')).toBeTruthy()
+    expect(screen.queryByRole('region', { name: '조건 일치 종목' })).toBeNull()
+  })
+
+  it('keeps a partial overall result distinct from completed flow facts when research data is missing', () => {
+    show({ ...result, outcome: 'PARTIAL', appliedConditions: ['외국인 순매수 > 0', 'PER 15 이하'],
+      matches: [], scope: { ...result.scope, matchedCount: 0 }, warnings: ['PER 실측 근거 미확인 종목은 제외했습니다.'],
+      flowCoverage: { requestedCount: 1, availableCount: 1, pendingCount: 0, unavailableCount: 0 },
+    })
+    expect(screen.getByRole('status').textContent).toContain('일부 데이터로 검색')
+    expect(screen.getByRole('status').textContent).not.toContain('조건 일치 0건')
+    expect(screen.getByText('수급 근거 확인 1 / 요청 1종목 · 추가 확인 대기 0종목 · 미확인 0종목')).toBeTruthy()
+  })
+
+  it('shows refreshed keyword results without publishing the stale original response', () => {
+    const updatedResult = { ...result, matches: [{ ...result.matches[0], code: '000660', name: '새로운 확인 종목' }],
+      flowCoverage: { requestedCount: 20, availableCount: 20, pendingCount: 0, unavailableCount: 0 },
+    }
+    const upgrade: Extract<SearchUpgrade, { mode: 'keyword' }> = {
+      status: 'done', mode: 'keyword', translation: null, risk: {}, riskAsOf: null, backtest: null, updatedResult,
+    }
+    render(<KeywordSearchPanel query="최근 1거래일 외국인 순매수" result={result} loading={false} error={null} onClose={vi.fn()} upgrade={upgrade} />)
+    expect(screen.getByText('새로운 확인 종목')).toBeTruthy()
+    expect(screen.queryByText('검증 종목')).toBeNull()
+  })
+
+  it.each(['exhausted', 'error'] as const)('keeps verified matches visible when automatic tracking stops with %s', reason => {
+    const live = { ...result, outcome: 'PARTIAL' as const,
+      flowCoverage: { requestedCount: 20, availableCount: 6, pendingCount: 14, unavailableCount: 0 },
+    }
+    const upgrade = mixed(live)
+    upgrade.combined = [{ code: '005930', live: result.matches[0], daily: null }]
+    upgrade.realtime = { ...upgrade.realtime!, trackingExhausted: reason === 'exhausted',
+      trackingError: reason === 'error' ? '진행 조회 연결 실패' : null,
+    }
+    showMixed(live, upgrade)
+    expect(screen.getByText('검증 종목')).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toContain(reason === 'exhausted' ? '수급 자동 확인 종료' : '수급 추가 확인 중단')
+    expect(screen.getByRole('status').textContent).not.toContain('수급 조회 진행 중')
+    expect(screen.getByText('수급 근거 확인 6 / 요청 20종목 · 추가 확인 대기 14종목 · 미확인 0종목')).toBeTruthy()
+    expect(screen.queryByText('수급 조건 조회 실패')).toBeNull()
   })
 })

@@ -88,6 +88,16 @@ public class KeywordSearchDataService {
         List<String> verified=codes==null?List.of():codes.stream().filter(c->c!=null&&c.matches("[0-9]{6}")).distinct().limit(CROSS_CANDIDATE_LIMIT).toList();
         return verified.isEmpty()?Map.of():kiwoom.fetchEvidence(verified);
     }
+    public Map<String,Object> kiwoomEvidence(List<String> codes,List<String> parts) {
+        if(kiwoom==null||!kiwoom.isEnabled())return Map.of();
+        List<String> verified=verifiedCrossCodes(codes);
+        List<String> selected=parts==null?List.of():parts.stream().filter(part->Set.of("quote","valuation","technical","investorDaily").contains(part)).distinct().toList();
+        Map<String,List<String>> missing=new LinkedHashMap<>();for(String code:verified)missing.put(code,selected);
+        return verified.isEmpty()?Map.of():kiwoom.fetchEvidence(verified,missing);
+    }
+    public Map<String,Object> cachedInvestorEvidence(List<String> codes,java.time.LocalDate expectedDate) {
+        return kiwoom==null?Map.of():kiwoom.cachedInvestorEvidence(verifiedCrossCodes(codes),expectedDate);
+    }
     /** Existing permitted KIS current-price API; independent observations never fill another quote's fields. */
     public Map<String,Quote> kisQuotes(List<String> codes) {
         if(kis==null || !kis.isAvailable() || codes==null || Thread.currentThread().isInterrupted()) return Map.of();

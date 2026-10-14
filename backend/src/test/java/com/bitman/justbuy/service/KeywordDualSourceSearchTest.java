@@ -17,7 +17,7 @@ class KeywordDualSourceSearchTest {
     void primary(String... codes) {when(data.snapshot()).thenReturn(new KeywordSearchDataService.Snapshot("COMPLETE",Arrays.stream(codes).map(this::quote).toList(),now,"검증된 후보",List.of()));}
     void secondary(Map<String,Object> facts) {
         when(data.kiwoomReadiness()).thenReturn(Map.of("enabled",true,"source","KIWOOM_REST_MOCK","environment","MOCK","status","READY","candidateLimit",20));
-        when(data.kiwoomEvidence(anyList())).thenReturn(Map.of("status","PARTIAL","source","KIWOOM_REST_MOCK","environment","MOCK","fetchedAt",now.toString(),"candidates",Map.of(code,facts)));
+        when(data.kiwoomEvidence(anyList(),anyList())).thenReturn(Map.of("status","PARTIAL","source","KIWOOM_REST_MOCK","environment","MOCK","fetchedAt",now.toString(),"candidates",Map.of(code,facts)));
     }
     Map<String,Object> group(String part) {
         var v=new LinkedHashMap<String,Object>();v.put("status","AVAILABLE");v.put("source","KIWOOM_REST_MOCK");v.put("environment","MOCK");v.put("fetchedAt",now.toString());v.put("requestedStockCode",code);
@@ -65,14 +65,14 @@ class KeywordDualSourceSearchTest {
         assertThat(service.search("최근 6거래일 외국인 기관 순매수").matches()).isEmpty();
     }
     @Test void oneProviderFailurePreservesPrimaryAndMarksPartial() {
-        primary(code);secondary(Map.of());when(data.kiwoomEvidence(anyList())).thenThrow(new IllegalStateException("provider failure"));
+        primary(code);secondary(Map.of());when(data.kiwoomEvidence(anyList(),anyList())).thenThrow(new IllegalStateException("provider failure"));
         var result=service.search("삼성전자");assertThat(result.matches()).hasSize(1);assertThat(result.outcome()).isEqualTo("PARTIAL");
         assertThat(result.providers()).anyMatch(p->p.source().equals("KIWOOM_REST_MOCK")&&p.status().equals("UNAVAILABLE"));
     }
     @Test void crossCheckExpandsToTwentyVerifiedCandidatesWithoutRequestingTheTwentyFirst() {
         primary(java.util.stream.IntStream.rangeClosed(1,25).mapToObj(i->String.format("%06d",i)).toArray(String[]::new));
         secondary(Map.of("quote",group("quote")));
-        var result=service.search("거래량 상위 20");verify(data).kiwoomEvidence(argThat(codes->codes.size()==20));
+        var result=service.search("거래량 상위 20");verify(data).kiwoomEvidence(argThat(codes->codes.size()==20),eq(List.of("quote")));
         verify(data).kisQuotes(argThat(codes->codes.size()==20));assertThat(result.scope().label()).contains("20종목");
     }
     @Test void wrongCodeAndStaleResearchCannotSatisfyACondition() {
@@ -123,7 +123,7 @@ class KeywordDualSourceSearchTest {
     }
     @Test void pendingFactsAreNotFailedRequestsOrMadeUpConditionMatches() {
         primary(code);secondary(Map.of());
-        when(data.kiwoomEvidence(anyList())).thenReturn(Map.of("status","PENDING","source","KIWOOM_REST_MOCK","environment","MOCK",
+        when(data.kiwoomEvidence(anyList(),anyList())).thenReturn(Map.of("status","PENDING","source","KIWOOM_REST_MOCK","environment","MOCK",
             "fetchedAt",now.toString(),"pendingCodes",1,"candidates",Map.of(code,Map.of("valuation",Map.of("status","PENDING")))));
         var result=service.search("PER 15 이하");assertThat(result.matches()).isEmpty();assertThat(result.outcome()).isEqualTo("PARTIAL");
         var provider=result.providers().stream().filter(p->p.source().equals("KIWOOM_REST_MOCK")).findFirst().orElseThrow();
@@ -134,7 +134,7 @@ class KeywordDualSourceSearchTest {
     @Test void aVerifiedKiwoomResearchMatchBeyondTheKisFiveCandidateSubsetIsPreserved() {
         primary(java.util.stream.IntStream.rangeClosed(1,20).mapToObj(i->String.format("%06d",i)).toArray(String[]::new));
         secondary(Map.of());var value=group("valuation");value.put("requestedStockCode","000018");
-        when(data.kiwoomEvidence(anyList())).thenReturn(Map.of("status","PARTIAL","source","KIWOOM_REST_MOCK","environment","MOCK",
+        when(data.kiwoomEvidence(anyList(),anyList())).thenReturn(Map.of("status","PARTIAL","source","KIWOOM_REST_MOCK","environment","MOCK",
             "fetchedAt",now.toString(),"candidates",Map.of("000018",Map.of("valuation",value))));
         var research=mock(KisResearchEvidenceService.class);service.configureResearchEvidence(research);
         var result=service.search("PER 15 이하");assertThat(result.matches()).extracting(m->m.code()).containsExactly("000018");

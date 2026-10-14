@@ -3,7 +3,10 @@ import {
   engineApi,
   type BacktestResult, type RiskCheckItem, type ScreenResult, type Translation,
 } from '../api/engineApi'
-import { searchKeywordStocks, type KeywordSearchMatch, type KeywordSearchResponse } from '../api/keywordSearchApi'
+import {
+  getFlowCoverage, getSearchProgress, searchKeywordProgress, searchKeywordStocks,
+  type KeywordSearchMatch, type KeywordSearchResponse,
+} from '../api/keywordSearchApi'
 import { getStoredToken } from '../contexts/AuthContext'
 
 /**
@@ -34,6 +37,9 @@ export type SearchUpgrade =
       risk: Record<string, RiskCheckItem>
       riskAsOf: string | null
       backtest: BacktestResult | null
+      updatedResult?: KeywordSearchResponse
+      trackingError?: string | null
+      trackingExhausted?: boolean
     }
   | {
       status: 'done'
@@ -41,7 +47,10 @@ export type SearchUpgrade =
       translation: Translation
       screen: ScreenResult
       backtest: BacktestResult | null
-      realtime: { query: string; result: KeywordSearchResponse | null; error: string | null } | null
+      realtime: {
+        query: string; result: KeywordSearchResponse | null; error: string | null
+        trackingError?: string | null; trackingExhausted?: boolean
+      } | null
       /** 수급 조건이 섞였을 때: 실데이터와 일봉 조건을 모두 만족한 종목. 없으면 null. */
       combined: CombinedMatch[] | null
       /** 수급 조건은 맞지만 일봉 위험 신호로 뺀 종목. */
@@ -51,6 +60,18 @@ export type SearchUpgrade =
     }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'AI 조건검색을 처리하지 못했습니다.')
+
+function waitForProgress(delay: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false)
+  return new Promise(resolve => {
+    const onAbort = () => { clearTimeout(timer); resolve(false) }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve(true)
+    }, delay)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
 
 /** 실데이터 검색이 조건을 못 읽고 남은 단어를 종목명으로 찾았는지. */
 export function fellBackToNameSearch(result: KeywordSearchResponse | null) {
@@ -92,6 +113,44 @@ export function useSearchUpgrade(
     const t = translation.value
     const done = (next: SearchUpgrade) => { if (!ctl.signal.aborted) setState(next) }
 
+    // Progress observes existing work only. Translation, screen and backtest stay fixed for this search.
+    const track = async (
+      initial: KeywordSearchResponse,
+      accept: (next: KeywordSearchResponse) => Promise<void>,
+      fail: (error: string) => void,
+      exhaust: () => void,
+    ) => {
+      const originalProgress = getSearchProgress(initial)
+      if (!originalProgress) return
+      let latest = initial
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const coverage = getFlowCoverage(latest)
+        const progress = getSearchProgress(latest)
+        if (!coverage?.pendingCount || !progress || ctl.signal.aborted) return
+        const expiresAt = Math.min(Date.parse(originalProgress.expiresAt), Date.parse(progress.expiresAt))
+        if (Date.now() >= expiresAt) { exhaust(); return }
+        const delay = Math.max(10_000, Math.min(30_000, progress.retryAfterMs))
+        if (!await waitForProgress(delay, ctl.signal)) return
+        if (Date.now() >= expiresAt) { exhaust(); return }
+        try {
+          const next = await searchKeywordProgress(originalProgress.id, getStoredToken() || undefined, ctl.signal)
+          if (ctl.signal.aborted) return
+          const nextCoverage = getFlowCoverage(next)
+          const flowFinished = nextCoverage !== null && nextCoverage.pendingCount === 0
+          if ((next.outcome === 'UNAVAILABLE' && !flowFinished) || next.outcome === 'UNSUPPORTED' || fellBackToNameSearch(next)) {
+            fail('추가 수급 조회에서 요청한 조건의 근거를 확인하지 못했습니다.')
+            return
+          }
+          await accept(next)
+          latest = next
+        } catch (e) {
+          if (!ctl.signal.aborted) fail(message(e))
+          return
+        }
+      }
+      if (getFlowCoverage(latest)?.pendingCount && getSearchProgress(latest) && !ctl.signal.aborted) exhaust()
+    }
+
     ;(async () => {
       try {
         if (t && engineShouldLead(result, error, t)) {
@@ -100,10 +159,33 @@ export function useSearchUpgrade(
             engineApi.screen({ strategy }, ctl.signal),
             engineApi.backtest({ strategy }).catch(() => null),
           ])
-          let realtime: { query: string; result: KeywordSearchResponse | null; error: string | null } | null = null
+          let realtime: Extract<SearchUpgrade, { mode: 'engine' }>['realtime'] = null
           let combined: CombinedMatch[] | null = null
           let combinedExcluded: KeywordSearchMatch[] = []
           let riskError: string | null = null
+          const passing = [...new Set([...screen.results.map(r => r.code), ...screen.below_top_n])]
+          const excluded = new Set(Object.keys(screen.excluded_codes ?? {}))
+          const topN = Math.max(1, Math.min(50, screen.strategy.top_n))
+          let dailyByCode: Record<string, RiskCheckItem> = {}
+          const publish = () => done({ status: 'done', mode: 'engine', translation: t, screen, backtest, realtime, combined, combinedExcluded, riskError })
+          const combine = async (live: KeywordSearchResponse) => {
+            const liveByCode = new Map(live.matches.map(m => [m.code, m]))
+            const both = passing.filter(code => liveByCode.has(code)).slice(0, topN).map(code => liveByCode.get(code)!)
+            combinedExcluded = live.matches.filter(m => excluded.has(m.code))
+            combined = both.map(m => ({ code: m.code, live: m, daily: dailyByCode[m.code] ?? null }))
+            riskError = null
+            const missing = both.map(m => m.code).filter(code => !dailyByCode[code])
+            if (missing.length) {
+              try {
+                const daily = (await engineApi.risk(missing, screen.as_of)).items
+                if (ctl.signal.aborted) return
+                dailyByCode = { ...dailyByCode, ...Object.fromEntries(daily.map(d => [d.code, d])) }
+                combined = both.map(m => ({ code: m.code, live: m, daily: dailyByCode[m.code] ?? null }))
+              } catch {
+                riskError = '일봉 위험 정보 보강을 확인하지 못했습니다. 확인된 수급·일봉 조건 일치 결과는 유지합니다.'
+              }
+            }
+          }
           if (t.realtime_query) {
             try {
               const live = await searchKeywordStocks(t.realtime_query, getStoredToken() || undefined, ctl.signal)
@@ -113,30 +195,27 @@ export function useSearchUpgrade(
                   ? '요청한 수급 조건을 확인하지 못했습니다.'
                   : '실시간 수급을 조회하지 못했습니다.'
               } else {
-                const passing = [...new Set([...screen.results.map(r => r.code), ...screen.below_top_n])]
-                const liveByCode = new Map(live.matches.map(m => [m.code, m]))
-                const excluded = new Set(Object.keys(screen.excluded_codes ?? {}))
-                const topN = Math.max(1, Math.min(50, screen.strategy.top_n))
-                const both = passing.filter(code => liveByCode.has(code)).slice(0, topN).map(code => liveByCode.get(code)!)
-                combinedExcluded = live.matches.filter(m => excluded.has(m.code))
-                // Membership is confirmed before optional risk enrichment; enrichment cannot undo it.
-                combined = both.map(m => ({ code: m.code, live: m, daily: null }))
-                if (both.length) {
-                  try {
-                    const daily = (await engineApi.risk(both.map(m => m.code))).items
-                    const byCode = Object.fromEntries(daily.map(d => [d.code, d]))
-                    combined = both.map(m => ({ code: m.code, live: m, daily: byCode[m.code] ?? null }))
-                  } catch {
-                    riskError = '일봉 위험 정보 보강을 확인하지 못했습니다. 확인된 수급·일봉 조건 일치 결과는 유지합니다.'
-                  }
-                }
+                await combine(live)
               }
             } catch (e) {
               if (ctl.signal.aborted) return
               realtime = { query: t.realtime_query, result: null, error: message(e) }
             }
           }
-          done({ status: 'done', mode: 'engine', translation: t, screen, backtest, realtime, combined, combinedExcluded, riskError })
+          publish()
+          if (realtime?.result && !realtime.error) {
+            await track(realtime.result, async next => {
+              realtime = { ...realtime!, result: next }
+              await combine(next)
+              publish()
+            }, error => {
+              realtime = { ...realtime!, trackingError: error }
+              publish()
+            }, () => {
+              realtime = { ...realtime!, trackingExhausted: true }
+              publish()
+            })
+          }
           return
         }
 
@@ -148,8 +227,26 @@ export function useSearchUpgrade(
             ? engineApi.backtest({ strategy: t.strategy }).catch(() => null)
             : Promise.resolve(null),
         ])
-        const risk = Object.fromEntries((riskRes?.items ?? []).filter(i => i.found).map(i => [i.code, i]))
-        done({ status: 'done', mode: 'keyword', translation: t, risk, riskAsOf: riskRes?.as_of ?? null, backtest })
+        let risk = Object.fromEntries((riskRes?.items ?? []).filter(i => i.found).map(i => [i.code, i]))
+        let riskAsOf = riskRes?.as_of ?? null
+        let updatedResult: KeywordSearchResponse | undefined
+        let trackingError: string | null = null
+        let trackingExhausted = false
+        const publish = () => done({ status: 'done', mode: 'keyword', translation: t, risk, riskAsOf, backtest, updatedResult, trackingError, trackingExhausted })
+        publish()
+        if (result) {
+          await track(result, async next => {
+            const missing = next.matches.slice(0, 50).map(m => m.code).filter(code => !risk[code])
+            if (missing.length) {
+              const extraRisk = await engineApi.risk(missing, riskAsOf ?? undefined).catch(() => null)
+              if (ctl.signal.aborted) return
+              risk = { ...risk, ...Object.fromEntries((extraRisk?.items ?? []).filter(i => i.found).map(i => [i.code, i])) }
+              riskAsOf = riskAsOf ?? extraRisk?.as_of ?? null
+            }
+            updatedResult = next
+            publish()
+          }, error => { trackingError = error; publish() }, () => { trackingExhausted = true; publish() })
+        }
       } catch (e) {
         if (!ctl.signal.aborted) done({ status: 'failed', message: message(e) })
       }

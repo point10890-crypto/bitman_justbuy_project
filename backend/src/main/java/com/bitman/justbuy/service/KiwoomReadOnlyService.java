@@ -180,6 +180,25 @@ public class KiwoomReadOnlyService {
         Map<String,List<String>> missing=new LinkedHashMap<>();for(String code:codes(codes)) missing.put(code,PARTS);
         return fetchEvidence(codes,missing);
     }
+    /** Reads completed daily facts and live demand only. Never authenticates, requests or queues work. */
+    public Map<String,Object> cachedInvestorEvidence(List<String> requestedCodes,LocalDate expectedDate) {
+        Map<String,Object> candidates=new LinkedHashMap<>();
+        Set<String> pending=refreshQueue==null?Set.of():refreshQueue.keys();
+        LocalDate current=KoreanMarketCalendar.previousTradingDay(LocalDate.now(clock.withZone(KST)));
+        for(String code:codes(requestedCodes)) {
+            Map<String,Object> fact;
+            if(!isEnabled())fact=status(gate());
+            else if(expectedDate==null||!expectedDate.equals(current))fact=status("STALE_DATE");
+            else {
+                var params=partParams(code,"investorDaily",expectedDate,expectedDate);
+                Cached cached=freshCached("ka10059"+new TreeMap<>(params));
+                fact=cached==null?status("UNAVAILABLE"):investors(code,expectedDate,cached.value());
+                if(!usable(fact)&&pending.contains(partJobKey(code,"investorDaily",expectedDate,expectedDate)))fact=status("PENDING");
+            }
+            candidates.put(code,Map.of("investorDaily",Collections.unmodifiableMap(fact)));
+        }
+        return Map.of("source",source(),"environment",environmentName(),"candidates",Collections.unmodifiableMap(candidates));
+    }
     public Map<String,Object> fetchEvidence(List<String> requestedCodes,Map<String,List<String>> missingPartsByCode) {
         Map<String,Object> batch=new LinkedHashMap<>();batch.put("source",source());batch.put("environment",environmentName());batch.put("scope",scope());batch.put("fetchedAt",clock.instant().toString());
         batch.put("candidateLimit",CANDIDATE_LIMIT);batch.put("budgetSeconds",12);batch.put("scoringEnabled",false);
