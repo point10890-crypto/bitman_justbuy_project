@@ -147,3 +147,59 @@ def test_expected_share_follows_the_intraday_curve():
     assert L.expected_share(datetime(2026, 10, 14, 9, 0, tzinfo=tz)) == 0.05      # floor at the open
     assert L.expected_share(datetime(2026, 10, 14, 11, 0, tzinfo=tz)) == pytest.approx(0.47)
     assert L.expected_share(datetime(2026, 10, 14, 15, 30, tzinfo=tz)) == 1.0
+
+
+@pytest.mark.parametrize("hour,minute,short_min,leader_min", [(9, 59, 3e9, 15e9), (10, 0, 5e9, 25e9), (11, 0, 10e9, 50e9)])
+def test_pools_apply_approved_liquidity_boundaries(engine, make, hour, minute, short_min, leader_min):
+    clock = session_clock(engine, hour, minute)
+    ls = make(clock, {})
+    row = {"value": short_min - 1, "val20": 20e9, "val5": 10e9, "pace": 4., "velocity": 4.,
+           "chg": .05, "close": 100., "hi250": 100.}
+    tape = pd.DataFrame([row], index=["005930"])
+    assert ls.pools(tape, clock())["short_term"] == []
+    assert ls.pools(tape, clock())["themes"] == []
+    tape.loc["005930", "value"] = short_min
+    assert ls.pools(tape, clock())["short_term"] == ["005930"]
+    tape.loc["005930", "value"] = leader_min - 1
+    assert ls.pools(tape, clock())["leaders"] == []  # market rank cannot bypass turnover
+    tape.loc["005930", "value"] = leader_min
+    assert ls.pools(tape, clock())["leaders"] == ["005930"]
+    tape.loc["005930", ["val20", "val5"]] = [4.9e9, 2e9]
+    assert ls.pools(tape, clock())["swing"] == []
+
+
+def test_missing_or_partial_financials_do_not_earn_profit_points(engine, make):
+    ls = make(session_clock(engine, 10, 0), {})
+    for facts in ({}, {"005930": {"quarters": {"op": [("202606", 10)]}}}):
+        part, reasons, loss = ls._fund_part("005930", facts)
+        assert part == 0
+        assert any("미확인" in reason for reason in reasons)
+
+
+def test_sector_movers_are_all_retained_and_not_called_confirmed_themes(engine, make):
+    clock = session_clock(engine, 11, 0)
+    ls = make(clock, {})
+    codes = list(engine.panel.close.columns[:4])
+    ls.daily.sector.loc[codes] = "같은업종"
+    tape = pd.DataFrame({"value": [50e9, 40e9, 30e9, 20e9], "val20": [1e9] * 4,
+                         "pace": [5.] * 4, "chg": [.05] * 4, "close": [110.] * 4,
+                         "prev_high": [100.] * 4}, index=codes)
+    candidates = ls.themes(tape, codes, {}, {}, {})
+    assert len(candidates) == 4
+    assert all(c.info["theme_status"] == "UNKNOWN" for c in candidates)
+    assert candidates[2].info["role"] == "동반 상승주"
+
+
+def test_sampled_performance_is_labeled_not_true_intraday_maximum(engine, make):
+    ls = make(session_clock(engine, 10, 0), {})
+    assert ls.sections()["short_term"]["performance_basis"] == "SCAN_SAMPLED_AFTER_CAPTURE"
+    assert ls.sections()["swing"]["average_turnover_basis"] == "CLOSE_TIMES_VOLUME_ESTIMATE"
+
+
+def test_individual_previous_day_quotes_never_enter_today_tape(engine, make):
+    clock = session_clock(engine, 10, 0)
+    ls = make(clock, {})
+    snap = snapshot(engine, clock, {})
+    code = snap.iloc[0]["code"]
+    snap.loc[snap["code"] == code, "traded_at"] = "2020-01-01T10:00:00+09:00"
+    assert code not in ls.tape(snap, clock()).index

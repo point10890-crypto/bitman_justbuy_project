@@ -1,5 +1,10 @@
 # condition_engine — 조건검색 엔진
 
+홈 5개 섹션은 기존 운영 원천을 유지한다. `live_screeners.py`는 그림자 수집만 수행하며
+과거 평균 거래대금은 종가×거래량 추정값이다. 통합 범위와 한계는
+`docs/SECTION_INTEGRATION_2026_10_14.md`를 참조한다. `detectors.py`와 `SectionScanner`의
+홈 연결 방식은 사용자 반려로 비활성화됐으며 재사용 기준이 아니다.
+
 `docs/REDESIGN_AI_CONDITION_SEARCH_2026_10_12.md` 의 설계를 구현한 별도 서비스.
 회원의 자연어 요청을 **검증된 조건식(DSL)** 으로 바꾸고, 그 조건으로 오늘 종목을 찾고, 같은 날 다른 종목과 비교한 과거 성과를 보여준다.
 종목을 추천하거나 목표가를 만들지 않는다.

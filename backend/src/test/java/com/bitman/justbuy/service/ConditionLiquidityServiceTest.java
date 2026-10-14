@@ -12,6 +12,35 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class ConditionLiquidityServiceTest {
+    @Test void newerMissingBarsCannotKeepAPreviousRefreshPass() {
+        stub(daily(30_000_000_000L, 10_000_000_000L, 20));
+        var checks = new java.util.ArrayList<>(com.bitman.justbuy.dto.condition.ConditionCheck.unknown("BREAKOUT"));
+        checks.set(2, new com.bitman.justbuy.dto.condition.ConditionCheck("technical.1", "technical", "돌파",
+            "PASS", "이전 관측", "KIS 일봉 · 이전 재조회", now.minusSeconds(60).toString()));
+        var result = service.filterSignals("BREAKOUT", List.of(signal("005930", 80).withChecks(checks)), 3).getFirst();
+        assertThat(result.conditionChecks()).filteredOn(c -> c.id().equals("technical.1"))
+            .extracting(com.bitman.justbuy.dto.condition.ConditionCheck::status).containsExactly("UNKNOWN");
+    }
+    @Test void verifiedDailyResponseAttachesMeasuredTechnicalEvidenceWithoutExtraFetches() {
+        var body = daily(30_000_000_000L, 10_000_000_000L, 20);
+        for (var row : body.path("output2")) {
+            var bar = (ObjectNode) row;
+            bar.put("stck_oprc", "100").put("stck_hgpr", "102").put("stck_lwpr", "99")
+                .put("stck_clpr", "100").put("acml_vol", "100");
+        }
+        ((ObjectNode) body.path("output2").get(0)).put("stck_oprc", "104").put("stck_hgpr", "112")
+            .put("stck_lwpr", "103").put("stck_clpr", "110").put("acml_vol", "300");
+        stub(body);
+        var result = service.filterSignals("BREAKOUT", List.of(signal("005930", 80)), 3).getFirst();
+        assertThat(result.conditionChecks()).filteredOn(c -> c.id().equals("technical.1"))
+            .extracting(com.bitman.justbuy.dto.condition.ConditionCheck::status).containsExactly("PASS");
+        assertThat(result.capturePrice()).isEqualTo("100");
+        assertThat(result.finalScore()).isEqualTo(80);
+        assertThat(result.conditionChecks()).filteredOn(c -> c.id().equals("technical.1"))
+            .allMatch(c -> c.source().contains("포착 당시 판정과 구분"));
+        assertThat(service.filterSignals("BREAKOUT", List.of(result), 3).getFirst()).isEqualTo(result);
+        verify(kis, times(1)).fetchVerifiedReadOnly(anyString(), anyString(), anyMap(), anyLong());
+    }
     @Test void serializedEvidenceDoesNotPromoteGenericOrAiTextToPassedRules() throws Exception {
         stub(daily(100_000_000_000L, 30_000_000_000L, 20));
         var signal = new ConditionSignalDto("leaders", "FLOW_LEADER", 1, "삼성전자", "005930",

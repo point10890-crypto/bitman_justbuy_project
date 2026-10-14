@@ -239,7 +239,7 @@ def daily_context(eng: Engine) -> Daily:
     c, h, v = p.close, p.high, p.value
     t = p.dates[-1]
     ma = lambda w: c.rolling(w, min_periods=w).mean().loc[t]  # noqa: E731
-    val20 = v.rolling(20, min_periods=15).mean().loc[t]
+    val20 = v.rolling(20, min_periods=20).mean().loc[t]
     val5 = v.rolling(5, min_periods=5).mean().loc[t]
     r60 = f["r60"].loc[t]
     frame = pd.DataFrame({
@@ -333,6 +333,8 @@ class LiveScreeners:
     # ---------------------------------------------------------------- scan
     def tape(self, snap: pd.DataFrame, now: datetime) -> pd.DataFrame:
         d = self.daily.frame
+        # A market-wide freshness percentage cannot validate each individual quote.
+        snap = snap[snap["traded_at"].astype(str).str.startswith(str(now.date()))]
         live = snap.set_index("code")[["close", "change_pct", "value", "volume", "traded_at"]]
         t = live.join(d, how="inner")
         t = t[t["in_universe"].fillna(False).astype(bool)]
@@ -382,17 +384,24 @@ class LiveScreeners:
             return self.last_scan
 
     def pools(self, t: pd.DataFrame, now: datetime) -> dict[str, list[str]]:
-        """Each section's trading-value pool: every stock where money is attaching, by its own rule."""
+        """Approved absolute thresholds. Historical averages remain explicitly estimated in shadow mode.
+
+        Mirrors ConditionLiquidityPolicy; an estimate here is NOT a production liquidity pass.
+        The home feed still requires KIS acml_tr_pbmn for the actual 20-session average.
+        """
         late = (now.hour, now.minute) >= (14, 30)
+        early = 9 <= now.hour < 11
+        short_min = (3e9 if now.hour == 9 else 5e9) if early else 1e10
+        leader_min = (15e9 if now.hour == 9 else 25e9) if early else 5e10
         return {
-            "short_term": list(t.index[(t["value"] >= 3e9) & (t["pace"] >= 3.0) & (t["velocity"].fillna(0) >= 3.0)
-                                        & (t["chg"] >= 0.02) & (t["chg"] <= 0.15)]),
-            "swing": list(t.index[(t["val20"] >= 2e9) & (t["val5"] <= 0.8 * t["val20"]) & (t["pace"] >= 1.2)
+            "short_term": list(t.index[(t["value"] >= short_min) & (t["pace"] >= 3.0) & (t["velocity"].fillna(0) >= 3.0)
+                                        & (t["chg"] >= 0.03) & (t["chg"] <= 0.15)]),
+            "swing": list(t.index[(t["val20"] >= 5e9) & (t["val5"] <= 0.8 * t["val20"]) & (t["pace"] >= 1.2)
                                    & (t["chg"] >= 0.01)]),
-            "leaders": list(t.index[((t["val20"] >= 3e10) | (t["value"].rank(ascending=False) <= 50))
+            "leaders": list(t.index[(t["val20"] >= 2e10) & (t["value"] >= leader_min)
                                      & (t["close"] >= 0.9 * t["hi250"])]),
-            "themes": list(t.index[(t["pace"] >= 2.0) & (t["chg"] >= 0.03) & (t["value"] >= 2e9)]),
-            "closing_bet": list(t.index[(t["value"] >= 1e10) & (t["pace"] >= 2.0) & (t["chg"] >= 0.04)
+            "themes": list(t.index[(t["pace"] >= 2.0) & (t["chg"] >= 0.03) & (t["value"] >= short_min)]),
+            "closing_bet": list(t.index[(t["value"] >= 1e10) & (t["pace"] >= 2.0) & (t["chg"] >= 0.05)
                                          & (t["chg"] <= 0.15)]) if late else [],
         }
 
@@ -416,8 +425,8 @@ class LiveScreeners:
         q = (facts.get(code, {}) or {}).get("quarters") or {}
         bar = (facts.get(code, {}) or {}).get("bar") or {}
         op = [v for _, v in q.get("op", [])]
-        if not op:
-            return 0.3, [], False
+        if len(op) < 4 or not all(v is not None and np.isfinite(v) for v in op):
+            return 0.0, ["기본: 최근 4분기 영업이익 미확인 (가점 없음)"], False
         last4 = sum(op[-4:])
         loss = last4 < 0
         growth = len(op) >= 5 and op[-5] not in (0, None) and op[-1] > op[-5]
@@ -437,7 +446,7 @@ class LiveScreeners:
         return _clip01(part), [f"수급: {horizon}일 외국인 {tag(f)} · 기관 {tag(o)}"]
 
     def _value_reason(self, row) -> str:
-        return f"거래대금: {row['value'] / 1e8:,.0f}억 (평소 같은 시각 대비 {row['pace']:.1f}배)"
+        return f"거래대금: {row['value'] / 1e8:,.0f}억 (종가×거래량·가정 누적곡선 대비 추정 {row['pace']:.1f}배)"
 
     # ---------------------------------------------------------------- sections
     def short_term(self, t, pool, facts, filings, risky) -> list[Candidate]:
@@ -523,19 +532,18 @@ class LiveScreeners:
             group = t[sector == sec]
             if len(members) < 3 or group["value"].sum() < 2.0 * (group["val20"] * expected_share(self.clock())).sum():
                 continue
-            ranked = members.sort_values(["value", "chg"], ascending=False)
-            for role, code in zip(("대장주", "2등주"), ranked.index[:2]):
-                if code in risky:
-                    continue
+            ranked = members.drop(index=list(risky), errors="ignore").sort_values(["value", "chg"], ascending=False)
+            for position, code in enumerate(ranked.index):
+                role = ("업종 거래대금 1위", "업종 거래대금 2위")[position] if position < 2 else "동반 상승주"
                 r = t.loc[code]
                 c = Candidate(code, "themes")
                 c.parts["value"] = _clip01(min(r["pace"], 6) / 6)
                 c.parts["tech"] = _clip01(0.5 + 0.5 * (r["close"] > r["prev_high"]))
                 c.parts["news"], nr, _ = self._news_part(code, facts, filings)
                 c.parts["flow"], wr = self._flow_part(code, facts, 5)
-                c.reasons = [f"테마: {sec} — {len(members)}종목 동반 급등, 업종 거래대금 급증",
+                c.reasons = [f"업종 동반 상승: {sec} — {len(members)}종목 · 뉴스·공시 기반 테마 연결 미확인",
                              f"{role} · 당일 {r['chg'] * 100:+.1f}% · {self._value_reason(r)[6:]}"] + nr + wr
-                c.info = {"theme": sec, "role": role, "members": int(len(members))}
+                c.info = {"sector": sec, "theme_status": "UNKNOWN", "role": role, "members": int(len(members))}
                 out.append(c)
         return out
 
@@ -553,7 +561,7 @@ class LiveScreeners:
             c.parts["news"], nr, _ = self._news_part(code, facts, filings)
             c.parts["fund"], fr, _ = self._fund_part(code, facts)
             c.parts["flow"], wr = self._flow_part(code, facts, 5)
-            c.reasons = [f"기술: 당일 고가권 마감 {r['chg'] * 100:+.1f}%" + (" · 52주 신고가 근접" if near52 else ""),
+            c.reasons = [f"기술: 당일 고가권 진행 {r['chg'] * 100:+.1f}% (마감 미확정)" + (" · 52주 신고가 근접" if near52 else ""),
                          self._value_reason(r)] + nr + wr + fr[:1]
             c.info = {"pace": float(r["pace"]), "change": float(r["chg"])}
             out.append(c)
@@ -590,7 +598,10 @@ class LiveScreeners:
                              "max_since_capture": (mp / cp - 1) if cp and mp else None})
             out[s] = {"key": s, "title": SECTION_TITLES[s], "intent": INTENT[s], "weights": dict(zip(
                 ("거래대금", "기술", "재료", "기본", "수급"), WEIGHTS[s])), "day": self.day,
-                "observed_at": self.last_scan.get("at"), "rows": rows, "captured_today": len(entries)}
+                "observed_at": self.last_scan.get("at"), "rows": rows, "captured_today": len(entries),
+                "performance_basis": "SCAN_SAMPLED_AFTER_CAPTURE",
+                "average_turnover_basis": "CLOSE_TIMES_VOLUME_ESTIMATE",
+                "pace_basis": "ASSUMED_INTRADAY_CURVE", "publication_eligible": False}
         return out
 
     def run_forever(self, stop: threading.Event) -> None:

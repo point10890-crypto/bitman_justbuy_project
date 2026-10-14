@@ -27,7 +27,8 @@ public class ConditionLiquidityService {
     private final Clock clock;
     private final Cache<String, Amounts> cache = Caffeine.newBuilder()
         .maximumSize(500).expireAfterWrite(60, TimeUnit.SECONDS).build();
-    private record Amounts(BigDecimal today, BigDecimal average20, LocalDate date, Instant fetchedAt) {}
+    private record Amounts(BigDecimal today, BigDecimal average20, LocalDate date, Instant fetchedAt,
+                           Map<LocalDate, ConditionTechnicalEvidence.Bar> bars) {}
     private record Ranked(ConditionSignalDto signal, ConditionLiquidityPolicy.Result result) {}
 
     @Autowired public ConditionLiquidityService(KisApiService kis) { this(kis, Clock.systemUTC()); }
@@ -84,7 +85,7 @@ public class ConditionLiquidityService {
                     Amounts loaded;
                     try { loaded = load(code, date, deadline); }
                     catch (RuntimeException error) { loaded = null; }
-                    return loaded == null ? new Amounts(null, null, date, clock.instant()) : loaded;
+                    return loaded == null ? new Amounts(null, null, date, clock.instant(), Map.of()) : loaded;
                 });
             } catch (RuntimeException ignored) { return unavailable(); }
         }
@@ -124,6 +125,19 @@ public class ConditionLiquidityService {
                     + " (장초반 완화 적용 시 실제 최소값은 관측값에 표시)",
                 "PASS", item.result().reason(), "KIS 일봉 acml_tr_pbmn · 원(KRW)", item.result().observedAt()));
             s.conditionChecks().stream().filter(c -> !"liquidity".equals(c.category())).forEach(checks::add);
+            // Reuse the verified response already fetched for turnover: no extra request per card.
+            Amounts observations = cache.getIfPresent(marketDate(clock.instant().atZone(KST)) + ":" + s.stockCode());
+            if (observations != null && observations.fetchedAt().toString().equals(item.result().observedAt())) {
+                for (ConditionCheck measured : ConditionTechnicalEvidence.evaluate(mode, observations.bars(),
+                    observations.date(), observations.fetchedAt())) {
+                    if (!"technical".equals(measured.category())) continue;
+                    boolean previousRefresh = checks.stream().anyMatch(c -> c.id().equals(measured.id())
+                        && c.source() != null && c.source().startsWith("KIS 일봉 · "));
+                    if ("UNKNOWN".equals(measured.status()) && !previousRefresh) continue;
+                    checks.removeIf(c -> c.id().equals(measured.id()));
+                    checks.add(measured);
+                }
+            }
             result.add(new ConditionSignalDto(s.section(), s.mode(), result.size() + 1, s.stockName(), s.stockCode(),
                 s.capturePrice(), s.currentPrice(), s.highPrice(), s.stopLoss(), s.maxReturnPct(), s.status(),
                 s.ruleScore(), s.aiScore(), s.finalScore(), s.summary(), List.copyOf(evidence), s.riskFlags(),
@@ -147,6 +161,7 @@ public class ConditionLiquidityService {
         if (!"0".equals(body.path("rt_cd").asText()) || !body.path("output2").isArray()
             || !code.equals(body.path("output1").path("stck_shrn_iscd").asText())) return null;
         Map<LocalDate, BigDecimal> amounts = new HashMap<>();
+        Map<LocalDate, ConditionTechnicalEvidence.Bar> bars = new HashMap<>();
         Set<LocalDate> seen = new HashSet<>();
         for (JsonNode row : body.path("output2")) {
             // The API can pad output2 with empty objects; those are not trading observations.
@@ -158,6 +173,9 @@ public class ConditionLiquidityService {
             if (day.isAfter(date) || !seen.add(day)) return null;
             BigDecimal value = amount(row.path("acml_tr_pbmn"));
             if (value != null) amounts.put(day, value);
+            bars.put(day, new ConditionTechnicalEvidence.Bar(number(row.path("stck_oprc")),
+                number(row.path("stck_hgpr")), number(row.path("stck_lwpr")),
+                number(row.path("stck_clpr")), number(row.path("acml_vol"))));
         }
         BigDecimal today = amounts.get(date);
         if (today == null) return null;
@@ -170,7 +188,12 @@ public class ConditionLiquidityService {
             if (value == null) { complete = false; break; }
             sum = sum.add(value);
         }
-        return new Amounts(today, complete ? sum.divide(BigDecimal.valueOf(20)) : null, date, response.fetchedAt());
+        return new Amounts(today, complete ? sum.divide(BigDecimal.valueOf(20)) : null, date, response.fetchedAt(), Map.copyOf(bars));
+    }
+
+    private static Double number(JsonNode node) {
+        BigDecimal value = amount(node);
+        return value == null ? null : value.doubleValue();
     }
 
     private static BigDecimal amount(JsonNode node) {
