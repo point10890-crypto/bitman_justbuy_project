@@ -175,18 +175,17 @@ def test_served_startup_loads_then_starts_the_screener(store, tmp_path, monkeypa
     from condition_engine.engine import Engine
     started = {}
 
-    class FakeScanner:
-        def __init__(self, store, det, **kw):
-            started["det"] = det
-            self.det, self.day, self.last_scan = det, None, {"state": "idle"}
+    class FakeScreeners:
+        def __init__(self, engine, **kw):
+            started["engine"] = engine
 
         def run_forever(self, stop):
             started["running"] = True
 
-    monkeypatch.setattr(api_mod, "SectionScanner", FakeScanner)
+    monkeypatch.setattr(api_mod, "LiveScreeners", FakeScreeners)
     monkeypatch.setattr(Engine, "from_store", classmethod(lambda cls, s: Engine(__import__("condition_engine.panel", fromlist=["build_panel"]).build_panel(s.final_bars(), s.load_listing(), s.load_names()), min_value_avg20=1e8, min_history=60)))
     svc = EngineService(store=store, ledger=Ledger(tmp_path / "l.db"), translator=RuleTranslator())
     svc.autoscan = True
     svc.load()
     assert svc.state == "ready" and svc.error is None
-    assert started.get("det") is svc._detectors
+    assert started.get("engine") is svc.engine

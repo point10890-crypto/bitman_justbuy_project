@@ -20,6 +20,7 @@ from . import config, dsl
 from .agent import build_translator
 from .detectors import SectionDetectors
 from .scanner import SectionScanner
+from .live_screeners import LiveScreeners
 from .engine import Engine
 from .features import catalogue
 from .ledger import Ledger
@@ -45,6 +46,7 @@ class EngineService:
         self.loaded_at: float | None = time.time() if engine else None
         self.update_job: dict = {"state": "idle"}
         self.scanner: SectionScanner | None = None
+        self.screeners: LiveScreeners | None = None   # section screeners, shadow run (home cards stay legacy)
         self.autoscan = False                     # the served app turns this on; tests do not
         self._stop = threading.Event()
         self._detectors: SectionDetectors | None = None
@@ -111,11 +113,12 @@ class EngineService:
         return payload
 
     def start_scanner(self) -> None:
-        """Intraday condition screener: re-scan the market every few minutes during the session."""
-        if self.scanner is not None:
+        """Section condition screeners: re-scan the whole market every few minutes during the session."""
+        if self.screeners is not None:
+            self.screeners.reload_daily(self.require())      # the daily history moved on (after 16:30)
             return
-        self.scanner = SectionScanner(self.store, self.detectors())
-        threading.Thread(target=self.scanner.run_forever, args=(self._stop,), daemon=True).start()
+        self.screeners = LiveScreeners(self.require())
+        threading.Thread(target=self.screeners.run_forever, args=(self._stop,), daemon=True).start()
 
     def run_update(self) -> None:
         self.update_job = {"state": "running", "started": time.time()}
@@ -230,11 +233,17 @@ def create_app(service: EngineService | None = None, autoload: bool = True) -> F
     def sections():
         return svc.sections()
 
+    @app.get("/engine/screeners")
+    def screeners():
+        if svc.screeners is None:
+            raise HTTPException(409, "screeners are not running")
+        return {"last_scan": svc.screeners.last_scan, "sections": svc.screeners.sections()}
+
     @app.post("/engine/admin/scan")
     def scan_now():
-        if svc.scanner is None:
-            raise HTTPException(409, "scanner is not running")
-        return svc.scanner.scan()
+        if svc.screeners is None:
+            raise HTTPException(409, "screeners are not running")
+        return svc.screeners.scan()
 
     @app.get("/engine/regime")
     def regime():
