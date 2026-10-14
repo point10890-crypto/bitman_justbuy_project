@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   engineApi,
   type BacktestResult, type EngineHealth, type LibraryStrategy, type RegimeNow,
@@ -21,14 +21,6 @@ const REGIME_TONE: Record<string, string> = { UP_TREND: 'up', PULLBACK: 'flat', 
 const STATUS_TONE: Record<string, string> = { candidate: 'good', regime_gated: 'flat', monitoring: 'info', retired: 'bad' }
 
 export default function ConditionLabPage() {
-  return <ConditionLab />
-}
-
-/**
- * 조건검색 엔진 화면. 홈에서는 `embedded` 로 카드 한 장에 들어가고(운영),
- * `/lab` 에서는 전체 페이지로 쓴다(dev 빌드 전용).
- */
-export function ConditionLab({ embedded = false }: { embedded?: boolean }) {
   const [tab, setTab] = useState<Tab>('ask')
   const [health, setHealth] = useState<EngineHealth | null>(null)
   const [regime, setRegime] = useState<RegimeNow | null>(null)
@@ -119,26 +111,16 @@ export function ConditionLab({ embedded = false }: { embedded?: boolean }) {
   const ready = health?.state === 'ready'
 
   return (
-    <Root embedded={embedded}>
-      {embedded ? (
-        <header className="lab-embedded-head">
-          <div>
-            <h2 id="ai-search-title">AI 조건검색</h2>
-            <p>말로 조건을 적으면 검증 가능한 조건식으로 바꿔 찾고, 같은 날 다른 종목과 비교한 과거 성과와 위험 등급을 함께 보여드립니다. 종목 추천이나 목표가는 만들지 않습니다.</p>
-          </div>
-          <span>최근 확정 종가 기준</span>
-        </header>
-      ) : (
-        <header className="lab-header">
-          <p className="lab-kicker">로컬 개발 · 조건검색 엔진 v0.1</p>
-          <h1>조건검색 랩</h1>
-          <p className="lab-lede">
-            말로 조건을 쓰면 엔진이 검증 가능한 조건식으로 바꾸고, 같은 날 다른 종목과 비교한 과거 성과까지 보여줍니다.
-            종목 추천이나 목표가는 만들지 않습니다.
-          </p>
-        </header>
-      )}
-      <StatusStrip health={health} regime={regime} bootError={bootError} />
+    <main className="lab-page">
+      <header className="lab-header">
+        <p className="lab-kicker">로컬 개발 · 조건검색 엔진 v0.1</p>
+        <h1>조건검색 랩</h1>
+        <p className="lab-lede">
+          말로 조건을 쓰면 엔진이 검증 가능한 조건식으로 바꾸고, 같은 날 다른 종목과 비교한 과거 성과까지 보여줍니다.
+          종목 추천이나 목표가는 만들지 않습니다.
+        </p>
+        <StatusStrip health={health} regime={regime} bootError={bootError} />
+      </header>
 
       <nav className="lab-tabs" role="tablist" aria-label="조건검색 랩 메뉴">
         {([['ask', '자연어 검색'], ['library', '검증된 전략'], ['risk', '위험 점검']] as const).map(([id, label]) => (
@@ -203,14 +185,8 @@ export function ConditionLab({ embedded = false }: { embedded?: boolean }) {
       )}
 
       {tab === 'risk' && <RiskCheck ready={ready} />}
-    </Root>
+    </main>
   )
-}
-
-function Root({ embedded, children }: { embedded: boolean; children: ReactNode }) {
-  return embedded
-    ? <section id="ai-search" className="lab-page lab-embedded" aria-labelledby="ai-search-title">{children}</section>
-    : <main className="lab-page">{children}</main>
 }
 
 function StatusStrip({ health, regime, bootError }: { health: EngineHealth | null; regime: RegimeNow | null; bootError: string | null }) {

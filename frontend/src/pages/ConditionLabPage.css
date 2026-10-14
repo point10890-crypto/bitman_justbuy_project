@@ -1,4 +1,4 @@
-.lab-page, .engine-section {
+.lab-page {
   --lab-bg: #0f1317;
   --lab-panel: #161b22;
   --lab-panel-2: #1b212a;
@@ -21,9 +21,9 @@
   font-size: 14px;
   line-height: 1.6;
 }
-:is(.lab-page, .engine-section) :is(h1, h2, h3, p) { margin: 0; }
-:is(.lab-page, .engine-section) button { font: inherit; }
-:is(.lab-page, .engine-section) button:focus-visible, :is(.lab-page, .engine-section) input:focus-visible { outline: 2px solid var(--lab-gold); outline-offset: 3px; }
+.lab-page :is(h1, h2, h3, p) { margin: 0; }
+.lab-page button { font: inherit; }
+.lab-page button:focus-visible, .lab-page input:focus-visible { outline: 2px solid var(--lab-gold); outline-offset: 3px; }
 
 .lab-header { margin-bottom: 18px; }
 .lab-kicker { color: var(--lab-gold); font-size: 12px; font-weight: 700; letter-spacing: .04em; }
@@ -59,10 +59,10 @@
 .lab-ask-row input { flex: 1; min-width: 0; min-height: 46px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--lab-line-2);
   background: #0f1419; color: var(--lab-text); font-size: 15px; }
 .lab-ask-row input::placeholder { color: #66727f; }
-:is(.lab-page, .engine-section) button.lab-primary, .lab-actions button, .lab-ask-row button {
+.lab-page button.lab-primary, .lab-actions button, .lab-ask-row button {
   min-height: 42px; padding: 9px 16px; border-radius: 9px; border: 1px solid #465060; background: #1c232c; color: #e0e6ed; font-weight: 680; cursor: pointer; }
-:is(.lab-page, .engine-section) button.lab-primary { background: var(--lab-gold); border-color: var(--lab-gold); color: #211c0c; }
-:is(.lab-page, .engine-section) button:disabled { opacity: .5; cursor: default; }
+.lab-page button.lab-primary { background: var(--lab-gold); border-color: var(--lab-gold); color: #211c0c; }
+.lab-page button:disabled { opacity: .5; cursor: default; }
 .lab-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .lab-actions button:hover:not(:disabled) { border-color: var(--lab-gold); }
 .lab-examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
@@ -163,41 +163,3 @@
   .lab-panel { padding: 16px; }
   .lab-table { min-width: 620px; }        /* 좁은 화면에서는 셀을 찌그러뜨리지 않고 표만 가로로 민다 */
 }
-
-/* 홈 검색 패널 안의 AI 조건검색 구역 — 변수만 공유하고 페이지 레이아웃은 쓰지 않는다 */
-.engine-section { width: auto; min-height: 0; margin: 18px 0 0; padding: 18px 0 0; background: none; border-top: 1px solid var(--lab-line); }
-.engine-section > header { display: grid; gap: 4px; margin-bottom: 12px; }
-.engine-section > header h3 { font-size: 15px; font-weight: 780; color: var(--lab-text); }
-.engine-section .lab-panel { padding: 14px; background: #12171d; }
-.engine-section .lab-translation { margin-top: 0; padding-top: 0; border-top: 0; }
-.engine-section .lab-actions { margin: 12px 0; }
-
-/* 홈 카드로 들어간 AI 조건검색 — 홈의 조건 카드와 같은 표면·모서리·강조선 */
-.lab-page.lab-embedded {
-  position: relative; width: auto; min-height: 0; margin: 0 0 8px; padding: 22px;
-  background: #161b21; border: 1px solid #2c343e; border-radius: 16px; scroll-margin-top: 130px;
-}
-.lab-embedded::before { content: ''; position: absolute; top: 0; left: 22px; width: 38px; height: 3px; border-radius: 0 0 3px 3px; background: var(--lab-gold); }
-.lab-embedded-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
-.lab-embedded-head h2 { font-size: 25px; font-weight: 800; letter-spacing: -.04em; }
-.lab-embedded-head p { margin-top: 6px !important; max-width: 720px; color: #a4adba; font-size: 12.5px; line-height: 1.55; }
-.lab-embedded-head > span { flex-shrink: 0; color: #a99b76; font-size: 11px; white-space: nowrap; }
-.lab-embedded .lab-status-grid { margin-top: 16px; }
-.lab-embedded .lab-tabs { margin: 18px 0 14px; }
-.lab-embedded .lab-panel { background: #12171d; border-color: #2a323c; }
-@media (max-width: 760px) {
-  .lab-page.lab-embedded { padding: 18px 14px; border-radius: 14px; scroll-margin-top: 98px; }
-  .lab-embedded-head h2 { font-size: 21px; }
-  .lab-embedded-head > span { display: none; }
-}
-
-.engine-section-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.engine-section-close { min-height: 34px; padding: 5px 12px; border-radius: 8px; border: 1px solid #465060; background: #1c232c; color: #e0e6ed; font-weight: 650; cursor: pointer; }
-.engine-section-close:hover { border-color: var(--lab-gold); }
-/* 히어로 검색창 바로 아래에 펼쳐지는 AI 조건검색 결과 */
-.engine-section.engine-hero {
-  position: relative; margin: 14px 0 0; padding: 20px 22px; border: 1px solid #5a5030; border-radius: 16px;
-  background: #14181d; scroll-margin-top: 110px;
-}
-.engine-section.engine-hero::before { content: ''; position: absolute; top: 0; left: 22px; width: 38px; height: 3px; border-radius: 0 0 3px 3px; background: var(--lab-gold); }
-@media (max-width: 760px) { .engine-section.engine-hero { padding: 16px 14px; border-radius: 14px; } }

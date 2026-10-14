@@ -6,8 +6,7 @@ import { useMainConditions } from '../hooks/useMainConditions'
 import { fetchConditionSection, type ConditionSectionResponse } from '../api/conditionApi'
 import { AgentMascot } from '../components/app/AgentMascot'
 import { KeywordSearchPanel } from '../components/app/KeywordSearchPanel'
-import { EngineSearchSection } from '../components/app/ConditionEngineViews'
-import { ConditionLab } from './ConditionLabPage'
+import { KeywordEngineResults } from '../components/app/KeywordEngineResults'
 import { searchKeywordStocks, type KeywordSearchResponse } from '../api/keywordSearchApi'
 import { formatConditionAsOf, latestAnalysisPresentation } from '../lib/conditionPresentation'
 import './HomePage.css'
@@ -218,8 +217,6 @@ export default function HomePage() {
   const [activeQuery, setActiveQuery] = useState('')
   const [panelOpen, setPanelOpen] = useState(false)
   const [keywordPanelOpen, setKeywordPanelOpen] = useState(false)
-  const [heroAi, setHeroAi] = useState<{ query: string; id: number } | null>(null)
-  const heroAiRef = useRef<HTMLDivElement>(null)
   const [keywordQuery, setKeywordQuery] = useState('')
   const [keywordResult, setKeywordResult] = useState<KeywordSearchResponse | null>(null)
   const [keywordLoading, setKeywordLoading] = useState(false)
@@ -274,16 +271,6 @@ export default function HomePage() {
       if (request === keywordGeneration.current) setKeywordLoading(false)
     }
   }
-
-  const runHeroAiSearch = () => {
-    const q = query.trim()
-    if (!q) return
-    setHeroAi(prev => ({ query: q, id: (prev?.id ?? 0) + 1 }))
-  }
-
-  useEffect(() => {
-    if (heroAi) heroAiRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
-  }, [heroAi])
 
   const handleSearch = (event: FormEvent) => {
     event.preventDefault()
@@ -427,7 +414,6 @@ export default function HomePage() {
               placeholder="종목·조건 검색"
             />
             <button type="submit">실데이터 조건검색</button>
-            <button type="button" className="hero-ai-button" onClick={runHeroAiSearch} disabled={!query.trim()}>AI 조건검색</button>
           </form>
           <div className="keyword-search-examples" aria-label="조건검색 예시">
             {keywordExamples.map(example => (
@@ -442,17 +428,10 @@ export default function HomePage() {
         </div>
       </section>
 
-      {heroAi && (
-        <div ref={heroAiRef}>
-          <EngineSearchSection key={heroAi.id} query={heroAi.query} className="engine-hero" onClose={() => setHeroAi(null)} />
-        </div>
-      )}
-
       <nav className="agent-mode-nav" aria-label="조건검색 바로가기">
         {sections.map(section => (
           <Link key={section.id} className={`agent-card-${section.icon}`} to={`/#${section.id}`}><span className="agent-mode-dot" aria-hidden="true" /><span>{section.title}</span></Link>
         ))}
-        <Link className="agent-card-ai" to="/#ai-search"><span className="agent-mode-dot" aria-hidden="true" /><span>AI 조건검색</span></Link>
       </nav>
 
       <div className="condition-track-summary" aria-label="공개 사건 연구 바로가기">
@@ -474,8 +453,6 @@ export default function HomePage() {
           {mainConditions.asOf && <span>{formatConditionAsOf(mainConditions.asOf)} 기준</span>}
         </div>
       )}
-
-      <ConditionLab embedded />
 
       <div className="agent-section-heading">
         <div><h2>조건별 관심 종목</h2><p>카드를 선택해 후보를 확인하고 상세 분석을 받아보세요.</p></div>
@@ -623,7 +600,7 @@ export default function HomePage() {
       )}
       {keywordPanelOpen && (
         <KeywordSearchPanel query={keywordQuery} loading={keywordLoading} error={keywordError} result={keywordResult} onClose={closeKeywordPanel}>
-          {keywordQuery && <EngineSearchSection key={keywordQuery} query={keywordQuery} />}
+          {keywordQuery && <KeywordEngineResults key={keywordQuery} query={keywordQuery} />}
         </KeywordSearchPanel>
       )}
     </main>

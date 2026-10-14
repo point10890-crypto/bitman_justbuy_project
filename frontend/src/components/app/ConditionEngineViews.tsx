@@ -1,7 +1,7 @@
 // 조건검색 엔진 결과 화면 조각 — 홈 검색 패널과 조건검색 랩이 함께 쓴다.
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
-  EngineError, engineApi,
+  EngineError,
   type BacktestResult, type HorizonStats, type RiskView, type ScreenResult, type ScreenRow, type Translation, type WindowStats,
 } from '../../api/engineApi'
 import '../../pages/ConditionLabPage.css'
@@ -258,90 +258,5 @@ function Curve({ curve }: { curve: BacktestResult['curve'] }) {
       </svg>
       <div className="lab-curve-axis"><span>{curve[0].date}</span><span>{last.date}</span></div>
     </figure>
-  )
-}
-
-
-type EngineSearchState =
-  | { phase: 'translating' }
-  | { phase: 'screening'; translation: Translation }
-  | { phase: 'done'; translation: Translation; screen: ScreenResult | null }
-  | { phase: 'error'; message: string; translation?: Translation }
-
-/**
- * 홈 검색창의 같은 질문을 조건검색 엔진에도 보낸다: 자연어 → 검증된 조건식 → 어제 종가 기준 검색.
- * 실데이터(장중) 검색과 별개로, 과거 성과와 위험 등급을 함께 보여주는 것이 역할이다.
- */
-export function EngineSearchSection({ query, onClose, className = '' }: { query: string; onClose?: () => void; className?: string }) {
-  const [state, setState] = useState<EngineSearchState>({ phase: 'translating' })
-  const [backtest, setBacktest] = useState<BacktestResult | null>(null)
-  const [btBusy, setBtBusy] = useState(false)
-  const [btError, setBtError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const ctl = new AbortController()
-    setState({ phase: 'translating' })
-    setBacktest(null)
-    setBtError(null)
-    ;(async () => {
-      let translation: Translation | undefined
-      try {
-        translation = await engineApi.translate(query, ctl.signal)
-        if (!translation.strategy) {
-          setState({ phase: 'done', translation, screen: null })
-          return
-        }
-        setState({ phase: 'screening', translation })
-        const screen = await engineApi.screen({ strategy: translation.strategy }, ctl.signal)
-        setState({ phase: 'done', translation, screen })
-      } catch (e) {
-        if (ctl.signal.aborted) return
-        setState({ phase: 'error', message: errorText(e), translation })
-      }
-    })()
-    return () => ctl.abort()
-  }, [query])
-
-  const strategy = state.phase === 'done' ? state.translation.strategy : null
-  const runBacktest = async () => {
-    if (!strategy) return
-    setBtBusy(true)
-    setBtError(null)
-    try {
-      setBacktest(await engineApi.backtest({ strategy }))
-    } catch (e) {
-      setBtError(errorText(e))
-    } finally {
-      setBtBusy(false)
-    }
-  }
-
-  return (
-    <section className={`engine-section ${className}`.trim()} aria-label="AI 조건검색 결과">
-      <header>
-        <div className="engine-section-title">
-          <h3>AI 조건검색 · 과거 성과 검증</h3>
-          {onClose && <button type="button" className="engine-section-close" onClick={onClose}>닫기</button>}
-        </div>
-        <p className="lab-muted">“{query}” — 조건식으로 바꿔 최근 확정 종가 기준으로 찾고, 같은 날 다른 종목과 비교한 과거 성과와 위험 등급을 보여드립니다.</p>
-      </header>
-      {state.phase === 'translating' && <p className="lab-status" role="status">질문을 조건식으로 바꾸는 중…</p>}
-      {state.phase !== 'translating' && 'translation' in state && state.translation && <TranslationCard t={state.translation} />}
-      {state.phase === 'screening' && <p className="lab-status" role="status">조건에 맞는 종목을 찾는 중…</p>}
-      {state.phase === 'error' && <p className="lab-error" role="alert">{state.message}</p>}
-      {state.phase === 'done' && state.screen && (
-        <>
-          <p className="lab-muted">{state.screen.as_of} 종가 기준 · 시장 국면: {state.screen.regime.label}</p>
-          <ScreenView s={state.screen} />
-          <div className="lab-actions">
-            <button type="button" className="lab-primary" onClick={runBacktest} disabled={btBusy}>
-              {btBusy ? '검증 중…' : backtest ? '과거 성과 다시 보기' : '이 조건의 과거 성과 검증'}
-            </button>
-          </div>
-          {btError && <p className="lab-error" role="alert">{btError}</p>}
-          {backtest && <BacktestView b={backtest} />}
-        </>
-      )}
-    </section>
   )
 }
