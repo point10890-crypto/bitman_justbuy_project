@@ -190,3 +190,14 @@
   .lab-embedded-head h2 { font-size: 21px; }
   .lab-embedded-head > span { display: none; }
 }
+
+.engine-section-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.engine-section-close { min-height: 34px; padding: 5px 12px; border-radius: 8px; border: 1px solid #465060; background: #1c232c; color: #e0e6ed; font-weight: 650; cursor: pointer; }
+.engine-section-close:hover { border-color: var(--lab-gold); }
+/* 히어로 검색창 바로 아래에 펼쳐지는 AI 조건검색 결과 */
+.engine-section.engine-hero {
+  position: relative; margin: 14px 0 0; padding: 20px 22px; border: 1px solid #5a5030; border-radius: 16px;
+  background: #14181d; scroll-margin-top: 110px;
+}
+.engine-section.engine-hero::before { content: ''; position: absolute; top: 0; left: 22px; width: 38px; height: 3px; border-radius: 0 0 3px 3px; background: var(--lab-gold); }
+@media (max-width: 760px) { .engine-section.engine-hero { padding: 16px 14px; border-radius: 14px; } }

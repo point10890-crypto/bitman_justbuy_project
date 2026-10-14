@@ -218,6 +218,8 @@ export default function HomePage() {
   const [activeQuery, setActiveQuery] = useState('')
   const [panelOpen, setPanelOpen] = useState(false)
   const [keywordPanelOpen, setKeywordPanelOpen] = useState(false)
+  const [heroAi, setHeroAi] = useState<{ query: string; id: number } | null>(null)
+  const heroAiRef = useRef<HTMLDivElement>(null)
   const [keywordQuery, setKeywordQuery] = useState('')
   const [keywordResult, setKeywordResult] = useState<KeywordSearchResponse | null>(null)
   const [keywordLoading, setKeywordLoading] = useState(false)
@@ -272,6 +274,16 @@ export default function HomePage() {
       if (request === keywordGeneration.current) setKeywordLoading(false)
     }
   }
+
+  const runHeroAiSearch = () => {
+    const q = query.trim()
+    if (!q) return
+    setHeroAi(prev => ({ query: q, id: (prev?.id ?? 0) + 1 }))
+  }
+
+  useEffect(() => {
+    if (heroAi) heroAiRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+  }, [heroAi])
 
   const handleSearch = (event: FormEvent) => {
     event.preventDefault()
@@ -415,6 +427,7 @@ export default function HomePage() {
               placeholder="종목·조건 검색"
             />
             <button type="submit">실데이터 조건검색</button>
+            <button type="button" className="hero-ai-button" onClick={runHeroAiSearch} disabled={!query.trim()}>AI 조건검색</button>
           </form>
           <div className="keyword-search-examples" aria-label="조건검색 예시">
             {keywordExamples.map(example => (
@@ -428,6 +441,12 @@ export default function HomePage() {
           <span className="agent-greeting">눌러서 BitMan과 인사해요.</span>
         </div>
       </section>
+
+      {heroAi && (
+        <div ref={heroAiRef}>
+          <EngineSearchSection key={heroAi.id} query={heroAi.query} className="engine-hero" onClose={() => setHeroAi(null)} />
+        </div>
+      )}
 
       <nav className="agent-mode-nav" aria-label="조건검색 바로가기">
         {sections.map(section => (

@@ -272,7 +272,7 @@ type EngineSearchState =
  * 홈 검색창의 같은 질문을 조건검색 엔진에도 보낸다: 자연어 → 검증된 조건식 → 어제 종가 기준 검색.
  * 실데이터(장중) 검색과 별개로, 과거 성과와 위험 등급을 함께 보여주는 것이 역할이다.
  */
-export function EngineSearchSection({ query }: { query: string }) {
+export function EngineSearchSection({ query, onClose, className = '' }: { query: string; onClose?: () => void; className?: string }) {
   const [state, setState] = useState<EngineSearchState>({ phase: 'translating' })
   const [backtest, setBacktest] = useState<BacktestResult | null>(null)
   const [btBusy, setBtBusy] = useState(false)
@@ -317,10 +317,13 @@ export function EngineSearchSection({ query }: { query: string }) {
   }
 
   return (
-    <section className="engine-section" aria-label="AI 조건검색 결과">
+    <section className={`engine-section ${className}`.trim()} aria-label="AI 조건검색 결과">
       <header>
-        <h3>AI 조건검색 · 과거 성과 검증</h3>
-        <p className="lab-muted">같은 질문을 조건식으로 바꿔 최근 확정 종가 기준으로 찾고, 같은 날 다른 종목과 비교한 과거 성과와 위험 등급을 보여드립니다.</p>
+        <div className="engine-section-title">
+          <h3>AI 조건검색 · 과거 성과 검증</h3>
+          {onClose && <button type="button" className="engine-section-close" onClick={onClose}>닫기</button>}
+        </div>
+        <p className="lab-muted">“{query}” — 조건식으로 바꿔 최근 확정 종가 기준으로 찾고, 같은 날 다른 종목과 비교한 과거 성과와 위험 등급을 보여드립니다.</p>
       </header>
       {state.phase === 'translating' && <p className="lab-status" role="status">질문을 조건식으로 바꾸는 중…</p>}
       {state.phase !== 'translating' && 'translation' in state && state.translation && <TranslationCard t={state.translation} />}

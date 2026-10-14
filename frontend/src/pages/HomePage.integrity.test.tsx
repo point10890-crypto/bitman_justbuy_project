@@ -168,6 +168,24 @@ it('the same question also runs through the AI condition engine with its evidenc
   expect(body).toEqual({ strategy })                       // the validated DSL, never the raw sentence
 })
 
+it('the hero search box runs the AI condition search right under the hero, separately from the data search', async () => {
+  const fetchMock = vi.fn((url: string, _init?: RequestInit) => Promise.resolve(asJson(String(url).includes('/api/engine/') ? engineMiss : keywordResponse('x'))))
+  vi.stubGlobal('fetch', fetchMock)
+  render(tree())
+  const input = screen.getByRole('textbox', { name: '분석할 종목명 또는 조건' })
+  const aiButton = within(screen.getByRole('search')).getByRole('button', { name: 'AI 조건검색' })
+  expect((aiButton as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.change(input, { target: { value: '20일선 위 눌림' } })
+  fireEvent.click(aiButton)
+  const result = await screen.findByRole('region', { name: 'AI 조건검색 결과' })
+  expect(result.textContent).toContain('20일선 위 눌림')
+  await waitFor(() => expect(fetchMock.mock.calls.some(([u, init]) => String(u).endsWith('/api/engine/translate') && JSON.parse(String(init?.body)).text === '20일선 위 눌림')).toBe(true))
+  expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/api/analysis/keyword-search'))).toBe(false)
+  expect(screen.queryByRole('dialog', { name: '실데이터 조건검색' })).toBeNull()
+  fireEvent.click(within(result).getByRole('button', { name: '닫기' }))
+  expect(screen.queryByRole('region', { name: 'AI 조건검색 결과' })).toBeNull()
+})
+
 it('the home carries the AI condition search card and a shortcut to it', async () => {
   vi.stubGlobal('fetch', withEngine(vi.fn()))
   render(tree())
