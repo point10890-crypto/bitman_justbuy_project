@@ -6,7 +6,7 @@ import { useMainConditions } from '../hooks/useMainConditions'
 import { fetchConditionSection, type ConditionSectionResponse } from '../api/conditionApi'
 import { AgentMascot } from '../components/app/AgentMascot'
 import { KeywordSearchPanel } from '../components/app/KeywordSearchPanel'
-import { KeywordEngineResults } from '../components/app/KeywordEngineResults'
+import { useSearchUpgrade } from '../hooks/useSearchUpgrade'
 import { searchKeywordStocks, type KeywordSearchResponse } from '../api/keywordSearchApi'
 import { formatConditionAsOf, latestAnalysisPresentation } from '../lib/conditionPresentation'
 import './HomePage.css'
@@ -78,7 +78,7 @@ const sections: Section[] = [
   },
 ]
 
-const keywordExamples = ['가격 5만원 이하', '거래대금 100억 이상', '상승률 3% 이상', '외국인 순매수', '기관 순매수']
+const keywordExamples = ['20일선 위 눌림인데 거래량 1.5배 붙은 종목', '60일선 위 저변동 대형주 10개', '신고가 근처 코스닥 반도체', '오늘 7% 이상 오른 거래량 급증 종목']
 
 function CategoryIcon({ type }: { type: Section['icon'] }) {
   return <span className={`category-icon category-icon-${type}`} aria-hidden="true" />
@@ -221,6 +221,8 @@ export default function HomePage() {
   const [keywordResult, setKeywordResult] = useState<KeywordSearchResponse | null>(null)
   const [keywordLoading, setKeywordLoading] = useState(false)
   const [keywordError, setKeywordError] = useState<string | null>(null)
+  // 검색 업그레이드: 같은 검색어를 AI 조건검색 엔진에도 보내 결과를 보강하거나 이어받는다.
+  const searchUpgrade = useSearchUpgrade(keywordPanelOpen ? keywordQuery : '', { result: keywordResult, loading: keywordLoading, error: keywordError })
   const keywordGeneration = useRef(0)
   const keywordController = useRef<AbortController | null>(null)
   const [endpointSections, setEndpointSections] = useState<Record<string, { data: ConditionSectionResponse; feed: typeof mainConditions }>>({})
@@ -599,9 +601,7 @@ export default function HomePage() {
         <ResultPanel query={activeQuery} loading={loading} error={error} result={result} onClose={closePanel} />
       )}
       {keywordPanelOpen && (
-        <KeywordSearchPanel query={keywordQuery} loading={keywordLoading} error={keywordError} result={keywordResult} onClose={closeKeywordPanel}>
-          {keywordQuery && <KeywordEngineResults key={keywordQuery} query={keywordQuery} />}
-        </KeywordSearchPanel>
+        <KeywordSearchPanel query={keywordQuery} loading={keywordLoading} error={keywordError} result={keywordResult} onClose={closeKeywordPanel} upgrade={searchUpgrade} />
       )}
     </main>
   )

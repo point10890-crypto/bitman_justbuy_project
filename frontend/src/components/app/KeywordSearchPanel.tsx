@@ -1,5 +1,8 @@
-import { useEffect, useRef, type ReactNode } from 'react'
-import type { KeywordSearchResponse } from '../../api/keywordSearchApi'
+import { useEffect, useRef } from 'react'
+import type { KeywordSearchMatch, KeywordSearchResponse } from '../../api/keywordSearchApi'
+import type { RiskCheckItem } from '../../api/engineApi'
+import { fellBackToNameSearch, type SearchUpgrade } from '../../hooks/useSearchUpgrade'
+import { DailyEvidence, EngineMatchCard, PastPerformance } from './SearchUpgradeViews'
 
 interface KeywordSearchPanelProps {
   query: string
@@ -7,8 +10,8 @@ interface KeywordSearchPanelProps {
   error: string | null
   result: KeywordSearchResponse | null
   onClose: () => void
-  /** 실데이터 결과 아래에 붙는 추가 결과 (AI 조건검색 엔진). */
-  children?: ReactNode
+  /** AI 조건검색 엔진 보강. 없으면 실데이터 결과만 보여준다. */
+  upgrade?: SearchUpgrade
 }
 
 const outcomeLabel: Record<KeywordSearchResponse['outcome'], string> = {
@@ -90,7 +93,160 @@ function formatEvidenceObservation(value: string) {
   return `관측 ${formatKstTimestamp(value)}`
 }
 
-export function KeywordSearchPanel({ query, loading, error, result, onClose, children }: KeywordSearchPanelProps) {
+function LiveMatchCard({ match, daily, dailyAsOf }: { match: KeywordSearchMatch; daily?: RiskCheckItem | null; dailyAsOf?: string | null }) {
+  return (
+    <article className="keyword-match">
+      <div className="keyword-match-heading"><strong>{match.name}</strong><span>{match.code} · {match.market || '시장 미확인'}</span></div>
+      <div className="keyword-match-values">
+        <span>현재가 {formatNumber(match.currentPrice, '원')}</span>
+        <span>등락률 {formatNumber(match.changePct, '%', true)}</span>
+        <span>거래량 {formatNumber(match.volume, '주')}</span>
+        <span>거래대금 {formatNumber(match.tradingValueKrw, '원')}</span>
+      </div>
+      <p className="keyword-match-source">시세 출처 {observationSourceLabel(match.quoteSource, match.quoteEnvironment)} · 확인 시각 {formatKstTimestamp(match.quoteCheckedAt)}</p>
+      <p className="keyword-match-source">시세 관측 시각 {formatKstTimestamp(match.observedAt)}</p>
+      {match.sourceObservations && match.sourceObservations.length > 0 && (
+        <ul className="keyword-match-evidence" aria-label={`${match.name} 공급자별 조회값`}>
+          {match.sourceObservations.map((observation, index) => (
+            <li key={`${observation.source}-${index}`}>
+              <strong>{sourceLabel(observation.source)} · {environmentLabel(observation.environment)}</strong>
+              <span>현재가 {formatNumber(observation.currentPrice, '원')} · 등락률 {formatNumber(observation.changePct, '%', true)} · 거래량 {formatNumber(observation.volume, '주')} · 거래대금 {formatNumber(observation.tradingValueKrw, '원')}</span>
+              <span>조회 {formatKstTimestamp(observation.fetchedAt)} · 관측 {formatKstTimestamp(observation.observedAt)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <ul className="keyword-match-evidence">
+        {match.evidence.map((evidence, index) => (
+          <li key={index}>
+            <strong>{evidence.condition}</strong>
+            <span>실측 {evidence.observedValue || '미확인'}{evidence.unit} · 출처 {observationSourceLabel(evidence.source, evidence.environment)}</span>
+            {evidence.observedAt && <span>{formatEvidenceObservation(evidence.observedAt)}</span>}
+            {evidence.fetchedAt && <span>근거 조회 시각 {formatKstTimestamp(evidence.fetchedAt)}</span>}
+          </li>
+        ))}
+      </ul>
+      {daily && <DailyEvidence item={daily} asOf={dailyAsOf ?? null} />}
+    </article>
+  )
+}
+
+function KeywordBody({ result, upgrade }: { result: KeywordSearchResponse; upgrade?: SearchUpgrade }) {
+  const enriched = upgrade?.status === 'done' && upgrade.mode === 'keyword' ? upgrade : null
+  return (
+    <>
+      <div className="keyword-search-status" role="status">
+        <strong>{outcomeLabel[result.outcome]}</strong>
+        <span>조회 시각 {formatKstTimestamp(result.fetchedAt)}</span>
+      </div>
+      {outcomeMessage[result.outcome] && <p className="keyword-search-empty">{outcomeMessage[result.outcome]}</p>}
+      {result.providers && result.providers.length > 0 && (
+        <section className="keyword-search-scope" aria-label="조회 출처와 상태">
+          <h3>조건검색 데이터 출처</h3>
+          {result.providers.map((provider, index) => (
+            <div key={`${provider.source}-${index}`}>
+              <p><strong>{sourceLabel(provider.source)} · {environmentLabel(provider.environment)} · {providerStatusLabel(provider.status)}</strong></p>
+              {provider.scope && <p>{provider.scope}</p>}
+              {providerCoverage(provider) && <p>{providerCoverage(provider)}</p>}
+              <p>조회 결과 확인 {formatKstTimestamp(provider.checkedAt)}</p>
+            </div>
+          ))}
+          {result.providers.some(provider => provider.status === 'PENDING' || provider.status === 'QUEUED'
+            || validCount(provider.pendingCount) && provider.pendingCount! > 0) && (
+            <p>확인된 종목은 먼저 표시합니다. 추가 조회가 끝난 뒤 같은 조건으로 다시 검색해 주세요.</p>
+          )}
+        </section>
+      )}
+      <section className="keyword-search-scope" aria-label="검색 조건과 범위">
+        <h3>적용한 조건</h3>
+        {result.appliedConditions.length > 0
+          ? <ul>{result.appliedConditions.map((condition, index) => <li key={index}>{condition}</li>)}</ul>
+          : <p>적용한 조건이 없습니다.</p>}
+        <p>검색 범위: {result.scope.label}</p>
+        <p>시세 확인 {result.scope.examinedCount.toLocaleString('ko-KR')}개 · 시세 조건 통과 {result.scope.eligibleCount.toLocaleString('ko-KR')}개 · 조건 일치 {result.scope.matchedCount.toLocaleString('ko-KR')}개</p>
+        {result.scope.truncated && <p className="keyword-search-caution">검색 범위 제한</p>}
+      </section>
+      {(result.unsupportedTerms.length > 0 || result.warnings.length > 0) && (
+        <section className="keyword-search-warnings" aria-label="검색 제한과 확인 필요 사항">
+          {result.unsupportedTerms.length > 0 && <p>적용하지 못한 조건: {result.unsupportedTerms.join(', ')}</p>}
+          {result.warnings.map((warning, index) => <p key={index}>{warning}</p>)}
+        </section>
+      )}
+      {enriched?.backtest && enriched.translation && (
+        <PastPerformance backtest={enriched.backtest} conditions={enriched.translation.conditions} />
+      )}
+      {result.matches.length > 0 && (
+        <section className="keyword-search-matches" aria-label="조건 일치 종목">
+          <h3>조건 일치 종목</h3>
+          {result.matches.map(match => (
+            <LiveMatchCard key={match.code} match={match} daily={enriched?.risk[match.code]} dailyAsOf={enriched?.riskAsOf} />
+          ))}
+        </section>
+      )}
+      <p className="keyword-search-note">조건에 맞는 조회 결과입니다. 조회 시각과 시세 관측 시각은 다를 수 있습니다.</p>
+    </>
+  )
+}
+
+function EngineBody({ up }: { up: Extract<SearchUpgrade, { mode: 'engine' }> }) {
+  const { translation: t, screen: s, realtime, combined, combinedExcluded } = up
+  const live = realtime?.result ?? null
+  const shown = combined ? combined.length : s.results.length
+  const label = realtime?.error ? '수급 조건 조회 실패'
+    : s.regime_blocked && !combined ? '현재 시장 국면에서 쓰지 않는 조건'
+    : shown > 0 ? (combined ? '검색 완료 · 수급과 일봉 조건 결합' : '검색 완료 · AI 조건 해석') : '조건 일치 0건'
+  const notes = [
+    ...(t.fallback_reason ? [t.fallback_reason] : []),
+    ...t.warnings,
+    ...t.unsupported.map(u => `적용하지 못한 조건: ${u}`),
+    ...(t.unparsed.length ? [`이해하지 못한 단어: ${t.unparsed.join(', ')}`] : []),
+    ...(s.regime_blocked ? [`현재 시장 국면(${s.regime.label})에서는 이 조건을 쓰지 않습니다. 검증 결과 이 국면에서 성과가 나빴습니다.`] : []),
+    ...(!combined && s.excluded.length
+      ? [`위험 신호로 제외: ${s.excluded.slice(0, 6).map(r => `${r.name ?? r.code}(${r.risk.flags.map(f => f.label).join('·')})`).join(', ')}${s.counts.guard_excluded > 6 ? ` 외 ${s.counts.guard_excluded - 6}개` : ''}`]
+      : []),
+    ...(combinedExcluded.length ? [`수급 조건은 맞지만 위험 신호로 제외: ${combinedExcluded.map(m => m.name).join(', ')}`] : []),
+    ...(realtime?.error ? [`수급 조건(${realtime.query})을 실데이터로 조회하지 못했습니다: ${realtime.error}`] : []),
+    ...(live?.warnings ?? []),
+  ]
+  return (
+    <>
+      <div className="keyword-search-status" role="status">
+        <strong>{label}</strong>
+        <span>일봉 {s.as_of} 확정 종가{live ? ` · 수급 조회 ${formatKstTimestamp(live.fetchedAt)}` : ''}</span>
+      </div>
+      <section className="keyword-search-scope" aria-label="검색 조건과 범위">
+        <h3>적용한 조건</h3>
+        <ul>
+          {t.conditions.map(c => <li key={`d-${c}`}>{c}</li>)}
+          {(live?.appliedConditions ?? []).map(c => <li key={`r-${c}`}>{c}</li>)}
+        </ul>
+        {t.assumptions.map(a => <p key={a}>{a}</p>)}
+        <p>일봉 조건: 분석 대상 {s.counts.universe.toLocaleString('ko-KR')}개 · 조건 통과 {s.counts.passing.toLocaleString('ko-KR')}개 · 위험 신호 제외 {s.counts.guard_excluded.toLocaleString('ko-KR')}개 · 시장 국면 {s.regime.label}</p>
+        {live && <p>수급 조건: {live.scope.label} · 조건 일치 {live.scope.matchedCount.toLocaleString('ko-KR')}개 → 두 조건 모두 일치 {combined?.length ?? 0}개</p>}
+      </section>
+      {notes.length > 0 && (
+        <section className="keyword-search-warnings" aria-label="검색 제한과 확인 필요 사항">
+          {notes.map(n => <p key={n}>{n}</p>)}
+        </section>
+      )}
+      {up.backtest && <PastPerformance backtest={up.backtest} />}
+      {shown > 0 && (
+        <section className="keyword-search-matches" aria-label="조건 일치 종목">
+          <h3>조건 일치 종목</h3>
+          {combined
+            ? combined.map(c => c.live && <LiveMatchCard key={c.code} match={c.live} daily={c.daily} dailyAsOf={s.as_of} />)
+            : s.results.map(r => <EngineMatchCard key={r.code} r={r} asOf={s.as_of} />)}
+        </section>
+      )}
+      <p className="keyword-search-note">일봉 조건은 최근 확정 종가 기준입니다. 위험 등급과 변동 범위는 과거 통계이며 목표가가 아닙니다.</p>
+    </>
+  )
+}
+
+const mayHandOver = (result: KeywordSearchResponse) =>
+  result.outcome === 'UNSUPPORTED' || result.outcome === 'UNAVAILABLE' || fellBackToNameSearch(result)
+
+export function KeywordSearchPanel({ query, loading, error, result, onClose, upgrade }: KeywordSearchPanelProps) {
   const closeRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -116,6 +272,9 @@ export function KeywordSearchPanel({ query, loading, error, result, onClose, chi
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [onClose])
 
+  const engineLed = upgrade?.status === 'done' && upgrade.mode === 'engine' ? upgrade : null
+  const upgrading = upgrade?.status === 'working' && !loading
+
   return (
     <div ref={dialogRef} className="maker-analysis-panel keyword-search-panel" role="dialog" aria-modal="true" aria-label="실데이터 조건검색">
       <div className="maker-analysis-sheet">
@@ -128,89 +287,16 @@ export function KeywordSearchPanel({ query, loading, error, result, onClose, chi
         </header>
         <div className="maker-analysis-body keyword-search-body">
           {loading && <div className="analysis-loading" role="status">실데이터를 조회하고 조건을 확인하고 있습니다.</div>}
-          {error && <div className="auth-error" role="alert">{error}</div>}
-          {result && !loading && (
+          {upgrading && (
+            <div className="analysis-loading" role="status">AI가 조건을 해석해 일봉 근거와 과거 성과를 붙이고 있습니다.</div>
+          )}
+          {engineLed ? <EngineBody up={engineLed} /> : (
             <>
-              <div className="keyword-search-status" role="status">
-                <strong>{outcomeLabel[result.outcome]}</strong>
-                <span>조회 시각 {formatKstTimestamp(result.fetchedAt)}</span>
-              </div>
-              {outcomeMessage[result.outcome] && <p className="keyword-search-empty">{outcomeMessage[result.outcome]}</p>}
-              {result.providers && result.providers.length > 0 && (
-                <section className="keyword-search-scope" aria-label="조회 출처와 상태">
-                  <h3>조건검색 데이터 출처</h3>
-                  {result.providers.map((provider, index) => (
-                    <div key={`${provider.source}-${index}`}>
-                      <p><strong>{sourceLabel(provider.source)} · {environmentLabel(provider.environment)} · {providerStatusLabel(provider.status)}</strong></p>
-                      {provider.scope && <p>{provider.scope}</p>}
-                      {providerCoverage(provider) && <p>{providerCoverage(provider)}</p>}
-                      <p>조회 결과 확인 {formatKstTimestamp(provider.checkedAt)}</p>
-                    </div>
-                  ))}
-                  {result.providers.some(provider => provider.status === 'PENDING' || provider.status === 'QUEUED'
-                    || validCount(provider.pendingCount) && provider.pendingCount! > 0) && (
-                    <p>확인된 종목은 먼저 표시합니다. 추가 조회가 끝난 뒤 같은 조건으로 다시 검색해 주세요.</p>
-                  )}
-                </section>
-              )}
-              <section className="keyword-search-scope" aria-label="검색 조건과 범위">
-                <h3>적용한 조건</h3>
-                {result.appliedConditions.length > 0
-                  ? <ul>{result.appliedConditions.map((condition, index) => <li key={index}>{condition}</li>)}</ul>
-                  : <p>적용한 조건이 없습니다.</p>}
-                <p>검색 범위: {result.scope.label}</p>
-                <p>시세 확인 {result.scope.examinedCount.toLocaleString('ko-KR')}개 · 시세 조건 통과 {result.scope.eligibleCount.toLocaleString('ko-KR')}개 · 조건 일치 {result.scope.matchedCount.toLocaleString('ko-KR')}개</p>
-                {result.scope.truncated && <p className="keyword-search-caution">검색 범위 제한</p>}
-              </section>
-              {(result.unsupportedTerms.length > 0 || result.warnings.length > 0) && (
-                <section className="keyword-search-warnings" aria-label="검색 제한과 확인 필요 사항">
-                  {result.unsupportedTerms.length > 0 && <p>적용하지 못한 조건: {result.unsupportedTerms.join(', ')}</p>}
-                  {result.warnings.map((warning, index) => <p key={index}>{warning}</p>)}
-                </section>
-              )}
-              {result.matches.length > 0 && (
-                <section className="keyword-search-matches" aria-label="조건 일치 종목">
-                  <h3>조건 일치 종목</h3>
-                  {result.matches.map(match => (
-                    <article className="keyword-match" key={match.code}>
-                      <div className="keyword-match-heading"><strong>{match.name}</strong><span>{match.code} · {match.market || '시장 미확인'}</span></div>
-                      <div className="keyword-match-values">
-                        <span>현재가 {formatNumber(match.currentPrice, '원')}</span>
-                        <span>등락률 {formatNumber(match.changePct, '%', true)}</span>
-                        <span>거래량 {formatNumber(match.volume, '주')}</span>
-                        <span>거래대금 {formatNumber(match.tradingValueKrw, '원')}</span>
-                      </div>
-                      <p className="keyword-match-source">시세 출처 {observationSourceLabel(match.quoteSource, match.quoteEnvironment)} · 확인 시각 {formatKstTimestamp(match.quoteCheckedAt)}</p>
-                      <p className="keyword-match-source">시세 관측 시각 {formatKstTimestamp(match.observedAt)}</p>
-                      {match.sourceObservations && match.sourceObservations.length > 0 && (
-                        <ul className="keyword-match-evidence" aria-label={`${match.name} 공급자별 조회값`}>
-                          {match.sourceObservations.map((observation, index) => (
-                            <li key={`${observation.source}-${index}`}>
-                              <strong>{sourceLabel(observation.source)} · {environmentLabel(observation.environment)}</strong>
-                              <span>현재가 {formatNumber(observation.currentPrice, '원')} · 등락률 {formatNumber(observation.changePct, '%', true)} · 거래량 {formatNumber(observation.volume, '주')} · 거래대금 {formatNumber(observation.tradingValueKrw, '원')}</span>
-                              <span>조회 {formatKstTimestamp(observation.fetchedAt)} · 관측 {formatKstTimestamp(observation.observedAt)}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      <ul className="keyword-match-evidence">
-                        {match.evidence.map((evidence, index) => (
-                          <li key={index}>
-                            <strong>{evidence.condition}</strong>
-                            <span>실측 {evidence.observedValue || '미확인'}{evidence.unit} · 출처 {observationSourceLabel(evidence.source, evidence.environment)}</span>
-                            {evidence.observedAt && <span>{formatEvidenceObservation(evidence.observedAt)}</span>}
-                            {evidence.fetchedAt && <span>근거 조회 시각 {formatKstTimestamp(evidence.fetchedAt)}</span>}
-                          </li>
-                        ))}
-                      </ul>
-                    </article>
-                  ))}
-                </section>
-              )}
-              <p className="keyword-search-note">조건에 맞는 조회 결과입니다. 조회 시각과 시세 관측 시각은 다를 수 있습니다.</p>
+              {/* 엔진이 이어받을 수 있는 결과(미지원·조회 실패·종목명 대체)는 판단이 끝날 때까지 보류한다 */}
+              {error && !upgrading && <div className="auth-error" role="alert">{error}</div>}
+              {result && !loading && !(upgrading && mayHandOver(result)) && <KeywordBody result={result} upgrade={upgrade} />}
             </>
           )}
-          {children}
         </div>
       </div>
     </div>

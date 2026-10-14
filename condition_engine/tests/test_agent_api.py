@@ -55,10 +55,27 @@ def test_rule_translator_warns_and_relaxes_guard_for_explicit_chasing():
     assert any("-4.02%" in w for w in t.warnings)
 
 
-def test_rule_translator_refuses_data_it_does_not_have():
+def test_flow_conditions_are_handed_to_the_live_search_not_refused():
     t = RuleTranslator().translate("외국인 순매수 이어지는 20일선 위 종목")
-    assert any("수급" in u for u in t.unsupported)
+    assert t.realtime_query == "외국인 순매수"
+    assert not any("수급" in u for u in t.unsupported)
+    assert {"f": "gap_ma20", "op": ">", "v": 0} in leaves(t.strategy)
     assert all("foreign" not in json.dumps(l) for l in leaves(t.strategy))
+    assert RuleTranslator().translate("쌍끌이 매수 종목").realtime_query == "쌍끌이"
+    assert RuleTranslator().translate("외국인과 기관 순매수 60일선 위").realtime_query == "외국인과 기관 순매수"
+
+
+def test_vague_flow_wording_without_a_live_condition_is_still_refused():
+    t = RuleTranslator().translate("수급 좋은 20일선 위 종목")
+    assert t.realtime_query is None and any("수급" in u for u in t.unsupported)
+
+
+def test_llm_path_takes_the_flow_query_from_the_member_text_not_the_model():
+    reply = json.dumps({"strategy": {"title": "x", "when": {"f": "gap_ma20", "op": ">", "v": 0},
+                                     "rank_by": {"f": "quality_score", "desc": True}, "top_n": 5},
+                        "unsupported": ["외국인 수급 데이터 없음"]})
+    t = LlmTranslator(FakeProvider(reply)).translate("기관 순매수 20일선 위")
+    assert t.source == "fake" and t.realtime_query == "기관 순매수" and t.unsupported == []
 
 
 def test_rule_translator_with_nothing_to_parse():

@@ -142,34 +142,100 @@ it('hero searches the original condition through the data API without asking an 
   expect(within(panel).getByText('현재가 49,000원')).toBeTruthy()
 })
 
-it('the same question also runs through the AI condition engine with its evidence', async () => {
-  const strategy = { id: 'adhoc_1', title: '20일선 위', when: { f: 'gap_ma20', op: '>', v: 0 }, rank_by: { f: 'quality_score', desc: true }, top_n: 10, guard: { exclude_risk: ['chase', 'high_vol'] } }
-  const engine = vi.fn((url: string) => {
-    if (url.endsWith('/api/engine/translate')) return Promise.resolve(asJson({ ...engineMiss, strategy, error: null, conditions: ['20일선 이격 +0.0% 초과'] }))
-    return Promise.resolve(asJson({
-      strategy, conditions: ['20일선 이격 +0.0% 초과'], as_of: '2026-10-13', regime: { code: 'DOWN_TREND', label: '지수가 60일선 아래에서 20일 하락' },
-      regime_blocked: false, counts: { universe: 868, passing: 300, guard_excluded: 0, eligible: 300, published: 1 },
-      results: [{ code: '033780', name: '엔진 검색 종목', market: 'KOSPI', sector: null, stage: 'PUBLISHED', excluded_by: [], rank: 1, snapshot: {},
-        explanation: ['20일선 위 (+3.0%)'], risk: { flags: [], score: 0, grade: '낮음' } }],
-      excluded: [], below_top_n: [], data_version: 'v',
-    }))
+// ---- search upgrade: one search box, the live search and the AI engine merged into one result ----
+const dailyStrategy = { id: 'adhoc_1', title: '20일선 위', when: { f: 'gap_ma20', op: '>', v: 0 }, rank_by: { f: 'quality_score', desc: true }, top_n: 10, guard: { exclude_risk: ['chase', 'high_vol'] } }
+const translated = (extra: Record<string, unknown> = {}) => ({ ...engineMiss, strategy: dailyStrategy, error: null, conditions: ['20일선 이격 +0.0% 초과'], ...extra })
+const riskItem = (code: string, name: string) => ({ code, found: true, name, in_universe: true, explanation: ['20일선 위 (+3.0%)', 'ATR 2.2% · 차분함'],
+  risk: { flags: [], score: 0, grade: '낮음', band: { atr_pct: 2.2, typical_pct: 2.5, wide_low_pct: -6.1, wide_high_pct: 7.8, note: '' } } })
+const engineRow = (code: string, name: string) => ({ ...riskItem(code, name), market: 'KOSPI', sector: null, stage: 'PUBLISHED', excluded_by: [], rank: 1,
+  snapshot: { close: 180100, r1: 0.0056, volr: 1.3, val_today: 49923178496 } })
+const screenResponse = (rows: ReturnType<typeof engineRow>[], belowTopN: string[] = [], excludedCodes: string[] = []) => ({
+  strategy: dailyStrategy, conditions: ['20일선 이격 +0.0% 초과'], as_of: '2026-10-13', regime: { code: 'UP_TREND', label: '지수가 60일선 위에서 20일 상승' },
+  regime_blocked: false, counts: { universe: 868, passing: rows.length + belowTopN.length, guard_excluded: excludedCodes.length, eligible: rows.length + belowTopN.length, published: rows.length },
+  results: rows, excluded: [], below_top_n: belowTopN, excluded_codes: excludedCodes, data_version: 'v',
+})
+const backtestResponse = {
+  period: { all: ['2024-01-02', '2026-10-13', 675] },
+  horizons: { 5: { all: {}, discovery: { signal_days: 300, excess_vs_universe_pct: 0.47 }, confirm: { signal_days: 200, excess_vs_universe_pct: 0.22, excess_vs_index_pct: -1.9, net_return_pct: -0.35, hit_rate_pct: 47.3 },
+    verdict: { code: 'positive_unconfirmed', label: '양의 성과(통계적 확정 전)', detail: '두 구간 모두 양수지만 확인 구간 유의성이 낮습니다' } } },
+}
+type Routes = { translate: unknown; screen?: unknown; risk?: (codes: string[]) => unknown; keyword: (query: string) => unknown }
+function routed(r: Routes) {
+  return vi.fn((url: string, init?: RequestInit) => {
+    const u = String(url)
+    const body = init?.body ? JSON.parse(String(init.body)) : {}
+    if (u.endsWith('/api/engine/translate')) return Promise.resolve(asJson(r.translate))
+    if (u.endsWith('/api/engine/screen')) return Promise.resolve(asJson(r.screen))
+    if (u.endsWith('/api/engine/backtest')) return Promise.resolve(asJson(backtestResponse))
+    if (u.endsWith('/api/engine/risk')) return Promise.resolve(asJson({ as_of: '2026-10-13', items: r.risk ? r.risk(body.codes) : [] }))
+    return Promise.resolve(asJson(r.keyword(body.query)))
   })
-  const fetchMock = vi.fn((url: string, _init?: RequestInit) => String(url).includes('/api/engine/') ? engine(String(url)) : Promise.resolve(asJson(keywordResponse('20일선 위'))))
+}
+const search = async (text: string) => {
+  fireEvent.change(screen.getByRole('textbox', { name: '분석할 종목명 또는 조건' }), { target: { value: text } })
+  fireEvent.submit(screen.getByRole('search'))
+  return screen.findByRole('dialog', { name: '실데이터 조건검색' })
+}
+
+it('a query the live search understands keeps its live results and gains daily risk and past performance', async () => {
+  const fetchMock = routed({ translate: translated(), keyword: q => keywordResponse(q, '실시간 종목'), risk: codes => codes.map(c => riskItem(c, '실시간 종목')) })
   vi.stubGlobal('fetch', fetchMock)
   render(tree())
-  fireEvent.change(screen.getByRole('textbox', { name: '분석할 종목명 또는 조건' }), { target: { value: '20일선 위' } })
-  fireEvent.submit(screen.getByRole('search'))
-  const panel = await screen.findByRole('dialog', { name: '실데이터 조건검색' })
-  const matches = await within(panel).findByRole('region', { name: '일봉 조건 일치 종목' })
-  expect(within(matches).getByText('엔진 검색 종목')).toBeTruthy()
-  expect(within(within(panel).getByRole('region', { name: 'AI 조건 해석' })).getByText('20일선 이격 +0.0% 초과', { selector: 'li' })).toBeTruthy()
-  // one search box, one button: no separate AI card, button or shortcut
-  expect(within(screen.getByRole('search')).getAllByRole('button')).toHaveLength(1)
-  expect(screen.queryByRole('link', { name: 'AI 조건검색' })).toBeNull()
-  const screenCall = engine.mock.calls.find(([u]) => u.endsWith('/api/engine/screen'))
-  expect(screenCall).toBeTruthy()
-  const body = JSON.parse(String(fetchMock.mock.calls.find(([u]) => String(u).endsWith('/api/engine/screen'))![1]!.body))
-  expect(body).toEqual({ strategy })                       // the validated DSL, never the raw sentence
+  const panel = await search('거래대금 100억 이상')
+  const matches = await within(panel).findByRole('region', { name: '조건 일치 종목' })
+  expect(within(matches).getByText('실시간 종목')).toBeTruthy()
+  expect(within(matches).getByText('현재가 49,000원')).toBeTruthy()                     // live quote kept
+  expect(await within(matches).findByText(/위험 낮음 · 5거래일 변동 보통 ±2.5%/)).toBeTruthy()  // daily evidence added
+  expect(within(panel).getByRole('region', { name: '조건 과거 성과' }).textContent).toContain('양의 성과(통계적 확정 전)')
+  expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith('/api/engine/screen'))).toBe(false)  // live search led
+  expect(within(screen.getByRole('search')).getAllByRole('button')).toHaveLength(1)               // still one box, one button
+})
+
+it('a daily-bar query the live search refuses is answered by the engine in the same dialog', async () => {
+  const unsupported = (q: string) => ({ ...keywordResponse(q), outcome: 'UNSUPPORTED', appliedConditions: [], unsupportedTerms: ['해석할 수 없는 조건: 20일선 위 눌림'], matches: [] })
+  vi.stubGlobal('fetch', routed({ translate: translated(), screen: screenResponse([engineRow('033780', '엔진 일봉 종목')]), keyword: unsupported }))
+  render(tree())
+  const panel = await search('20일선 위 눌림')
+  const matches = await within(panel).findByRole('region', { name: '조건 일치 종목' })
+  expect(within(matches).getByText('엔진 일봉 종목')).toBeTruthy()
+  expect(within(panel).getByText('검색 완료 · AI 조건 해석')).toBeTruthy()
+  expect(within(panel).getByText('20일선 이격 +0.0% 초과', { selector: 'li' })).toBeTruthy()
+  expect(within(panel).queryByText(/지원하지 않는 조건이 있습니다/)).toBeNull()             // the refusal is replaced, not stacked
+})
+
+it('a mixed flow + daily query keeps only stocks that pass both the live flow and the daily conditions', async () => {
+  const keyword = (q: string) => q === '외국인 순매수'
+    ? { ...keywordResponse(q), appliedConditions: ['외국인 순매수 > 0'], matches: [
+        { ...keywordResponse(q).matches[0], code: '000001', name: '둘 다 맞는 종목' },
+        { ...keywordResponse(q).matches[0], code: '000002', name: '수급만 맞는 종목' },
+        { ...keywordResponse(q).matches[0], code: '000003', name: '위험 제외 종목' }] }
+    : { ...keywordResponse(q), outcome: 'UNSUPPORTED', appliedConditions: [], unsupportedTerms: ['해석할 수 없는 조건'], matches: [] }
+  const fetchMock = routed({
+    translate: translated({ realtime_query: '외국인 순매수' }),
+    screen: screenResponse([engineRow('009999', '일봉만 맞는 종목')], ['000001'], ['000003']),
+    risk: codes => codes.map(c => riskItem(c, c)),
+    keyword,
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  render(tree())
+  const panel = await search('외국인 순매수 20일선 위')
+  const matches = await within(panel).findByRole('region', { name: '조건 일치 종목' })
+  expect(within(matches).getByText('둘 다 맞는 종목')).toBeTruthy()
+  expect(within(matches).queryByText('수급만 맞는 종목')).toBeNull()
+  expect(within(matches).queryByText('일봉만 맞는 종목')).toBeNull()
+  expect(within(panel).getByText(/수급 조건은 맞지만 위험 신호로 제외: 위험 제외 종목/)).toBeTruthy()
+  expect(within(panel).getByText('외국인 순매수 > 0', { selector: 'li' })).toBeTruthy()
+  const flowCall = fetchMock.mock.calls.find(([u, init]) => String(u).includes('/api/analysis/keyword-search') && JSON.parse(String(init?.body)).query === '외국인 순매수')
+  expect(flowCall).toBeTruthy()
+})
+
+it('an engine outage never blocks the live search', async () => {
+  vi.stubGlobal('fetch', vi.fn((url: string) => String(url).includes('/api/engine/')
+    ? Promise.resolve(new Response('{"detail":"down"}', { status: 503 }))
+    : Promise.resolve(asJson(keywordResponse('가격 5만원 이하')))))
+  render(tree())
+  const panel = await search('가격 5만원 이하')
+  expect(await within(panel).findByText('조건 검증 종목')).toBeTruthy()
 })
 
 it('closing a keyword search aborts its request and rejects a late response after a newer search', async () => {

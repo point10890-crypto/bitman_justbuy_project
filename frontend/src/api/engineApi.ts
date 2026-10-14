@@ -39,6 +39,8 @@ export interface Translation {
   unparsed: string[]
   error: string | null
   fallback_reason: string | null
+  /** 수급 조건(외국인·기관 순매수 등). 엔진에는 없으므로 실데이터 검색이 적용한다. */
+  realtime_query?: string | null
 }
 
 export interface RiskBand {
@@ -79,6 +81,7 @@ export interface ScreenResult {
   results: ScreenRow[]
   excluded: ScreenRow[]
   below_top_n: string[]
+  excluded_codes?: string[]
   data_version: string
   run_id?: string
 }

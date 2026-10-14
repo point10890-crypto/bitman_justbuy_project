@@ -47,6 +47,26 @@ UNSUPPORTED = [
     (re.compile(r"목표가|추천|사야|매수할|오를 종목"), "엔진은 매수 추천이나 목표가를 만들지 않습니다 — 조건과 그 과거 성적을 보여줍니다"),
 ]
 
+# Investor-flow phrases. The engine has no flow data, but the live data search does, so these
+# are handed back as `realtime_query` and applied there instead of being refused.
+REALTIME = re.compile(r"쌍끌이|(?:외국인|기관)(?:\s*(?:과|와|및|,)?\s*(?:외국인|기관))?\s*(?:동반\s*)?순매수")
+FLOW_WORDS = re.compile(r"수급|외국인|기관|순매수|쌍끌이")
+
+
+def realtime_query(text: str) -> str | None:
+    found: list[str] = []
+    for m in REALTIME.finditer(text or ""):
+        phrase = re.sub(r"\s+", " ", m.group()).strip()
+        if phrase not in found:
+            found.append(phrase)
+    return " ".join(found) or None
+
+
+def _drop_flow_refusals(unsupported, rq: str | None) -> list[str]:
+    if not rq:
+        return sorted(set(unsupported))
+    return sorted({u for u in unsupported if not FLOW_WORDS.search(u)})
+
 
 @dataclass
 class Translation:
@@ -59,6 +79,7 @@ class Translation:
     unparsed: list[str] = field(default_factory=list)
     error: str | None = None
     fallback_reason: str | None = None
+    realtime_query: str | None = None       # flow conditions for the live data search
 
     def as_dict(self) -> dict:
         return self.__dict__.copy()
@@ -72,7 +93,8 @@ class RuleTranslator:
         leaves: list[dict] = []
         assumptions: list[str] = []
         warnings: list[str] = []
-        unsupported = sorted({msg for pat, msg in UNSUPPORTED if pat.search(t)})
+        rq = realtime_query(t)
+        unsupported = _drop_flow_refusals({msg for pat, msg in UNSUPPORTED if pat.search(t)}, rq)
         rank_by = None
         top_n = 10
         guard = {"exclude_risk": list(dsl.DEFAULT_GUARD["exclude_risk"])}
@@ -189,8 +211,11 @@ class RuleTranslator:
             warnings.append("당일 +5% 이상 상승 조건은 급등 추격과 겹칩니다. 같은 방식은 과거 5일 -2.58% / -4.02%였습니다. "
                             "요청대로 추격 제외를 껐습니다")
 
+        for m in REALTIME.finditer(t):
+            consumed.append(m.span())
+
         if not leaves:
-            return Translation(None, "rules", unsupported=unsupported,
+            return Translation(None, "rules", unsupported=unsupported, realtime_query=rq,
                                error="조건으로 바꿀 수 있는 표현을 찾지 못했습니다. 예: '20일선 위 눌림, 거래량 1.5배, 반도체 10개'")
 
         strategy = {
@@ -205,7 +230,7 @@ class RuleTranslator:
         strategy = dsl.validate_strategy(strategy)
         return Translation(strategy, "rules", conditions=dsl.describe(strategy["when"]),
                            assumptions=assumptions, warnings=warnings, unsupported=unsupported,
-                           unparsed=_leftover(t, consumed))
+                           unparsed=_leftover(t, consumed), realtime_query=rq)
 
 
 def _leftover(text: str, spans: list[tuple[int, int]]) -> list[str]:
@@ -290,7 +315,8 @@ def system_prompt() -> str:
  "unsupported":["데이터가 없어 조건으로 만들 수 없는 요청"]}}
 
 규칙:
-- 외국인·기관 수급, 공시, 뉴스, 테마, 재무, 밸류에이션은 데이터가 없다 → unsupported 에 적고 조건에 넣지 않는다.
+- 외국인·기관 순매수(수급)는 실시간 검색이 따로 적용한다 → 조건에 넣지 않고 unsupported 에도 적지 않는다.
+- 공시, 뉴스, 테마, 재무, 밸류에이션은 데이터가 없다 → unsupported 에 적고 조건에 넣지 않는다.
 - 정렬을 말하지 않으면 rank_by 는 {{"f":"quality_score","desc":true}}.
 - guard 는 기본 ["chase","high_vol"]. 회원이 급등주나 고변동을 명시적으로 원할 때만 해당 항목을 뺀다.
 - 개수를 말하지 않으면 top_n 은 10."""
@@ -325,10 +351,13 @@ class LlmTranslator:
                 payload = json.loads(raw)
                 strategy = dsl.validate_strategy(payload["strategy"])
                 ok = True
+                rq = realtime_query(text)        # from the member's own words, never from the model
                 return Translation(strategy, provider.name, conditions=dsl.describe(strategy["when"]),
                                    assumptions=[str(a) for a in payload.get("assumptions", [])][:8],
-                                   unsupported=sorted({str(u) for u in payload.get("unsupported", [])}
-                                                      | {m for p, m in UNSUPPORTED if p.search(text)}))
+                                   unsupported=_drop_flow_refusals(
+                                       {str(u) for u in payload.get("unsupported", [])}
+                                       | {m for p, m in UNSUPPORTED if p.search(text)}, rq),
+                                   realtime_query=rq)
             except Exception as exc:
                 note = f"{type(exc).__name__}: {str(exc)[:150]}"
                 invalid = invalid or isinstance(exc, (dsl.DslError, KeyError, TypeError, json.JSONDecodeError))
