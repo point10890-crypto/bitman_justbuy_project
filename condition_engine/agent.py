@@ -51,6 +51,7 @@ UNSUPPORTED = [
 # are handed back as `realtime_query` and applied there instead of being refused.
 REALTIME = re.compile(r"쌍끌이|(?:외국인|기관)(?:\s*(?:과|와|및|,)?\s*(?:외국인|기관))?\s*(?:동반\s*)?순매수")
 FLOW_WORDS = re.compile(r"수급|외국인|기관|순매수|쌍끌이")
+FLOW_WINDOW = re.compile(r"오늘|최근\s*[0-9]+\s*거래일(?:간)?")
 
 
 def realtime_query(text: str) -> str | None:
@@ -59,7 +60,12 @@ def realtime_query(text: str) -> str | None:
         phrase = re.sub(r"\s+", " ", m.group()).strip()
         if phrase not in found:
             found.append(phrase)
-    return " ".join(found) or None
+    if not found:
+        return None
+    # Keep explicit periods, including invalid/conflicting ones, for the live parser to validate.
+    # Dropping them would silently switch a 'today' query to its three-session default.
+    windows = [re.sub(r"\s+", " ", m.group()).strip() for m in FLOW_WINDOW.finditer(text or "")]
+    return " ".join(windows + found)
 
 
 def _drop_flow_refusals(unsupported, rq: str | None) -> list[str]:
@@ -213,6 +219,8 @@ class RuleTranslator:
 
         for m in REALTIME.finditer(t):
             consumed.append(m.span())
+        if rq:
+            consumed.extend(m.span() for m in FLOW_WINDOW.finditer(t))
 
         if not leaves:
             return Translation(None, "rules", unsupported=unsupported, realtime_query=rq,

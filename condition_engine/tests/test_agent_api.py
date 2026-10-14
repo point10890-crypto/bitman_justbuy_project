@@ -70,6 +70,27 @@ def test_vague_flow_wording_without_a_live_condition_is_still_refused():
     assert t.realtime_query is None and any("수급" in u for u in t.unsupported)
 
 
+@pytest.mark.parametrize("text, expected", [
+    ("오늘 기관 순매수 20일선 위", "오늘 기관 순매수"),
+    ("최근 5거래일 외국인 순매수 60일선 위", "최근 5거래일 외국인 순매수"),
+    ("60일선 위 쌍끌이 최근 2 거래일간", "최근 2 거래일간 쌍끌이"),
+    ("오늘 최근 5거래일 기관 순매수 20일선 위", "오늘 최근 5거래일 기관 순매수"),
+    ("최근 20거래일 기관 순매수 20일선 위", "최근 20거래일 기관 순매수"),
+])
+def test_live_flow_handoff_preserves_member_time_window(text, expected):
+    # The live parser validates conflicting/unsupported windows; never silently use its default.
+    reply = json.dumps({"strategy": {"title": "x", "when": {"f": "gap_ma20", "op": ">", "v": 0},
+                                     "rank_by": {"f": "quality_score", "desc": True}, "top_n": 5}})
+    for translator in (RuleTranslator(), LlmTranslator(FakeProvider(reply))):
+        translated = translator.translate(text)
+        assert translated.realtime_query == expected
+        assert not any("최근" in word for word in translated.unparsed)
+
+
+def test_daily_query_without_flow_does_not_gain_a_live_handoff():
+    assert RuleTranslator().translate("오늘 20일선 위").realtime_query is None
+
+
 def test_llm_path_takes_the_flow_query_from_the_member_text_not_the_model():
     reply = json.dumps({"strategy": {"title": "x", "when": {"f": "gap_ma20", "op": ">", "v": 0},
                                      "rank_by": {"f": "quality_score", "desc": True}, "top_n": 5},

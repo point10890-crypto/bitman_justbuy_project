@@ -81,7 +81,7 @@ export interface ScreenResult {
   results: ScreenRow[]
   excluded: ScreenRow[]
   below_top_n: string[]
-  excluded_codes?: string[]
+  excluded_codes?: Record<string, string[]>
   data_version: string
   run_id?: string
 }

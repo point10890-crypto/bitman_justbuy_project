@@ -46,6 +46,8 @@ export type SearchUpgrade =
       combined: CombinedMatch[] | null
       /** 수급 조건은 맞지만 일봉 위험 신호로 뺀 종목. */
       combinedExcluded: KeywordSearchMatch[]
+      /** 교집합은 확인했지만 별도 위험 정보 보강이 실패한 경우. */
+      riskError: string | null
     }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'AI 조건검색을 처리하지 못했습니다.')
@@ -101,25 +103,40 @@ export function useSearchUpgrade(
           let realtime: { query: string; result: KeywordSearchResponse | null; error: string | null } | null = null
           let combined: CombinedMatch[] | null = null
           let combinedExcluded: KeywordSearchMatch[] = []
+          let riskError: string | null = null
           if (t.realtime_query) {
             try {
               const live = await searchKeywordStocks(t.realtime_query, getStoredToken() || undefined, ctl.signal)
               realtime = { query: t.realtime_query, result: live, error: null }
-              const passing = new Set([...screen.results.map(r => r.code), ...screen.below_top_n])
-              const excluded = new Set(screen.excluded_codes ?? [])
-              const both = live.matches.filter(m => passing.has(m.code))
-              combinedExcluded = live.matches.filter(m => excluded.has(m.code))
-              const daily = both.length
-                ? (await engineApi.risk(both.slice(0, 50).map(m => m.code))).items
-                : []
-              const byCode = Object.fromEntries(daily.map(d => [d.code, d]))
-              combined = both.slice(0, 50).map(m => ({ code: m.code, live: m, daily: byCode[m.code] ?? null }))
+              if (live.outcome === 'UNAVAILABLE' || live.outcome === 'UNSUPPORTED' || fellBackToNameSearch(live)) {
+                realtime.error = live.outcome === 'UNSUPPORTED' || fellBackToNameSearch(live)
+                  ? '요청한 수급 조건을 확인하지 못했습니다.'
+                  : '실시간 수급을 조회하지 못했습니다.'
+              } else {
+                const passing = [...new Set([...screen.results.map(r => r.code), ...screen.below_top_n])]
+                const liveByCode = new Map(live.matches.map(m => [m.code, m]))
+                const excluded = new Set(Object.keys(screen.excluded_codes ?? {}))
+                const topN = Math.max(1, Math.min(50, screen.strategy.top_n))
+                const both = passing.filter(code => liveByCode.has(code)).slice(0, topN).map(code => liveByCode.get(code)!)
+                combinedExcluded = live.matches.filter(m => excluded.has(m.code))
+                // Membership is confirmed before optional risk enrichment; enrichment cannot undo it.
+                combined = both.map(m => ({ code: m.code, live: m, daily: null }))
+                if (both.length) {
+                  try {
+                    const daily = (await engineApi.risk(both.map(m => m.code))).items
+                    const byCode = Object.fromEntries(daily.map(d => [d.code, d]))
+                    combined = both.map(m => ({ code: m.code, live: m, daily: byCode[m.code] ?? null }))
+                  } catch {
+                    riskError = '일봉 위험 정보 보강을 확인하지 못했습니다. 확인된 수급·일봉 조건 일치 결과는 유지합니다.'
+                  }
+                }
+              }
             } catch (e) {
               if (ctl.signal.aborted) return
               realtime = { query: t.realtime_query, result: null, error: message(e) }
             }
           }
-          done({ status: 'done', mode: 'engine', translation: t, screen, backtest, realtime, combined, combinedExcluded })
+          done({ status: 'done', mode: 'engine', translation: t, screen, backtest, realtime, combined, combinedExcluded, riskError })
           return
         }
 

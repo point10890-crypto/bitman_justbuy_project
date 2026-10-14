@@ -173,7 +173,7 @@ function KeywordBody({ result, upgrade }: { result: KeywordSearchResponse; upgra
         </section>
       )}
       {enriched?.backtest && enriched.translation && (
-        <PastPerformance backtest={enriched.backtest} conditions={enriched.translation.conditions} />
+        <PastPerformance backtest={enriched.backtest} conditions={enriched.translation.conditions} dailyOnly={!!enriched.translation.realtime_query} />
       )}
       {result.matches.length > 0 && (
         <section className="keyword-search-matches" aria-label="조건 일치 종목">
@@ -191,9 +191,11 @@ function KeywordBody({ result, upgrade }: { result: KeywordSearchResponse; upgra
 function EngineBody({ up }: { up: Extract<SearchUpgrade, { mode: 'engine' }> }) {
   const { translation: t, screen: s, realtime, combined, combinedExcluded } = up
   const live = realtime?.result ?? null
-  const shown = combined ? combined.length : s.results.length
+  const mixed = !!t.realtime_query
+  const shown = mixed ? combined?.length ?? 0 : s.results.length
   const label = realtime?.error ? '수급 조건 조회 실패'
-    : s.regime_blocked && !combined ? '현재 시장 국면에서 쓰지 않는 조건'
+    : s.regime_blocked ? '현재 시장 국면에서 쓰지 않는 조건'
+    : mixed && live?.outcome === 'PARTIAL' && shown === 0 ? '수급 조건 일부 자료 확인 중'
     : shown > 0 ? (combined ? '검색 완료 · 수급과 일봉 조건 결합' : '검색 완료 · AI 조건 해석') : '조건 일치 0건'
   const notes = [
     ...(t.fallback_reason ? [t.fallback_reason] : []),
@@ -206,6 +208,9 @@ function EngineBody({ up }: { up: Extract<SearchUpgrade, { mode: 'engine' }> }) 
       : []),
     ...(combinedExcluded.length ? [`수급 조건은 맞지만 위험 신호로 제외: ${combinedExcluded.map(m => m.name).join(', ')}`] : []),
     ...(realtime?.error ? [`수급 조건(${realtime.query})을 실데이터로 조회하지 못했습니다: ${realtime.error}`] : []),
+    ...(live?.outcome === 'UNSUPPORTED' ? live.unsupportedTerms.map(term => `수급 조건 미확인: ${term}`) : []),
+    ...(up.riskError ? [up.riskError] : []),
+    ...(live?.scope.truncated ? ['수급 검색 범위 제한: 조회한 범위의 확인된 종목만 결합했습니다.'] : []),
     ...(live?.warnings ?? []),
   ]
   return (
@@ -222,14 +227,14 @@ function EngineBody({ up }: { up: Extract<SearchUpgrade, { mode: 'engine' }> }) 
         </ul>
         {t.assumptions.map(a => <p key={a}>{a}</p>)}
         <p>일봉 조건: 분석 대상 {s.counts.universe.toLocaleString('ko-KR')}개 · 조건 통과 {s.counts.passing.toLocaleString('ko-KR')}개 · 위험 신호 제외 {s.counts.guard_excluded.toLocaleString('ko-KR')}개 · 시장 국면 {s.regime.label}</p>
-        {live && <p>수급 조건: {live.scope.label} · 조건 일치 {live.scope.matchedCount.toLocaleString('ko-KR')}개 → 두 조건 모두 일치 {combined?.length ?? 0}개</p>}
+        {live && !realtime?.error && <p>수급 조건: {live.scope.label} · 조건 일치 {live.scope.matchedCount.toLocaleString('ko-KR')}개 → 두 조건 모두 일치 {combined?.length ?? 0}개</p>}
       </section>
       {notes.length > 0 && (
         <section className="keyword-search-warnings" aria-label="검색 제한과 확인 필요 사항">
           {notes.map(n => <p key={n}>{n}</p>)}
         </section>
       )}
-      {up.backtest && <PastPerformance backtest={up.backtest} />}
+      {up.backtest && <PastPerformance backtest={up.backtest} conditions={t.conditions} dailyOnly={mixed} />}
       {shown > 0 && (
         <section className="keyword-search-matches" aria-label="조건 일치 종목">
           <h3>조건 일치 종목</h3>

@@ -53,12 +53,13 @@ export function EngineMatchCard({ r, asOf }: { r: ScreenRow; asOf: string }) {
 }
 
 /** 검색 조건을 과거에 그대로 썼다면 — 같은 날 다른 종목 대비 5거래일 성과. */
-export function PastPerformance({ backtest, conditions = [] }: { backtest: BacktestResult; conditions?: string[] }) {
+export function PastPerformance({ backtest, conditions = [], dailyOnly = false }: { backtest: BacktestResult; conditions?: string[]; dailyOnly?: boolean }) {
   const h5 = backtest.horizons?.['5']
   if (!h5) return null
   return (
     <section className="keyword-search-scope" aria-label="조건 과거 성과">
-      <h3>이 조건의 과거 성과</h3>
+      <h3>{dailyOnly ? '일봉 조건만의 과거 성과' : '이 조건의 과거 성과'}</h3>
+      {dailyOnly && <p>수급 조건을 결합한 성과는 검증하지 않았습니다.</p>}
       {conditions.length > 0 && <ul>{conditions.map(c => <li key={c}>{c}</li>)}</ul>}
       <p><strong>{h5.verdict.label}</strong> — {h5.verdict.detail}</p>
       <p>5거래일 보유, 같은 날 다른 종목 대비: 탐색 구간 {pct(h5.discovery.excess_vs_universe_pct)} · 확인 구간 {pct(h5.confirm.excess_vs_universe_pct)}</p>

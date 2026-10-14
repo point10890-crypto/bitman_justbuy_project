@@ -114,7 +114,7 @@ it('expected target upside in precomputed cards is labeled separately from obser
 const keywordResponse = (query: string, name = '조건 검증 종목') => ({
   query, outcome: 'COMPLETE', appliedConditions: ['현재가 50,000원 이하'], unsupportedTerms: [],
   scope: { label: '조회한 국내 상장 종목', examinedCount: 20, eligibleCount: 19, matchedCount: 1, truncated: false },
-  fetchedAt: '2026-10-12T10:00:00+09:00', sourceStatus: 'VERIFIED_QUOTES', warnings: [],
+  fetchedAt: '2026-10-12T10:00:00+09:00', sourceStatus: 'COMPLETE', warnings: [],
   matches: [{ code: '005930', name, market: 'KOSPI', currentPrice: 49000, changePct: null, volume: null, tradingValueKrw: null,
     quoteSource: 'KIS', quoteCheckedAt: '2026-10-12T10:00:00+09:00', observedAt: null,
     evidence: [{ condition: '현재가 50,000원 이하', observedValue: '49000', unit: '원', source: 'KIS', observedAt: null }] }],
@@ -147,11 +147,12 @@ const dailyStrategy = { id: 'adhoc_1', title: '20일선 위', when: { f: 'gap_ma
 const translated = (extra: Record<string, unknown> = {}) => ({ ...engineMiss, strategy: dailyStrategy, error: null, conditions: ['20일선 이격 +0.0% 초과'], ...extra })
 const riskItem = (code: string, name: string) => ({ code, found: true, name, in_universe: true, explanation: ['20일선 위 (+3.0%)', 'ATR 2.2% · 차분함'],
   risk: { flags: [], score: 0, grade: '낮음', band: { atr_pct: 2.2, typical_pct: 2.5, wide_low_pct: -6.1, wide_high_pct: 7.8, note: '' } } })
-const engineRow = (code: string, name: string) => ({ ...riskItem(code, name), market: 'KOSPI', sector: null, stage: 'PUBLISHED', excluded_by: [], rank: 1,
-  snapshot: { close: 180100, r1: 0.0056, volr: 1.3, val_today: 49923178496 } })
-const screenResponse = (rows: ReturnType<typeof engineRow>[], belowTopN: string[] = [], excludedCodes: string[] = []) => ({
+const engineRow = (code: string, name: string) => ({ ...riskItem(code, name), market: 'KOSPI', sector: null, industry: null, stage: 'PUBLISHED', excluded_by: [], rank: 1,
+  snapshot: { close: 180100, r1: 0.0056, volr: 1.3, dd20: -0.02, dd120: -0.03, gap_ma20: 0.03, gap_ma60: 0.08,
+    atr14_pct: 0.022, vol20: 0.012, val_today: 49923178496, val_avg20: 40000000000, rs_sector20: 0.01, quality_score: 0.8 } })
+const screenResponse = (rows: ReturnType<typeof engineRow>[], belowTopN: string[] = [], excludedCodes: Record<string, string[]> = {}) => ({
   strategy: dailyStrategy, conditions: ['20일선 이격 +0.0% 초과'], as_of: '2026-10-13', regime: { code: 'UP_TREND', label: '지수가 60일선 위에서 20일 상승' },
-  regime_blocked: false, counts: { universe: 868, passing: rows.length + belowTopN.length, guard_excluded: excludedCodes.length, eligible: rows.length + belowTopN.length, published: rows.length },
+  regime_blocked: false, counts: { universe: 868, passing: rows.length + belowTopN.length + Object.keys(excludedCodes).length, guard_excluded: Object.keys(excludedCodes).length, eligible: rows.length + belowTopN.length, published: rows.length },
   results: rows, excluded: [], below_top_n: belowTopN, excluded_codes: excludedCodes, data_version: 'v',
 })
 const backtestResponse = {
@@ -199,7 +200,7 @@ it('a daily-bar query the live search refuses is answered by the engine in the s
   const matches = await within(panel).findByRole('region', { name: '조건 일치 종목' })
   expect(within(matches).getByText('엔진 일봉 종목')).toBeTruthy()
   expect(within(panel).getByText('검색 완료 · AI 조건 해석')).toBeTruthy()
-  expect(within(panel).getByText('20일선 이격 +0.0% 초과', { selector: 'li' })).toBeTruthy()
+  expect(within(within(panel).getByRole('region', { name: '검색 조건과 범위' })).getByText('20일선 이격 +0.0% 초과', { selector: 'li' })).toBeTruthy()
   expect(within(panel).queryByText(/지원하지 않는 조건이 있습니다/)).toBeNull()             // the refusal is replaced, not stacked
 })
 
@@ -212,7 +213,7 @@ it('a mixed flow + daily query keeps only stocks that pass both the live flow an
     : { ...keywordResponse(q), outcome: 'UNSUPPORTED', appliedConditions: [], unsupportedTerms: ['해석할 수 없는 조건'], matches: [] }
   const fetchMock = routed({
     translate: translated({ realtime_query: '외국인 순매수' }),
-    screen: screenResponse([engineRow('009999', '일봉만 맞는 종목')], ['000001'], ['000003']),
+    screen: screenResponse([engineRow('009999', '일봉만 맞는 종목')], ['000001'], { '000003': ['high_vol'] }),
     risk: codes => codes.map(c => riskItem(c, c)),
     keyword,
   })
@@ -227,6 +228,109 @@ it('a mixed flow + daily query keeps only stocks that pass both the live flow an
   expect(within(panel).getByText('외국인 순매수 > 0', { selector: 'li' })).toBeTruthy()
   const flowCall = fetchMock.mock.calls.find(([u, init]) => String(u).includes('/api/analysis/keyword-search') && JSON.parse(String(init?.body)).query === '외국인 순매수')
   expect(flowCall).toBeTruthy()
+})
+
+it.each(['UNAVAILABLE', 'UNSUPPORTED'] as const)('a mixed query with HTTP200 %s flow evidence never publishes daily-only condition matches', async outcome => {
+  vi.stubGlobal('fetch', routed({
+    translate: translated({ realtime_query: '외국인 순매수' }),
+    screen: screenResponse([engineRow('009999', '검증 안 된 일봉 종목')]),
+    keyword: q => ({ ...keywordResponse(q), outcome: q === '외국인 순매수' ? outcome : 'UNSUPPORTED',
+      appliedConditions: [], unsupportedTerms: ['외국인 순매수 확인 불가'], warnings: ['실시간 수급을 확인하지 못했습니다.'], matches: [] }),
+  }))
+  render(tree())
+  const panel = await search('외국인 순매수 60일선 위 저변동 10개')
+  await within(panel).findByText('수급 조건 조회 실패')
+  expect(within(panel).queryByRole('region', { name: '조건 일치 종목' })).toBeNull()
+  expect(within(panel).queryByText('검증 안 된 일봉 종목')).toBeNull()
+  expect(within(panel).queryByText('조건 일치 0건')).toBeNull()
+  expect(within(panel).getByText(/실시간 수급을 확인하지 못했습니다/)).toBeTruthy()
+  expect(within(panel).queryByText(/not iterable/)).toBeNull()
+})
+
+it('a mixed query with a flow transport failure never falls back to daily-only matches', async () => {
+  vi.stubGlobal('fetch', routed({
+    translate: translated({ realtime_query: '외국인 순매수' }),
+    screen: screenResponse([engineRow('009999', '검증 안 된 일봉 종목')]),
+    keyword: q => {
+      if (q === '외국인 순매수') throw new Error('수급 연결 실패')
+      return { ...keywordResponse(q), outcome: 'UNSUPPORTED', appliedConditions: [], unsupportedTerms: [], matches: [] }
+    },
+  }))
+  render(tree())
+  const panel = await search('외국인 순매수 60일선 위 저변동 10개')
+  await within(panel).findByText('수급 조건 조회 실패')
+  expect(within(panel).queryByRole('region', { name: '조건 일치 종목' })).toBeNull()
+  expect(within(panel).queryByText('검증 안 된 일봉 종목')).toBeNull()
+})
+
+it('failed risk enrichment keeps the confirmed flow and daily intersection', async () => {
+  vi.stubGlobal('fetch', routed({
+    translate: translated({ realtime_query: '외국인 순매수' }),
+    screen: screenResponse([engineRow('009999', '일봉만 맞는 종목')], ['000001']),
+    keyword: q => q === '외국인 순매수'
+      ? { ...keywordResponse(q, '교집합 검증 종목'), appliedConditions: ['외국인 순매수 > 0'], matches: [{ ...keywordResponse(q, '교집합 검증 종목').matches[0], code: '000001' }] }
+      : { ...keywordResponse(q), outcome: 'UNSUPPORTED', appliedConditions: [], unsupportedTerms: [], matches: [] },
+    risk: () => { throw new Error('일봉 위험 보강 실패') },
+  }))
+  render(tree())
+  const panel = await search('외국인 순매수 60일선 위 저변동 10개')
+  const matches = await within(panel).findByRole('region', { name: '조건 일치 종목' })
+  expect(within(matches).getByText('교집합 검증 종목')).toBeTruthy()
+  expect(within(matches).queryByText('일봉만 맞는 종목')).toBeNull()
+  expect(within(panel).getByText('검색 완료 · 수급과 일봉 조건 결합')).toBeTruthy()
+  expect(within(panel).queryByText('수급 조건 조회 실패')).toBeNull()
+  expect(within(panel).getByText(/위험.*보강.*확인하지 못/)).toBeTruthy()
+})
+
+it('a mixed query preserves daily engine rank and requested top count after intersection', async () => {
+  const strategy = { ...dailyStrategy, top_n: 2 }
+  const liveCodes = ['000003', '000004', '000001', '000002']
+  vi.stubGlobal('fetch', routed({
+    translate: translated({ strategy, realtime_query: '외국인 순매수' }),
+    screen: { ...screenResponse([engineRow('000002', '일봉 순위 1'), { ...engineRow('000001', '일봉 순위 2'), rank: 2 }], ['000004', '000003']), strategy },
+    keyword: q => q === '외국인 순매수'
+      ? { ...keywordResponse(q), appliedConditions: ['외국인 순매수 > 0'], matches: liveCodes.map(code => ({ ...keywordResponse(q).matches[0], code, name: `수급 종목 ${code}` })) }
+      : { ...keywordResponse(q), outcome: 'UNSUPPORTED', appliedConditions: [], unsupportedTerms: [], matches: [] },
+    risk: codes => codes.map(code => riskItem(code, code)),
+  }))
+  render(tree())
+  const panel = await search('외국인 순매수 60일선 위 저변동 2개')
+  await within(panel).findByText('검색 완료 · 수급과 일봉 조건 결합')
+  const matches = within(panel).getByRole('region', { name: '조건 일치 종목' })
+  expect(within(matches).getAllByRole('article').map(article => within(article).getByText(/수급 종목/).textContent))
+    .toEqual(['수급 종목 000002', '수급 종목 000001'])
+})
+
+it('a mixed query labels past performance as daily conditions only rather than combined flow performance', async () => {
+  vi.stubGlobal('fetch', routed({
+    translate: translated({ realtime_query: '외국인 순매수' }),
+    screen: screenResponse([engineRow('009999', '일봉 종목')]),
+    keyword: q => q === '외국인 순매수'
+      ? { ...keywordResponse(q), outcome: 'EMPTY', appliedConditions: ['외국인 순매수 > 0'], matches: [] }
+      : { ...keywordResponse(q), outcome: 'UNSUPPORTED', appliedConditions: [], unsupportedTerms: [], matches: [] },
+  }))
+  render(tree())
+  const panel = await search('외국인 순매수 60일선 위 저변동 10개')
+  await within(panel).findByText('조건 일치 0건')
+  const performance = within(panel).getByRole('region', { name: '조건 과거 성과' })
+  expect(within(performance).getByText('일봉 조건만의 과거 성과')).toBeTruthy()
+  expect(within(performance).getByText('수급 조건을 결합한 성과는 검증하지 않았습니다.')).toBeTruthy()
+  expect(within(performance).getByText('20일선 이격 +0.0% 초과')).toBeTruthy()
+})
+
+it('a keyword-led mixed query also identifies backtest as daily-only performance', async () => {
+  vi.stubGlobal('fetch', routed({
+    translate: translated({ strategy: { ...dailyStrategy, title: '거래량 급증', when: { f: 'volr', op: '>=', v: 2 } },
+      conditions: ['거래량 20일 평균의 2배 이상'], realtime_query: '외국인 순매수' }),
+    keyword: q => ({ ...keywordResponse(q), appliedConditions: ['외국인 순매수 > 0', '거래량 20일 평균의 2배 이상'] }),
+    risk: codes => codes.map(code => riskItem(code, '조건 검증 종목')),
+  }))
+  render(tree())
+  const panel = await search('외국인 순매수 거래량 급증')
+  const performance = await within(panel).findByRole('region', { name: '조건 과거 성과' })
+  expect(within(performance).getByText('일봉 조건만의 과거 성과')).toBeTruthy()
+  expect(within(performance).getByText('수급 조건을 결합한 성과는 검증하지 않았습니다.')).toBeTruthy()
+  expect(within(performance).getByText('거래량 20일 평균의 2배 이상')).toBeTruthy()
 })
 
 it('an engine outage never blocks the live search', async () => {
