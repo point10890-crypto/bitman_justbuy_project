@@ -10,6 +10,30 @@ import java.util.zip.ZipOutputStream;
 import static org.assertj.core.api.Assertions.*;
 
 class SupplyContractDocumentParserTest {
+    @Test void actualOpenDartXmlNamedUtf8HtmlUsesPayloadEncodingDespiteEucKrMeta() throws Exception {
+        byte[] bytes;
+        try(var input=getClass().getResourceAsStream("/research/event/dart-opendart-20261014800068-original.zip")) {bytes=input.readAllBytes();}
+        var parsed=SupplyContractDocumentParser.parse(bytes,"ORIGINAL");
+        assertThat(parsed.customerName()).isEqualTo("롯데건설주식회사");
+        assertThat(parsed.product()).isEqualTo("안양 평촌 터미널 부지 복합개발사업 중 기계설비공사");
+        assertThat(parsed.amountWon()).isEqualByComparingTo("14378000000");
+        assertThat(parsed.recentSalesWon()).isEqualByComparingTo("164457886988");
+        assertThat(parsed.startDate()).isEqualTo(LocalDate.of(2026,10,13));
+        assertThat(parsed.endDate()).isEqualTo(LocalDate.of(2029,11,30));
+        assertThat(parsed.previousAmountWon()).isNull();
+        assertThat(parsed.amendmentStatus()).isEqualTo("ORIGINAL");
+        assertThat(parsed.issues()).isEmpty();
+        assertThat(parsed.evidenceText()).contains("계약상대", "롯데건설주식회사", "14,378,000,000");
+    }
+
+    @Test void malformedXmlDoesNotTriggerGenericHtmlFallbackAndHtmlDtdRemainsRejected() {
+        String malformed="<DOCUMENT><TABLE><TR><TD>계약금액(원)</TD><TD>1000</TD></TABLE></DOCUMENT>";
+        assertThatThrownBy(()->SupplyContractDocumentParser.parse(zip(malformed),"ORIGINAL"))
+            .isInstanceOf(IllegalArgumentException.class);
+        String hostile="<html><!DOCTYPE DOCUMENT [<!ENTITY xxe SYSTEM 'file:///secret'>]><body><table><tr><td>&xxe;</td></tr></table></body></html>";
+        assertThatThrownBy(()->SupplyContractDocumentParser.parse(zip(hostile),"ORIGINAL"))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
     @Test void capturedPublicOriginalRecognizesCumulativeChangedContractDespiteOriginalTitle() throws Exception {
         byte[] bytes;
         try(var input=getClass().getResourceAsStream("/research/event/dart-20261012800721-original.zip")) { bytes=input.readAllBytes(); }

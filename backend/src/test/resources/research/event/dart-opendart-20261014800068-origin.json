@@ -1,0 +1,12 @@
+{
+  "origin": "https://opendart.fss.or.kr/api/document.xml?rcept_no=20261014800068",
+  "viewerUrl": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261014800068",
+  "capturedFileModifiedAt": "2026-10-14T01:24:48.550283+00:00",
+  "sha256": "ffec02464bcd53ac2c54908271d326152b70578268ffe030e19467f73ce857a0",
+  "receiptNo": "20261014800068",
+  "supplierCode": "010400",
+  "supplierName": "우진아이엔에스",
+  "filingDate": "2026-10-14",
+  "format": "Actual OpenDART API ZIP containing .xml-named UTF-8 HTML; meta declares EUC-KR despite UTF-8 payload (unmodified)",
+  "requestRedaction": "Authentication query parameter omitted; captured by existing configured MiniPC runtime, no secret value saved."
+}

@@ -29,10 +29,14 @@ This release measures evidence and future reference-price outcomes; it does not 
 
 Local verification passed before commit:
 
-- Backend: `gradlew test bootJar --no-daemon`, 123 test classes, **1,171 tests: 1,170 passed, zero failures/errors, one existing Windows symlink-privilege skip**. Event/controller tests account for 118 tests. The complete run finished in 1m45s.
+- Backend: `gradlew test bootJar --no-daemon`, 123 test classes, **1,173 tests: 1,172 passed, zero failures/errors, one existing Windows symlink-privilege skip**. Event/controller tests account for 120 tests. The complete run finished in 1m58s after the runtime format correction.
 - Frontend: **24 files / 244 tests passed**, TypeScript and Vite build passed; JS `index-BbECemln.js`, CSS `index-YeJYe1Tn.css`.
 - Exact actual-format KIND regressions: 5 tests passed. Supply graph regression cycles reproduced changed-product/unknown-customer tombstones (16 tests / 2 failures), then late historical re-discovery (17 tests / 1 failure); the final full suite passed all 17.
 - Pipeline recovery: 15 tests passed; Store recovery/capacity: 14 tests passed. No live keys or member databases are fixtures.
 - Independent final review found no remaining release-blocking correctness/security issues. `git diff --check` passed.
 
 Commit/push, MiniPC/Pages deployment and exact live DOM/runtime checks are the remaining final gates. Their evidence will be appended after execution.
+
+## Runtime format correction
+
+The first deployed collection correctly failed closed: all selected OpenDART originals were rejected. A same-MiniPC Java probe confirmed a valid key, successful listings and an actual ZIP with an XML filename containing UTF-8 HTML while declaring EUC-KR. A captured API ZIP was added unchanged; the regression first failed, then verified exact contract/customer/amount/dates after narrow root detection and strict decoding. Genuine XML failures never retry through HTML; DTD/XXE and archive bounds remain enforced. The complete backend suite above was rerun after this correction. Official raw HTML fixtures are marked binary in Git to preserve captured bytes and origin hashes.

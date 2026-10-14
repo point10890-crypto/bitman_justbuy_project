@@ -13,6 +13,7 @@ import java.io.StringReader;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -56,8 +57,11 @@ public final class SupplyContractDocumentParser {
                 String lower=entry.getName().toLowerCase(Locale.ROOT);
                 if(!entry.isDirectory()&&(lower.endsWith(".xml")||lower.endsWith(".html")||lower.endsWith(".htm"))) {
                     xmlEntries++;
-                    if(lower.endsWith(".xml")) collect(output.toByteArray(),fields,evidence);
-                    else collectHtml(output.toByteArray(),fields,evidence);
+                    byte[] document=output.toByteArray();
+                    // OpenDART returns UTF-8 HTML in .xml entries. Route by an anchored root,
+                    // never by catching and downgrading a strict XML/security parsing failure.
+                    if(lower.endsWith(".xml")&&!hasHtmlRoot(document)) collect(document,fields,evidence);
+                    else collectHtml(document,fields,evidence);
                 }
                 input.closeEntry();
             }
@@ -131,10 +135,19 @@ public final class SupplyContractDocumentParser {
     private static final class HtmlTable {
         final List<List<String>> rows=new ArrayList<>();List<String> row;StringBuilder cell;
     }
+    private static boolean hasHtmlRoot(byte[] bytes) {
+        int offset=bytes.length>=3&&(bytes[0]&255)==239&&(bytes[1]&255)==187&&(bytes[2]&255)==191?3:0;
+        String root=new String(bytes,offset,Math.min(bytes.length-offset,1024),StandardCharsets.ISO_8859_1);
+        return Pattern.compile("\\A\\s*(?:<\\?xml\\s[^<>]*\\?>\\s*)?<html(?:\\s|>)",Pattern.CASE_INSENSITIVE).matcher(root).find();
+    }
     private static void collectHtml(byte[] bytes,Map<String,List<Value>> fields,StringBuilder evidence) throws Exception {
         String header=new String(bytes,0,Math.min(bytes.length,1000),StandardCharsets.ISO_8859_1).toLowerCase(Locale.ROOT);
-        Charset charset=header.contains("euc-kr")||header.contains("ks_c_5601")?Charset.forName("MS949"):StandardCharsets.UTF_8;
-        String html=charset.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString();
+        String html;
+        try {html=decode(bytes,StandardCharsets.UTF_8);}
+        catch(CharacterCodingException invalidUtf8) {
+            if(!header.contains("euc-kr")&&!header.contains("ks_c_5601"))throw invalidUtf8;
+            html=decode(bytes,Charset.forName("MS949"));
+        }
         if(Pattern.compile("<!\\s*(?:DOCTYPE|ENTITY)",Pattern.CASE_INSENSITIVE).matcher(html).find())throw new IllegalArgumentException("HTML_DECLARATION_DISABLED");
         var tables=new ArrayDeque<HtmlTable>();var all=new ArrayList<HtmlTable>();
         var documentText=new StringBuilder();
@@ -158,6 +171,10 @@ public final class SupplyContractDocumentParser {
         },true);
         note(documentText.toString(),fields,evidence);
         for(HtmlTable table:all)collectRows(table.rows,fields,evidence);
+    }
+    private static String decode(byte[] bytes,Charset charset) throws CharacterCodingException {
+        return charset.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(bytes)).toString();
     }
     private static void note(String text,Map<String,List<Value>> fields,StringBuilder evidence) {
         String compact=norm(text);
