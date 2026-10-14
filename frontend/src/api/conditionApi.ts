@@ -1,6 +1,16 @@
 import { API_BASE } from './config'
 import { failWithApiError } from './subscriptionGate'
 
+export interface ConditionCheck {
+  id: string
+  category: 'liquidity' | 'technical' | 'catalyst' | 'fundamental' | 'supply'
+  criterion: string
+  status: 'PASS' | 'FAIL' | 'UNKNOWN'
+  observedValue: string
+  source: string
+  observedAt?: string | null
+}
+
 export interface ConditionSignal {
   section: string
   mode: string
@@ -21,6 +31,7 @@ export interface ConditionSignal {
   riskFlags: string[]
   invalidation: string
   capturedAt: string
+  conditionChecks?: ConditionCheck[]
 }
 
 export interface ConditionSectionResponse {

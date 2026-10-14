@@ -1,6 +1,7 @@
 package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.dto.condition.ConditionSignalDto;
+import com.bitman.justbuy.dto.condition.ConditionCheck;
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.StockPick;
 import com.bitman.justbuy.util.KoreanMarketCalendar;
@@ -93,7 +94,7 @@ public class ConditionLiquidityService {
         LocalTime time = date.equals(now.toLocalDate()) ? now.toLocalTime() : LocalTime.of(15, 30);
         var result = ConditionLiquidityPolicy.evaluate(mode, amounts.today(), amounts.average20(), time);
         return new ConditionLiquidityPolicy.Result(result.eligible(), result.bonus(), result.reason()
-            + " · KIS 실제 일봉 거래대금(KRW) " + amounts.date() + " · 조회 " + amounts.fetchedAt().atZone(KST));
+            + " · KIS 실제 일봉 거래대금(KRW) " + amounts.date() + " · 조회 " + amounts.fetchedAt().atZone(KST), amounts.fetchedAt().toString());
     }
 
     /** Keep original rule/AI scores; use the measured turnover bonus only for ordering, once per pass. */
@@ -116,10 +117,17 @@ public class ConditionLiquidityService {
             if (s.evidence() != null) s.evidence().stream().filter(e -> !e.startsWith(EVIDENCE_PREFIX)).forEach(evidence::add);
             evidence.add(EVIDENCE_PREFIX + item.result().reason());
             evidence.add(EVIDENCE_PREFIX + "동일 시간대 20일 평균·눌림 대비 증가·업종/테마 순위·마지막 30분 비교 미확인: 추가 가점 없음");
+            var rule = ConditionLiquidityPolicy.RULES.get(mode);
+            List<ConditionCheck> checks = new ArrayList<>();
+            checks.add(new ConditionCheck("liquidity.0", "liquidity",
+                "누적 " + rule.minimumEok() + "억 이상" + (rule.average20Eok() > 0 ? " · 직전 20거래일 평균 " + rule.average20Eok() + "억 이상" : "")
+                    + " (장초반 완화 적용 시 실제 최소값은 관측값에 표시)",
+                "PASS", item.result().reason(), "KIS 일봉 acml_tr_pbmn · 원(KRW)", item.result().observedAt()));
+            s.conditionChecks().stream().filter(c -> !"liquidity".equals(c.category())).forEach(checks::add);
             result.add(new ConditionSignalDto(s.section(), s.mode(), result.size() + 1, s.stockName(), s.stockCode(),
                 s.capturePrice(), s.currentPrice(), s.highPrice(), s.stopLoss(), s.maxReturnPct(), s.status(),
                 s.ruleScore(), s.aiScore(), s.finalScore(), s.summary(), List.copyOf(evidence), s.riskFlags(),
-                s.invalidation(), s.capturedAt()));
+                s.invalidation(), s.capturedAt(), checks));
         }
         return List.copyOf(result);
     }

@@ -368,7 +368,7 @@ public class ShortTermRealtimeScanner {
             List.copyOf(evidence),
             List.copyOf(riskFlags),
             invalidation,
-            signal.capturedAt()
+            signal.capturedAt(), signal.conditionChecks()
         );
     }
 
@@ -393,7 +393,7 @@ public class ShortTermRealtimeScanner {
             signal.evidence(),
             signal.riskFlags(),
             signal.invalidation(),
-            signal.capturedAt()
+            signal.capturedAt(), signal.conditionChecks()
         );
     }
 
@@ -578,7 +578,9 @@ public class ShortTermRealtimeScanner {
                 List.copyOf(evidence),
                 List.copyOf(riskFlags),
                 "상승률 둔화, 거래량 순위 이탈, 고점 대비 급락",
-                capture.capturedAt()
+                capture.capturedAt(),
+                com.bitman.justbuy.dto.condition.ConditionCheck.withDailyChangeText("BREAKOUT", changeRateText,
+                    "KIS 당일 등락률", java.time.Instant.now().toString())
             );
         }
 

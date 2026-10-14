@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { Fragment, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAnalysis, type AnalysisResult } from '../hooks/useAnalysis'
 import { getStoredToken, useAuth } from '../contexts/AuthContext'
 import { useMainConditions } from '../hooks/useMainConditions'
-import { fetchConditionSection, type ConditionSectionResponse } from '../api/conditionApi'
+import { fetchConditionSection, type ConditionSectionResponse, type ConditionSignal } from '../api/conditionApi'
+import { DetectionEvidence } from '../components/app/DetectionEvidence'
 import { AgentMascot } from '../components/app/AgentMascot'
 import { KeywordSearchPanel } from '../components/app/KeywordSearchPanel'
 import { useSearchUpgrade } from '../hooks/useSearchUpgrade'
@@ -19,7 +20,7 @@ type Section = {
   query?: string
   scheduleLabel?: string
   columns: string[]
-  rows: Array<{ name: string; a: string; b: string; c: string; code?: string; summary?: string; capturedAt?: string; captureTime?: string }>
+  rows: Array<{ name: string; a: string; b: string; c: string; code?: string; summary?: string; capturedAt?: string; captureTime?: string; signal?: ConditionSignal }>
 }
 
 const sections: Section[] = [
@@ -100,6 +101,7 @@ function rowsFromCondition(section: ConditionSectionResponse | undefined, fallba
   const engine = isEngineSection(section)
   return section.signals.slice(0, 3).map(signal => ({
     name: signal.stockName,
+    signal,
     code: signal.stockCode,
     a: signal.capturePrice || signal.currentPrice || '-',
     b: !engine && usesRiskPriceColumns(section) ? signal.highPrice || '-' : signal.currentPrice || '-',
@@ -236,6 +238,7 @@ function ResultPanel({
 }
 
 export default function HomePage() {
+  const [expandedEvidence, setExpandedEvidence] = useState<string | null>(null)
   const navigate = useNavigate()
   const { user } = useAuth()
   const { result, loading, error, analyze, clear } = useAnalysis()
@@ -526,23 +529,31 @@ export default function HomePage() {
               {section.columns.map(column => <span key={column}>{column}</span>)}
             </div>
             {section.rows.map((row, index) => (
+              <Fragment key={`${section.id}-${row.code || row.name}`}>
               <button
                 className="rank-table-row"
                 type="button"
                 key={`${section.id}-${row.name}`}
-                onClick={() => section.mode && runAnalysis(`${row.name} ${section.title} 상세 분석`, section.mode === 'JONGGA_V2' ? '분석해줘' : section.mode)}
+                aria-expanded={!locked && expandedEvidence === `${section.id}-${row.code || row.name}`}
+                onClick={() => locked
+                  ? section.mode && runAnalysis(`${row.name} ${section.title} 상세 분석`, section.mode === 'JONGGA_V2' ? '분석해줘' : section.mode)
+                  : setExpandedEvidence(previous => previous === `${section.id}-${row.code || row.name}` ? null : `${section.id}-${row.code || row.name}`)}
               >
                 <span className="rank-name">
                   <strong>{index + 1}</strong>
                   <span className="rank-name-copy">
                     <span>{locked ? maskValue(row.name) : row.name}</span>
                     {row.captureTime && <em>포착 {row.captureTime}</em>}
+                    <span className="rank-evidence-hint">검출 근거 {expandedEvidence === `${section.id}-${row.code || row.name}` ? '접기' : '펼치기'}</span>
                   </span>
                 </span>
                 <span>{locked ? maskValue(row.a) : row.a}</span>
                 <span>{locked ? maskValue(row.b) : row.b}</span>
                 <span className={row.c.startsWith('+') ? 'profit-text' : ''}>{locked ? maskValue(row.c) : row.c}</span>
               </button>
+              {!locked && row.signal && expandedEvidence === `${section.id}-${row.code || row.name}` &&
+                <DetectionEvidence signal={row.signal} onAnalyze={() => section.mode && runAnalysis(`${row.name} ${section.title} 상세 분석`, section.mode === 'JONGGA_V2' ? '분석해줘' : section.mode)} />}
+              </Fragment>
             ))}
             {section.rows.length === 0 && (
               <div className="rank-table-empty">

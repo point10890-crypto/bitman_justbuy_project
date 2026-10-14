@@ -9,7 +9,9 @@ public final class ConditionLiquidityPolicy {
     private ConditionLiquidityPolicy() {}
     private static final BigDecimal EOK = BigDecimal.valueOf(100_000_000);
     public record Rule(long minimumEok, long average20Eok, long preferredEok, long strongestEok) {}
-    public record Result(boolean eligible, int bonus, String reason) {}
+    public record Result(boolean eligible, int bonus, String reason, String observedAt) {
+        public Result(boolean eligible, int bonus, String reason) { this(eligible, bonus, reason, null); }
+    }
     public static final Map<String, Rule> RULES = Map.of(
         "BREAKOUT", new Rule(100, 0, 300, 0),
         "REVERSAL_EDGE", new Rule(0, 50, 100, 0),

@@ -12,6 +12,27 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class ConditionLiquidityServiceTest {
+    @Test void serializedEvidenceDoesNotPromoteGenericOrAiTextToPassedRules() throws Exception {
+        stub(daily(100_000_000_000L, 30_000_000_000L, 20));
+        var signal = new ConditionSignalDto("leaders", "FLOW_LEADER", 1, "삼성전자", "005930",
+            "100", "100", "110", "90", "10%", "후보", 80, 90, 85,
+            "AI says all rules passed", List.of("정배열", "외국인/기관 수급"), List.of(), "", now.toString());
+        var filtered = service.filterSignals("FLOW_LEADER", List.of(signal), 3).getFirst();
+        var tree = mapper.valueToTree(filtered);
+        assertThat(tree.path("conditionChecks").isArray()).isTrue();
+        var checks = tree.path("conditionChecks");
+        assertThat(checks.findValuesAsText("status")).contains("PASS", "UNKNOWN");
+        assertThat(checks.findValuesAsText("category")).contains("liquidity", "technical", "catalyst", "fundamental", "supply");
+        long passed = java.util.stream.StreamSupport.stream(checks.spliterator(), false)
+            .filter(c -> "PASS".equals(c.path("status").asText())).count();
+        assertThat(passed).isEqualTo(1);
+        var turnover = checks.get(0);
+        assertThat(turnover.path("observedValue").asText()).contains("1000억");
+        assertThat(turnover.path("source").asText()).contains("KIS");
+        assertThat(turnover.path("observedAt").asText()).isEqualTo(now.toString());
+        assertThat(mapper.valueToTree(service.filterSignals("FLOW_LEADER", List.of(filtered), 3).getFirst())
+            .path("conditionChecks").size()).isEqualTo(checks.size());
+    }
     final ObjectMapper mapper = new ObjectMapper();
     final Instant now = Instant.parse("2026-10-14T03:00:00Z");
     final KisApiService kis = mock(KisApiService.class);

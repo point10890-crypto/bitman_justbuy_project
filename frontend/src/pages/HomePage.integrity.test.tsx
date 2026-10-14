@@ -32,6 +32,18 @@ function feed(name: string, asOf: string): MainConditionResponse {
   }
 }
 const tree = () => <MemoryRouter><HomePage /></MemoryRouter>
+it('opens stored detection evidence without starting another AI analysis', () => {
+  render(tree())
+  fireEvent.click(screen.getByRole('button', { name: /MAIN_0850/ }))
+  expect(analyzeMock).not.toHaveBeenCalled()
+  const panel = within(screen.getByRole('region', { name: 'MAIN_0850 검출 근거' }))
+  for (const category of ['거래대금', '기술적 분석', '재료', '기본적 분석', '수급']) {
+    expect(panel.getByRole('heading', { name: category })).toBeTruthy()
+  }
+  expect(panel.getAllByText('미확인').length).toBeGreaterThan(0)
+  fireEvent.click(panel.getByRole('button', { name: '추가 AI 분석' }))
+  expect(analyzeMock).toHaveBeenCalledTimes(1)
+})
 beforeEach(() => {
   vi.clearAllMocks()
   vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-12T11:00:00+09:00'))

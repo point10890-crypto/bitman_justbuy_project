@@ -1,0 +1,15 @@
+.detection-evidence { padding: 16px; margin: 0 0 12px; border: 1px solid #47515e; border-radius: 12px; background: #111820; color: #e8edf4; font-size: 13px; overflow-wrap: anywhere; }
+.detection-evidence header { display: grid; gap: 6px; }
+.detection-evidence header > span, .detection-evidence small { color: #a9b7c8; font-size: 11px; }
+.detection-evidence p { margin: 8px 0; line-height: 1.6; white-space: pre-line; }
+.detection-category h3 { font-size: 14px; color: #f4d65c; margin: 18px 0 8px; }
+.detection-check { padding: 10px 0; border-top: 1px solid #303b49; }
+.detection-check > div { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.check-status { display: inline-block; flex-shrink: 0; border-radius: 5px; padding: 2px 7px; font-size: 11px; background: #303b49; color: #dbe3ee; }
+.check-PASS { color: #a8ebc5; background: #174231; }
+.check-FAIL { color: #ffc3b5; background: #542b27; }
+.detection-commentary { margin-top: 14px; border-top: 1px solid #47515e; padding-top: 12px; }
+.detection-commentary summary { cursor: pointer; }
+.detection-evidence ul { padding-left: 18px; line-height: 1.65; }
+.detection-risks { margin-top: 14px; color: #e8c8a3; }
+.rank-evidence-hint { display: block; color: #b9c6d7; font-size: 10px; font-weight: 400; margin-top: 3px; }

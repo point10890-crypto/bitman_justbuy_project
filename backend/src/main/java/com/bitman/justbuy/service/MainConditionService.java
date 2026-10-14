@@ -596,7 +596,11 @@ public class MainConditionService {
             closingBetEvidence(signal),
             List.of("종가 변동성", "익일 갭 리스크", "거래대금 급감"),
             "종가 기준 진입가 이탈, 거래대금 둔화, 뉴스 모멘텀 약화",
-            closingBetAsOf(signal.path("signal_date").asText(""))
+            closingBetAsOf(signal.path("signal_date").asText("")),
+            com.bitman.justbuy.dto.condition.ConditionCheck.withDailyChange("JONGGA_V2",
+                signal.path("change_pct").isNumber() ? signal.path("change_pct").asDouble() : null,
+                "종가매매 V2 저장 시세",
+                signal.path("signal_date").asText("").isBlank() ? null : closingBetAsOf(signal.path("signal_date").asText()))
         );
     }
 
