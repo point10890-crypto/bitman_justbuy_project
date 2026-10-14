@@ -127,7 +127,9 @@ public class ConditionEngineSectionService {
 
     private ConditionSectionResponse toResponse(ConditionSection section, JsonNode node) {
         String status = node.path("status").asText("SIGNAL");
-        String asOf = node.path("as_of").asText("") + "T15:30:00+09:00";
+        // 카드의 기준 시각 = 마지막 검색 시각(실시간 검색기) 또는 신호 종가(종가 기준 목록)
+        String asOf = node.hasNonNull("observed_at") ? node.path("observed_at").asText()
+            : node.path("as_of").asText("") + "T15:30:00+09:00";
         List<ConditionSignalDto> signals = new ArrayList<>();
         int rank = 0;
         for (JsonNode row : node.path("rows")) {
@@ -150,58 +152,32 @@ public class ConditionEngineSectionService {
         String invalidation = design.path("exit").asText("") + (design.path("caution").asText("").isBlank()
             ? "" : " · " + design.path("caution").asText(""));
 
-        // 4칸 카드의 칸 의미 (HomePage sections.columns 와 짝)
-        String a = ref, b, c, high = "-", stop = "-", status;
-        switch (section) {
-            case SHORT_TERM -> {           // 종목명 | 전일 종가 | 현재가 | 시가 갭
-                b = live;
-                c = pct(row.path("open_gap"));
-                status = switch (row.path("trigger").asText("")) {
-                    case "TRIGGERED" -> "시가 갭 하락 · 매수 조건 충족";
-                    case "NOT_TRIGGERED" -> "시가 조건 미충족";
-                    default -> "09:00 시가 갭 하락 시 매수";
-                };
-            }
-            case SWING -> {                // 종목명 | 기준가 | 눌림 폭 | 보유
-                b = live;
-                high = "고점 대비 " + pct(row.path("pullback"));
-                stop = "10거래일";
-                c = "-";
-                status = "주도주 눌림";
-            }
-            case LEADERS -> {              // 종목명 | 기준가 | 현재가 | 상대강도
-                b = live;
-                c = row.hasNonNull("rs_top_pct") ? "상위 " + row.path("rs_top_pct").asInt() + "%" : "-";
-                status = "주도주";
-            }
-            case THEMES -> {               // 대장주 | 종가 | 당일 | 테마
-                b = pct(row.path("r1"));
-                c = row.path("theme").asText("-") + " · 동반 " + Math.round(row.path("breadth").asDouble() * 100) + "%";
-                status = "대장주 · 추격 주의";
-            }
-            case CLOSING_BET -> {          // 종목명 | 진입가 | 청산 | 테마
-                b = live;
-                high = "다음 날 종가";
-                stop = row.path("theme").asText("-");
-                c = "-";
-                status = "테마 후발주";
-            }
-            default -> { b = live; c = "-"; status = ""; }
-        }
+        // 조건검색기 카드: 종목명(포착 시각) | 포착가 | 현재가 | 포착 후 등락률
+        String a = ref, b = live, c = pct(row.path("since_capture"));
+        String status = switch (section) {
+            case SHORT_TERM -> "시가 갭 " + pct(row.path("open_gap")) + " · 과매도 반등 자리";
+            case SWING -> "주도주 눌림 " + pct(row.path("pullback"));
+            case LEADERS -> row.hasNonNull("rs_top_pct") ? "상대강도 상위 " + row.path("rs_top_pct").asInt() + "%" : "주도주";
+            case THEMES -> row.path("theme").asText("") + " 테마 대장주 · 추격 주의";
+            case CLOSING_BET -> row.path("theme").asText("") + " 후발주 · 종가 매수";
+            default -> "";
+        };
+        // 실시간 검색 결과면 행마다 편입 시각, 아니면(종가 기준 목록) 섹션 기준 시각
+        String capturedAt = row.hasNonNull("captured_at") ? row.path("captured_at").asText() : asOf;
         return new ConditionSignalDto(
             section.responseKey(), LEDGER_MODE.getOrDefault(section, section.legacyMode()), rank,
             row.path("name").asText(row.path("code").asText()), row.path("code").asText(),
-            a, b, high, stop, c, grade.isBlank() ? status : status + " · 위험 " + grade,
-            0, 0, 0, String.join(" · ", reasons), reasons, flags, invalidation, asOf);
+            a, b, b, c, c, grade.isBlank() ? status : status + " · 위험 " + grade,
+            0, 0, 0, String.join(" · ", reasons), reasons, flags, invalidation, capturedAt);
     }
 
-    /** 카드에 보인 매수 대상만 원장에 기록한다. 단타는 시가 조건이 충족된 종목만. */
+    /** 검색기에 포착된 매수 대상만 원장에 기록한다. 종가 기준 목록의 단타 관찰 종목은 아직 매수 대상이 아니다. */
     private void record(Map<ConditionSection, ConditionSectionResponse> parsed) {
         if (trackRecords == null) return;
         for (Map.Entry<ConditionSection, String> e : LEDGER_MODE.entrySet()) {
             ConditionSectionResponse response = parsed.get(e.getKey());
             if (response == null || response.signals().isEmpty()) continue;
-            if (e.getKey() == ConditionSection.SHORT_TERM && !"ENGINE_TRIGGERED".equals(response.sourceStatus())) continue;
+            if (e.getKey() == ConditionSection.SHORT_TERM && "ENGINE_WATCHLIST".equals(response.sourceStatus())) continue;
             try {
                 LocalDate signalDate = LocalDate.parse(response.asOf().substring(0, 10));
                 trackRecords.recordEngineSignals(e.getValue(), signalDate, response.signals());

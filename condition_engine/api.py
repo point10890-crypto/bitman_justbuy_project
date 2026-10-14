@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from . import config, dsl
 from .agent import build_translator
 from .detectors import SectionDetectors
+from .scanner import SectionScanner
 from .engine import Engine
 from .features import catalogue
 from .ledger import Ledger
@@ -43,7 +44,9 @@ class EngineService:
         self.error: str | None = None
         self.loaded_at: float | None = time.time() if engine else None
         self.update_job: dict = {"state": "idle"}
-        self.near_close_job: dict = {"state": "idle"}
+        self.scanner: SectionScanner | None = None
+        self.autoscan = False                     # the served app turns this on; tests do not
+        self._stop = threading.Event()
         self._detectors: SectionDetectors | None = None
         self._sections_cache: tuple[float, str, dict] | None = None
         self._lock = threading.Lock()
@@ -61,7 +64,14 @@ class EngineService:
                 log.info("engine ready in %.1fs (%s)", self.loaded_at - started, self.engine.data_version)
             except Exception as exc:
                 self.state, self.error = "error", f"{type(exc).__name__}: {exc}"
-                log.error("engine load failed\n%s", traceback.format_exc())
+                log.error("engine load failed: %s", traceback.format_exc())
+                return
+        # the screener needs a ready engine; a screener failure must not take the engine down
+        if self.autoscan:
+            try:
+                self.start_scanner()
+            except Exception:
+                log.error("screener start failed: %s", traceback.format_exc())
 
     def load_async(self) -> None:
         threading.Thread(target=self.load, daemon=True).start()
@@ -79,52 +89,33 @@ class EngineService:
         return self._detectors
 
     def sections(self, ttl: float = 60.0) -> dict:
+        """The home sections: the intraday screener's captures; the end-of-day list as fallback."""
         det = self.detectors()
-        self.maybe_start_near_close(det)
-        key = f"{det.eng.data_version}|{(det.near_close or {}).get('computed_at')}"
+        scanner = self.scanner
+        if scanner is not None and scanner.det is not det:
+            scanner.det = det                       # the engine reloaded after the daily update
         cached = self._sections_cache
+        key = f"{det.eng.data_version}|{scanner.last_scan.get('at') if scanner else None}"
         if cached and cached[1] == key and time.time() - cached[0] < ttl:
             return cached[2]
-        payload = det.all_sections()
-        payload["near_close"] = {k: v for k, v in self.near_close_job.items() if k != "report"}
+        fallback = det.all_sections()
+        if scanner is not None and scanner.day:
+            live = scanner.sections()
+            sections = {k: (live[k] if live[k]["rows"] or scanner.day >= fallback["as_of"] else fallback["sections"][k])
+                        for k in live}
+        else:
+            sections = fallback["sections"]
+        payload = {**fallback, "sections": sections,
+                   "scanner": scanner.last_scan if scanner is not None else {"state": "off"}}
         self._sections_cache = (time.time(), key, payload)
         return payload
 
-    def maybe_start_near_close(self, det: SectionDetectors) -> None:
-        """15:00~15:40 on a session day: build the near-close snapshot once."""
-        now = det.clock()
-        if not ((15, 0) <= (now.hour, now.minute) < (15, 40)) or now.weekday() >= 5:
+    def start_scanner(self) -> None:
+        """Intraday condition screener: re-scan the market every few minutes during the session."""
+        if self.scanner is not None:
             return
-        if now.date() <= det.eng.panel.dates[-1].date():
-            return
-        snap = det.near_close
-        if (snap and snap.get("date") == now.date()) or self.near_close_job.get("state") == "running":
-            return
-        job = self.near_close_job
-        if job.get("date") == str(now.date()) and job.get("state") == "error" and time.time() - job.get("finished", 0) < 300:
-            return                                   # retry a failed snapshot at most every 5 minutes
-        self.start_near_close(det)
-
-    def start_near_close(self, det: SectionDetectors | None = None) -> dict:
-        det = det or self.detectors()
-        if self.near_close_job.get("state") == "running":
-            return self.near_close_job
-        today = str(det.clock().date())
-        self.near_close_job = {"state": "running", "date": today, "started": time.time()}
-
-        def work():
-            try:
-                report = det.compute_near_close()
-                self.near_close_job = {"state": report.get("state", "done"), "date": today, "report": report,
-                                       "finished": time.time()}
-            except Exception as exc:
-                log.error("near-close failed: %s", traceback.format_exc())
-                self.near_close_job = {"state": "error", "date": today, "error": f"{type(exc).__name__}: {exc}",
-                                       "finished": time.time()}
-            self._sections_cache = None
-
-        threading.Thread(target=work, daemon=True).start()
-        return self.near_close_job
+        self.scanner = SectionScanner(self.store, self.detectors())
+        threading.Thread(target=self.scanner.run_forever, args=(self._stop,), daemon=True).start()
 
     def run_update(self) -> None:
         self.update_job = {"state": "running", "started": time.time()}
@@ -161,8 +152,10 @@ def create_app(service: EngineService | None = None, autoload: bool = True) -> F
     @asynccontextmanager
     async def lifespan(_app):
         if autoload and svc.state == "idle":
+            svc.autoscan = True
             svc.load_async()          # load in the background; endpoints answer 503 until ready
         yield
+        svc._stop.set()
 
     app = FastAPI(title="BitMan Condition Engine", version="0.1.0", lifespan=lifespan)
     app.state.service = svc
@@ -237,13 +230,11 @@ def create_app(service: EngineService | None = None, autoload: bool = True) -> F
     def sections():
         return svc.sections()
 
-    @app.post("/engine/admin/near-close")
-    def near_close():
-        return svc.start_near_close()
-
-    @app.get("/engine/admin/near-close")
-    def near_close_status():
-        return svc.near_close_job
+    @app.post("/engine/admin/scan")
+    def scan_now():
+        if svc.scanner is None:
+            raise HTTPException(409, "scanner is not running")
+        return svc.scanner.scan()
 
     @app.get("/engine/regime")
     def regime():

@@ -11,8 +11,10 @@ Timing matters as much as the rule:
   themes            the sectors that ignited (breadth + money); their money leader is shown
                     as information — chasing it lost money in every research window
   closing_bet       laggards of an ignited sector, bought at the close and sold at the next
-                    close; computed from a near-close snapshot (~15:05) so the close can
-                    actually be bought
+                    close
+
+These masks run on a final-close panel here (the end-of-day list) and on a live panel in
+scanner.py, the intraday condition screener that the home cards show.
 """
 from __future__ import annotations
 
@@ -27,7 +29,6 @@ import pandas as pd
 
 from . import config
 from .engine import Engine
-from .panel import build_panel
 from .store import BarStore, fdr_fetch, now_kst
 
 log = logging.getLogger(__name__)
@@ -199,8 +200,6 @@ class SectionDetectors:
         self.clock = clock
         self.x = section_features(engine)
         self.leaders = leader_mask(engine, self.x)
-        self.near_close: dict | None = None          # {"date": date, "themes": ..., "closing_bet": ...}
-        self._near_lock = threading.Lock()
 
     # ---- helpers
     def _t(self) -> pd.Timestamp:
@@ -275,7 +274,9 @@ class SectionDetectors:
                 f"RSI(2) {x['rsi2'].at[t, code]:.0f} — 단기 과매도",
                 "60일선 위 · 60일선 상승 중",
                 f"전일 등락 {_fmt_pct(eng.feats['r1'].at[t, code])}",
-            ], risk, open_gap=gap, live_price=bar["close"] if bar else None, trigger=state))
+            ], risk, open_gap=gap, open_price=bar["open"] if bar else None,
+                since_open=(bar["close"] / bar["open"] - 1) if bar and bar.get("open") else None,
+                live_price=bar["close"] if bar else None, trigger=state))
         triggered = [r for r in rows if r["trigger"] == "TRIGGERED"]
         if in_session and live:
             status = "TRIGGERED" if triggered else "NO_TRIGGER"
@@ -283,7 +284,9 @@ class SectionDetectors:
         else:
             status = "WATCHLIST"
             shown = rows[:TOP_N]
-        return self._section("short_term", t, shown, status=status, watchlist=len(rows))
+        # the buy decision is made at today's open, not at the signal close
+        observed = f"{now.date()}T09:00:00+09:00" if status != "WATCHLIST" else None
+        return self._section("short_term", t, shown, status=status, watchlist=len(rows), observed_at=observed)
 
     # ---- themes and closing bet (near-close snapshot when available)
     def _theme_rows(self, eng: Engine, x: dict, t) -> tuple[list[dict], list[dict]]:
@@ -311,9 +314,6 @@ class SectionDetectors:
         return theme_rows, lag_rows
 
     def themes_and_closing(self) -> tuple[dict, dict]:
-        snap = self.near_close
-        if snap is not None and snap.get("date") == self.clock().date() and snap.get("themes"):
-            return snap["themes"], snap["closing_bet"]
         return self._themes_and_closing(self.eng, self.x, self._t(), status="SIGNAL")
 
     def _themes_and_closing(self, eng: Engine, x: dict, t, status: str) -> tuple[dict, dict]:
@@ -337,39 +337,13 @@ class SectionDetectors:
         return (self._section("themes", t, themes, status=status),
                 self._section("closing_bet", t, closing, status=status))
 
-    def compute_near_close(self, today: date | None = None) -> dict:
-        """Rebuild the panel with today's partial bars (~15:05) and recompute themes / closing bet."""
-        with self._near_lock:
-            today = today or self.clock().date()
-            t_last = self._t()
-            if today <= t_last.date():
-                return {"state": "skipped", "reason": "today's session is already final"}
-            codes = list(self.eng.universe.columns[self.eng.universe.loc[t_last].fillna(False).astype(bool)])
-            started = time.time()
-            bars = self.live.get(codes, today)
-            if len(bars) < max(50, len(codes) // 2):
-                return {"state": "error", "reason": f"live bars {len(bars)}/{len(codes)}"}
-            rows = pd.DataFrame([{"code": c, "date": pd.Timestamp(today), **b} for c, b in bars.items()])
-            rows["as_of"] = pd.Timestamp(self.clock())
-            rows["final"] = True                 # treated as final for this temporary panel only
-            base = self.store.final_bars() if self.store is not None else None
-            if base is None:
-                return {"state": "error", "reason": "no store"}
-            merged = pd.concat([base, rows[base.columns]], ignore_index=True)
-            panel = build_panel(merged, self.store.load_listing(), self.store.load_names())
-            eng = Engine(panel)
-            x = section_features(eng)
-            t = eng.panel.dates[-1]
-            themes, closing = self._themes_and_closing(eng, x, t, status="NEAR_CLOSE")
-            self.near_close = {"date": today, "themes": themes, "closing_bet": closing,
-                               "computed_at": self.clock().isoformat(), "bars": len(bars)}
-            return {"state": "done", "bars": len(bars), "seconds": round(time.time() - started, 1),
-                    "themes": len(themes["rows"]), "closing_bet": len(closing["rows"])}
-
     # ---- assembly
-    def _section(self, key: str, t, rows: list[dict], status: str, **extra) -> dict:
-        return {"key": key, **DESIGNS[key], "as_of": str(pd.Timestamp(t).date()), "status": status,
-                "rows": rows, **extra}
+    def _section(self, key: str, t, rows: list[dict], status: str, observed_at: str | None = None, **extra) -> dict:
+        """`as_of` is the signal session; `observed_at` is when the card's decision was made
+        (the signal close, today's 09:00 open for short-term, or the near-close snapshot time)."""
+        day = str(pd.Timestamp(t).date())
+        return {"key": key, **DESIGNS[key], "as_of": day, "observed_at": observed_at or f"{day}T15:30:00+09:00",
+                "status": status, "rows": rows, **extra}
 
     def _in_session(self) -> bool:
         now = self.clock()

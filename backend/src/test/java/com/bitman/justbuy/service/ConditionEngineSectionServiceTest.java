@@ -10,14 +10,13 @@ import org.junit.jupiter.api.Test;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/** 엔진의 실제 /engine/sections 응답(2026-10-14 장중 캡처)으로 검증한다. */
+/** 엔진의 실제 /engine/sections 응답(2026-10-14 14:57 실시간 조건검색기 캡처)으로 검증한다. */
 class ConditionEngineSectionServiceTest {
     final ObjectMapper mapper = new ObjectMapper();
 
@@ -28,27 +27,25 @@ class ConditionEngineSectionServiceTest {
     }
 
     @Test
-    void realEngineResponseBecomesFiveCardsInTheExistingFormat() throws Exception {
+    void realScreenerResponseBecomesFiveScreenerCards() {
         var service = new ConditionEngineSectionService(mapper, this::sampleUnchecked);
         ConditionSectionResponse leaders = service.section(ConditionSection.LEADERS).orElseThrow();
-        assertThat(leaders.sourceStatus()).isEqualTo("ENGINE_SIGNAL");
+        assertThat(leaders.sourceStatus()).isEqualTo("ENGINE_LIVE_SCAN");
         assertThat(leaders.slug()).isEqualTo("leaders");
         assertThat(leaders.signals()).isNotEmpty();
         ConditionSignalDto first = leaders.signals().get(0);
         assertThat(first.stockCode()).matches("\\d{6}");
-        assertThat(first.capturePrice()).matches("[0-9,]+");                 // 기준가
-        assertThat(first.maxReturnPct()).startsWith("상위 ");                   // 상대강도 칸
+        assertThat(first.capturePrice()).matches("[0-9,]+");                 // 포착가
+        assertThat(first.currentPrice()).matches("[0-9,]+");                 // 현재가
+        assertThat(first.maxReturnPct()).matches("[+-]\\d+\\.\\d%");          // 포착 후 등락률
+        assertThat(first.capturedAt()).startsWith("2026-10-14T14:57");       // 편입 시각
         assertThat(first.evidence()).isNotEmpty();
         assertThat(first.invalidation()).contains("20거래일");
 
-        ConditionSectionResponse shortTerm = service.section(ConditionSection.SHORT_TERM).orElseThrow();
-        assertThat(shortTerm.sourceStatus()).isEqualTo("ENGINE_TRIGGERED");
-        assertThat(shortTerm.signals()).allSatisfy(s -> assertThat(s.maxReturnPct()).matches("[+-]\\d+\\.\\d%"));
-
-        ConditionSectionResponse themes = service.section(ConditionSection.THEMES).orElseThrow();
-        assertThat(themes.sourceStatus()).isEqualTo("ENGINE_NEAR_CLOSE");
-        assertThat(themes.signals()).allSatisfy(s -> assertThat(s.status()).contains("추격 주의"));
-
+        assertThat(service.section(ConditionSection.SHORT_TERM).orElseThrow().signals())
+            .isNotEmpty().allSatisfy(s -> assertThat(s.status()).contains("시가 갭"));
+        assertThat(service.section(ConditionSection.THEMES).orElseThrow().signals())
+            .allSatisfy(s -> assertThat(s.status()).contains("추격 주의"));
         assertThat(service.section(ConditionSection.SWING)).isPresent();
         assertThat(service.section(ConditionSection.CLOSING_BET)).isPresent();
         assertThat(service.section(ConditionSection.ALERTS)).isEmpty();
@@ -71,17 +68,17 @@ class ConditionEngineSectionServiceTest {
     }
 
     @Test
-    void onlyBuyTargetsAreRecordedAndShortTermOnlyOnceTriggered() throws Exception {
+    void capturedBuyTargetsAreRecordedButNotThemeLeadersOrAWatchlist() throws Exception {
         TrackRecordService ledger = mock(TrackRecordService.class);
         var service = new ConditionEngineSectionService(mapper, this::sampleUnchecked);
         service.configureTrackRecords(ledger);
         service.section(ConditionSection.LEADERS);
-        verify(ledger).recordEngineSignals(eq("ENGINE_LEADERS"), any(LocalDate.class), anyList());
+        verify(ledger).recordEngineSignals(eq("ENGINE_LEADERS"), eq(LocalDate.of(2026, 10, 14)), anyList());
         verify(ledger).recordEngineSignals(eq("ENGINE_SWING"), any(LocalDate.class), anyList());
         verify(ledger).recordEngineSignals(eq("ENGINE_SHORT_TERM"), any(LocalDate.class), anyList());
         verify(ledger, never()).recordEngineSignals(eq("CATALYST_BURST"), any(), anyList());   // 테마 대장주는 기록 안 함
 
-        // the same sections before the open: the short-term watchlist is not a buy
+        // the end-of-day fallback list: short-term names are only a watchlist, not a buy
         ObjectNode root = (ObjectNode) mapper.readTree(sample());
         ((ObjectNode) root.path("sections").path("short_term")).put("status", "WATCHLIST");
         TrackRecordService ledger2 = mock(TrackRecordService.class);
@@ -96,7 +93,7 @@ class ConditionEngineSectionServiceTest {
         ConditionSearchPipeline pipeline = mock(ConditionSearchPipeline.class);
         var main = new MainConditionService(pipeline);
         main.configureEngineSections(new ConditionEngineSectionService(mapper, this::sampleUnchecked));
-        assertThat(main.getSection(ConditionSection.LEADERS).sourceStatus()).isEqualTo("ENGINE_SIGNAL");
+        assertThat(main.getSection(ConditionSection.LEADERS).sourceStatus()).isEqualTo("ENGINE_LIVE_SCAN");
 
         var legacy = new MainConditionService(pipeline);
         legacy.configureEngineSections(new ConditionEngineSectionService(mapper, () -> { throw new IllegalStateException("down"); }));

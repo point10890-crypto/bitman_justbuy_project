@@ -21,21 +21,17 @@
    },
    "caution": "비용(약 0.2%)을 빼면 얇은 우위다. 분봉 검증 전까지 조건부 설계",
    "avoid": "전날 오른 종목이 +3% 이상 갭 상승할 때 시가에 사면 당일 -2.21% / -1.04% / -1.95% (세 구간 모두)",
-   "as_of": "2026-10-13",
-   "status": "TRIGGERED",
+   "status": "LIVE_SCAN",
+   "as_of": "2026-10-14",
+   "observed_at": "2026-10-14T14:57:59+09:00",
    "rows": [
     {
      "code": "437730",
+     "captured_at": "2026-10-14T14:57:59+09:00",
+     "capture_price": 42150.0,
      "name": "삼현",
      "market": "KOSDAQ",
      "sector": "자동차 신품 부품 제조업",
-     "ref_price": 43350.0,
-     "r1": -0.006872852332890034,
-     "reasons": [
-      "RSI(2) 2 — 단기 과매도",
-      "60일선 위 · 60일선 상승 중",
-      "전일 등락 -0.7%"
-     ],
      "risk": {
       "flags": [
        {
@@ -48,78 +44,92 @@
       "score": 2,
       "grade": "보통",
       "band": {
-       "atr_pct": 8.74,
-       "typical_pct": 9.6,
-       "wide_low_pct": -23.6,
-       "wide_high_pct": 30.6,
+       "atr_pct": 8.79,
+       "typical_pct": 9.7,
+       "wide_low_pct": -23.7,
+       "wide_high_pct": 30.8,
        "note": "최근 2.5년 비슷한 종목의 5거래일 변동 범위(중앙값·하위/상위 10%). 목표가가 아닙니다."
       }
      },
      "open_gap": -0.019607843137254943,
-     "live_price": 43000.0,
-     "trigger": "TRIGGERED",
-     "since_signal": -0.008073817762399127
+     "reasons": [
+      "시가 갭 -2.0% — 과매도 반등 자리",
+      "RSI(2) 2 (전일) · 60일선 위 상승 추세"
+     ],
+     "active": true,
+     "rank": 1,
+     "last_price": 42150.0,
+     "last_seen": "2026-10-14T14:57:59+09:00",
+     "ref_price": 42150.0,
+     "live_price": 42150.0,
+     "since_capture": 0.0
     },
     {
      "code": "001820",
+     "captured_at": "2026-10-14T14:57:59+09:00",
+     "capture_price": 141200.0,
      "name": "삼화콘덴서",
      "market": "KOSPI",
      "sector": "전자부품 제조업",
-     "ref_price": 144300.0,
-     "r1": -0.03735823929309845,
-     "reasons": [
-      "RSI(2) 4 — 단기 과매도",
-      "60일선 위 · 60일선 상승 중",
-      "전일 등락 -3.7%"
-     ],
      "risk": {
       "flags": [],
       "score": 0,
       "grade": "낮음",
       "band": {
-       "atr_pct": 7.68,
-       "typical_pct": 8.4,
-       "wide_low_pct": -20.7,
-       "wide_high_pct": 26.9,
+       "atr_pct": 7.41,
+       "typical_pct": 8.2,
+       "wide_low_pct": -20.0,
+       "wide_high_pct": 25.9,
        "note": "최근 2.5년 비슷한 종목의 5거래일 변동 범위(중앙값·하위/상위 10%). 목표가가 아닙니다."
       }
      },
      "open_gap": -0.005544005544005581,
-     "live_price": 145000.0,
-     "trigger": "TRIGGERED",
-     "since_signal": 0.00485100485100487
+     "reasons": [
+      "시가 갭 -0.6% — 과매도 반등 자리",
+      "RSI(2) 4 (전일) · 60일선 위 상승 추세"
+     ],
+     "active": true,
+     "rank": 2,
+     "last_price": 141200.0,
+     "last_seen": "2026-10-14T14:57:59+09:00",
+     "ref_price": 141200.0,
+     "live_price": 141200.0,
+     "since_capture": 0.0
     },
     {
      "code": "098120",
+     "captured_at": "2026-10-14T14:57:59+09:00",
+     "capture_price": 50300.0,
      "name": "마이크로컨텍솔",
      "market": "KOSDAQ",
      "sector": "전자부품 제조업",
-     "ref_price": 54300.0,
-     "r1": -0.04736842215061188,
-     "reasons": [
-      "RSI(2) 4 — 단기 과매도",
-      "60일선 위 · 60일선 상승 중",
-      "전일 등락 -4.7%"
-     ],
      "risk": {
       "flags": [],
       "score": 0,
       "grade": "낮음",
       "band": {
-       "atr_pct": 7.75,
-       "typical_pct": 8.5,
-       "wide_low_pct": -20.9,
-       "wide_high_pct": 27.1,
+       "atr_pct": 8.41,
+       "typical_pct": 9.2,
+       "wide_low_pct": -22.7,
+       "wide_high_pct": 29.4,
        "note": "최근 2.5년 비슷한 종목의 5거래일 변동 범위(중앙값·하위/상위 10%). 목표가가 아닙니다."
       }
      },
      "open_gap": -0.016574585635359074,
-     "live_price": 52200.0,
-     "trigger": "TRIGGERED",
-     "since_signal": -0.03867403314917128
+     "reasons": [
+      "시가 갭 -1.7% — 과매도 반등 자리",
+      "RSI(2) 4 (전일) · 60일선 위 상승 추세"
+     ],
+     "active": true,
+     "rank": 3,
+     "last_price": 50300.0,
+     "last_seen": "2026-10-14T14:57:59+09:00",
+     "ref_price": 50300.0,
+     "live_price": 50300.0,
+     "since_capture": 0.0
     }
    ],
-   "watchlist": 10
+   "captured_today": 3
   },
   "swing": {
    "key": "swing",
@@ -134,39 +144,45 @@
     "unit": "10일, 같은 날 대비 초과 %"
    },
    "caution": "보류 구간을 두 번째로 확인한 설계 — 운영 원장으로 실측 중",
-   "as_of": "2026-10-13",
-   "status": "SIGNAL",
+   "status": "LIVE_SCAN",
+   "as_of": "2026-10-14",
+   "observed_at": "2026-10-14T14:57:59+09:00",
    "rows": [
     {
-     "code": "096530",
-     "name": "씨젠",
+     "code": "131290",
+     "captured_at": "2026-10-14T14:57:59+09:00",
+     "capture_price": 318000.0,
+     "name": "티에스이",
      "market": "KOSDAQ",
-     "sector": "의료용품 및 기타 의약 관련제품 제조업",
-     "ref_price": 36550.0,
-     "r1": -0.01482479739934206,
-     "reasons": [
-      "5거래일 전 주도주 조건 충족",
-      "20일 고가 대비 -9.6% 눌림",
-      "상대강도 상위 9%",
-      "종가 > 60일선"
-     ],
+     "sector": "측정, 시험, 항해, 제어 및 기타 정밀기기 제조업; 광학기기 제외",
      "risk": {
       "flags": [],
       "score": 0,
       "grade": "낮음",
       "band": {
-       "atr_pct": 4.33,
-       "typical_pct": 4.8,
-       "wide_low_pct": -11.7,
-       "wide_high_pct": 15.2,
+       "atr_pct": 7.74,
+       "typical_pct": 8.5,
+       "wide_low_pct": -20.9,
+       "wide_high_pct": 27.1,
        "note": "최근 2.5년 비슷한 종목의 5거래일 변동 범위(중앙값·하위/상위 10%). 목표가가 아닙니다."
       }
      },
-     "pullback": -0.09641532599925995,
-     "live_price": 36900.0,
-     "since_signal": 0.009575923392612928
+     "pullback": -0.0535714291036129,
+     "reasons": [
+      "5거래일 전 주도주 조건 충족",
+      "20일 고점 대비 -5.4% 눌림",
+      "상대강도 상위 5%"
+     ],
+     "active": true,
+     "rank": 1,
+     "last_price": 318000.0,
+     "last_seen": "2026-10-14T14:57:59+09:00",
+     "ref_price": 318000.0,
+     "live_price": 318000.0,
+     "since_capture": 0.0
     }
-   ]
+   ],
+   "captured_today": 1
   },
   "leaders": {
    "key": "leaders",
@@ -181,80 +197,153 @@
     "unit": "20일, 같은 날 대비 초과 %"
    },
    "caution": "하락 국면에서는 약했다(보류 구간 -2.13%)",
-   "as_of": "2026-10-13",
-   "status": "SIGNAL",
+   "status": "LIVE_SCAN",
+   "as_of": "2026-10-14",
+   "observed_at": "2026-10-14T14:57:59+09:00",
    "rows": [
     {
-     "code": "096530",
-     "name": "씨젠",
-     "market": "KOSDAQ",
-     "sector": "의료용품 및 기타 의약 관련제품 제조업",
-     "ref_price": 36550.0,
-     "r1": -0.01482479739934206,
-     "reasons": [
-      "상대강도 상위 9%",
-      "52주 고가 대비 -9.6%",
-      "20일선 이격 +5.3% (과열 아님)",
-      "종가 > 60일선 > 120일선"
-     ],
-     "risk": {
-      "flags": [],
-      "score": 0,
-      "grade": "낮음",
-      "band": {
-       "atr_pct": 4.33,
-       "typical_pct": 4.8,
-       "wide_low_pct": -11.7,
-       "wide_high_pct": 15.2,
-       "note": "최근 2.5년 비슷한 종목의 5거래일 변동 범위(중앙값·하위/상위 10%). 목표가가 아닙니다."
-      }
-     },
-     "rs_top_pct": 9,
-     "live_price": 36900.0,
-     "since_signal": 0.009575923392612928
-    },
-    {
      "code": "251970",
+     "captured_at": "2026-10-14T14:57:59+09:00",
+     "capture_price": 65900.0,
      "name": "펌텍코리아",
      "market": "KOSDAQ",
      "sector": "플라스틱제품 제조업",
-     "ref_price": 69900.0,
-     "r1": 0.020437955856323242,
-     "reasons": [
-      "상대강도 상위 5%",
-      "52주 고가 대비 -2.0%",
-      "20일선 이격 +13.8% (과열 아님)",
-      "종가 > 60일선 > 120일선"
-     ],
      "risk": {
       "flags": [],
       "score": 0,
       "grade": "낮음",
       "band": {
-       "atr_pct": 5.64,
-       "typical_pct": 6.2,
-       "wide_low_pct": -15.2,
-       "wide_high_pct": 19.7,
+       "atr_pct": 6.0,
+       "typical_pct": 6.6,
+       "wide_low_pct": -16.2,
+       "wide_high_pct": 21.0,
        "note": "최근 2.5년 비슷한 종목의 5거래일 변동 범위(중앙값·하위/상위 10%). 목표가가 아닙니다."
       }
      },
      "rs_top_pct": 5,
-     "live_price": 66800.0,
-     "since_signal": -0.044349070100143106
-    },
-    {
-     "code": "446540",
-     "name": "메가터치",
-     "market": "KOSDAQ",
-     "sector": "일차전지 및 이차전지 제조업",
-     "ref_price": 10830.0,
-     "r1": 0.0,
      "reasons": [
-      "상대강도 상위 2%",
-      "52주 고가 대비 -9.3%",
-      "20일선 이격 +8.8% (과열 아님)",
+      "상대강도 상위 5%",
+      "52주 고가 대비 -7.6%",
+      "20일선 이격 +6.1% (과열 아님)",
       "종가 > 60일선 > 120일선"
      ],
+     "active": true,
+     "rank": 1,
+     "last_price": 65900.0,
+     "last_seen": "2026-10-14T14:57:59+09:00",
+     "ref_price": 65900.0,
+     "live_price": 65900.0,
+     "since_capture": 0.0
+    },
+    {
+     "code": "096770",
+     "captured_at": "2026-10-14T14:57:59+09:00",
+     "capture_price": 162600.0,
+     "name": "SK이노베이션",
+     "market": "KOSPI",
+     "sector": "석유 정제품 제조업",
+     "risk": {
+      "flags": [],
+      "score": 0,
+      "grade": "낮음",
+      "band": {
+       "atr_pct": 6.44,
+       "typical_pct": 7.1,
+       "wide_low_pct": -17.4,
+       "wide_high_pct": 22.5,
+       "note": "최근 2.5년 비슷한 종목의 5거래일 변동 범위(중앙값·하위/상위 10%). 목표가가 아닙니다."
+      }
+     },
+     "rs_top_pct": 10,
+     "reasons": [
+      "상대강도 상위 10%",
+      "52주 고가 대비 -1.7%",
+      "20일선 이격 +9.9% (과열 아님)",
+      "종가 > 60일선 > 120일선"
+     ],
+     "active": true,
+     "rank": 2,
+     "last_price": 162600.0,
+     "last_seen": "2026-10-14T14:57:59+09:00",
+     "ref_price": 162600.0,
+     "live_price": 162600.0,
+     "since_capture": 0.0
+    },
+    {
+     "code": "031980",
+     "captured_at": "2026-10-14T14:57:59+09:00",
+     "capture_price": 205500.0,
+     "name": "피에스케이홀딩스",
+     "market": "KOSDAQ",
+     "sector": "특수 목적용 기계 제조업",
+     "risk": {
+      "flags": [],
+      "score": 0,
+      "grade": "낮음",
+      "band": {
+       "atr_pct": 7.67,
+       "typical_pct": 8.4,
+       "wide_low_pct": -20.7,
+       "wide_high_pct": 26.8,
+       "note": "최근 2.5년 비슷한 종목의 5거래일 변동 범위(중앙값·하위/상위 10%). 목표가가 아닙니다."
+      }
+     },
+     "rs_top_pct": 4,
+     "reasons": [
+      "상대강도 상위 4%",
+      "52주 고가 대비 -7.2%",
+      "20일선 이격 +13.8% (과열 아님)",
+      "종가 > 60일선 > 120일선"
+     ],
+     "active": true,
+     "rank": 3,
+     "last_price": 205500.0,
+     "last_seen": "2026-10-14T14:57:59+09:00",
+     "ref_price": 205500.0,
+     "live_price": 205500.0,
+     "since_capture": 0.0
+    },
+    {
+     "code": "131290",
+     "captured_at": "2026-10-14T14:57:59+09:00",
+     "capture_price": 318000.0,
+     "name": "티에스이",
+     "market": "KOSDAQ",
+     "sector": "측정, 시험, 항해, 제어 및 기타 정밀기기 제조업; 광학기기 제외",
+     "risk": {
+      "flags": [],
+      "score": 0,
+      "grade": "낮음",
+      "band": {
+       "atr_pct": 7.74,
+       "typical_pct": 8.5,
+       "wide_low_pct": -20.9,
+       "wide_high_pct": 27.1,
+       "note": "최근 2.5년 비슷한 종목의 5거래일 변동 범위(중앙값·하위/상위 10%). 목표가가 아닙니다."
+      }
+     },
+     "rs_top_pct": 5,
+     "reasons": [
+      "상대강도 상위 5%",
+      "52주 고가 대비 -5.4%",
+      "20일선 이격 +11.9% (과열 아님)",
+      "종가 > 60일선 > 120일선"
+     ],
+     "active": true,
+     "rank": 4,
+     "last_price": 318000.0,
+     "last_seen": "2026-10-14T14:57:59+09:00",
+     "ref_price": 318000.0,
+     "live_price": 318000.0,
+     "since_capture": 0.0
+    },
+    {
+     "code": "064290",
+     "captured_at": "2026-10-14T14:57:59+09:00",
+     "capture_price": 58400.0,
+     "name": "인텍플러스",
+     "market": "KOSDAQ",
+     "sector": "특수 목적용 기계 제조업",
      "risk": {
       "flags": [
        {
@@ -267,47 +356,30 @@
       "score": 2,
       "grade": "보통",
       "band": {
-       "atr_pct": 9.28,
-       "typical_pct": 10.2,
-       "wide_low_pct": -25.1,
-       "wide_high_pct": 32.5,
+       "atr_pct": 8.75,
+       "typical_pct": 9.6,
+       "wide_low_pct": -23.6,
+       "wide_high_pct": 30.6,
        "note": "최근 2.5년 비슷한 종목의 5거래일 변동 범위(중앙값·하위/상위 10%). 목표가가 아닙니다."
       }
      },
      "rs_top_pct": 2,
-     "live_price": 10320.0,
-     "since_signal": -0.047091412742382266
-    },
-    {
-     "code": "064290",
-     "name": "인텍플러스",
-     "market": "KOSDAQ",
-     "sector": "특수 목적용 기계 제조업",
-     "ref_price": 61700.0,
-     "r1": 0.07867132872343063,
      "reasons": [
       "상대강도 상위 2%",
-      "52주 고가 대비 -1.4%",
-      "20일선 이격 +14.9% (과열 아님)",
+      "52주 고가 대비 -6.7%",
+      "20일선 이격 +7.8% (과열 아님)",
       "종가 > 60일선 > 120일선"
      ],
-     "risk": {
-      "flags": [],
-      "score": 0,
-      "grade": "낮음",
-      "band": {
-       "atr_pct": 8.44,
-       "typical_pct": 9.3,
-       "wide_low_pct": -22.8,
-       "wide_high_pct": 29.5,
-       "note": "최근 2.5년 비슷한 종목의 5거래일 변동 범위(중앙값·하위/상위 10%). 목표가가 아닙니다."
-      }
-     },
-     "rs_top_pct": 2,
-     "live_price": 59100.0,
-     "since_signal": -0.04213938411669371
+     "active": true,
+     "rank": 5,
+     "last_price": 58400.0,
+     "last_seen": "2026-10-14T14:57:59+09:00",
+     "ref_price": 58400.0,
+     "live_price": 58400.0,
+     "since_capture": 0.0
     }
-   ]
+   ],
+   "captured_today": 5
   },
   "themes": {
    "key": "themes",
@@ -322,21 +394,24 @@
     "unit": "점화 다음 날 대장주 시가 매수 1일 초과 %"
    },
    "caution": "테마는 업종(KSIC)으로 근사 — 업종을 넘나드는 테마는 잡지 못한다",
+   "status": "LIVE_SCAN",
    "as_of": "2026-10-14",
-   "status": "NEAR_CLOSE",
+   "observed_at": "2026-10-14T14:57:59+09:00",
    "rows": [
     {
      "code": "028670",
+     "captured_at": "2026-10-14T14:57:59+09:00",
+     "capture_price": 7150.0,
      "name": "팬오션",
      "market": "KOSPI",
      "sector": "해상 운송업",
-     "ref_price": 7170.0,
-     "r1": 0.09298780560493469,
+     "theme": "해상 운송업",
+     "role": "LEADER",
+     "breadth": 0.5,
      "reasons": [
-      "해상 운송업 테마 점화 — 업종 6종목 중 83% 가 +3% 이상",
-      "업종 거래대금 20일 평균의 3.1배",
-      "대장주(업종 내 거래대금 1위) · 당일 +9.3%",
-      "대장주 추격은 과거 손실 — 같은 업종 후발주는 종가매매 카드 참고"
+      "해상 운송업 테마 점화 — 업종 6종목 중 50% 가 +3% 이상",
+      "업종 거래대금 20일 평균의 3.3배",
+      "대장주 — 추격 주의, 같은 업종 후발주는 종가매매"
      ],
      "risk": {
       "flags": [
@@ -356,21 +431,23 @@
       "score": 3,
       "grade": "높음",
       "band": {
-       "atr_pct": 5.02,
-       "typical_pct": 5.5,
-       "wide_low_pct": -20.1,
-       "wide_high_pct": 26.6,
+       "atr_pct": 4.82,
+       "typical_pct": 5.3,
+       "wide_low_pct": -19.3,
+       "wide_high_pct": 25.5,
        "note": "최근 2.5년 비슷한 종목의 5거래일 변동 범위(중앙값·하위/상위 10%). 목표가가 아닙니다."
       }
      },
-     "role": "LEADER",
-     "theme": "해상 운송업",
-     "breadth": 0.8333333333333334,
-     "value_surge": 3.0984225350311134,
-     "live_price": 7170.0,
-     "since_signal": 0.0
+     "active": true,
+     "rank": 1,
+     "last_price": 7150.0,
+     "last_seen": "2026-10-14T14:57:59+09:00",
+     "ref_price": 7150.0,
+     "live_price": 7150.0,
+     "since_capture": 0.0
     }
-   ]
+   ],
+   "captured_today": 1
   },
   "closing_bet": {
    "key": "closing_bet",
@@ -385,12 +462,24 @@
     "unit": "1일, 같은 날 대비 초과 %"
    },
    "caution": "점화 업종이 있는 날만 신호가 나온다(연 60~80일)",
+   "status": "LIVE_SCAN",
    "as_of": "2026-10-14",
-   "status": "NEAR_CLOSE",
-   "rows": []
+   "observed_at": "2026-10-14T14:57:59+09:00",
+   "rows": [],
+   "captured_today": 0
   }
  },
- "near_close": {
-  "state": "done"
+ "scanner": {
+  "state": "done",
+  "at": "2026-10-14T14:57:59+09:00",
+  "seconds": 12.7,
+  "stocks": 4304,
+  "active": {
+   "short_term": 3,
+   "swing": 1,
+   "leaders": 5,
+   "themes": 1,
+   "closing_bet": 0
+  }
  }
 }

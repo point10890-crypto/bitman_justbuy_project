@@ -125,37 +125,38 @@ const engineMiss = { strategy: null, source: 'rules', conditions: [], assumption
 const withEngine = (dataFetch: (url: string, init?: RequestInit) => Promise<Response>) =>
   vi.fn((url: string, init?: RequestInit) => String(url).includes('/api/engine/') ? Promise.resolve(asJson(engineMiss)) : dataFetch(url, init))
 
-it('engine-detected sections show their design columns, entry rule and an honest empty state', () => {
-  const sig = (name: string, code: string, a: string, b: string, c: string) => ({
+it('screener sections show capture time, capture price, current price and change since capture', () => {
+  const sig = (name: string, code: string, a: string, b: string, c: string, at: string) => ({
     stockName: name, stockCode: code, capturePrice: a, currentPrice: b, highPrice: b, stopLoss: c, section: 'leaders', mode: 'ENGINE_LEADERS',
-    rank: 1, maxReturnPct: c, status: '주도주 · 위험 낮음', ruleScore: 0, aiScore: 0, finalScore: 0, summary: '상대강도 상위 2%',
-    evidence: ['상대강도 상위 2%'], riskFlags: [], invalidation: '20거래일 보유 후 청산', capturedAt: '2026-10-13T15:30:00+09:00',
+    rank: 1, maxReturnPct: c, status: '상대강도 상위 2% · 위험 낮음', ruleScore: 0, aiScore: 0, finalScore: 0, summary: '상대강도 상위 2%',
+    evidence: ['상대강도 상위 2%'], riskFlags: [], invalidation: '20거래일 보유 후 청산', capturedAt: at,
   })
   const engine = (key: string, slug: string, title: string, status: string, signals: ReturnType<typeof sig>[]) => ({
-    key, slug, title, mode: 'X', endpoint: `/api/conditions/${slug}`, asOf: '2026-10-13T15:30:00+09:00', sourceStatus: status, signals,
+    key, slug, title, mode: 'X', endpoint: `/api/conditions/${slug}`, asOf: '2026-10-14T14:57:59+09:00', sourceStatus: status, signals,
   })
   main = {
-    ...feed('MAIN_0850', '2026-10-13T15:30:00+09:00'),
+    ...feed('MAIN_0850', '2026-10-14T14:57:59+09:00'),
     sections: {
-      shortTerm: engine('shortTerm', 'short-term', '단타', 'ENGINE_NO_TRIGGER', []),
-      swing: engine('swing', 'swing', '스윙', 'ENGINE_SIGNAL', [sig('눌림 리더', '096530', '36,550', '고점 대비 -9.6%', '10거래일')]),
-      leaders: engine('leaders', 'leaders', '주도주', 'ENGINE_SIGNAL', [sig('주도 종목', '064290', '61,700', '62,000', '상위 2%')]),
-      themes: engine('themes', 'themes', '테마주', 'ENGINE_NEAR_CLOSE', []),
-      closingBet: engine('closingBet', 'closing-bet', '종가매매', 'ENGINE_NEAR_CLOSE', []),
-      alerts: { ...section('x', '2026-10-13T15:30:00+09:00'), signals: [] },
+      shortTerm: engine('shortTerm', 'short-term', '단타', 'ENGINE_LIVE_SCAN', []),
+      swing: engine('swing', 'swing', '스윙', 'ENGINE_LIVE_SCAN', [sig('눌림 리더', '096530', '36,550', '36,900', '+1.0%', '2026-10-14T10:12:00+09:00')]),
+      leaders: engine('leaders', 'leaders', '주도주', 'ENGINE_LIVE_SCAN', [sig('주도 종목', '064290', '61,700', '62,000', '+0.5%', '2026-10-14T09:03:00+09:00')]),
+      themes: engine('themes', 'themes', '테마주', 'ENGINE_LIVE_SCAN', []),
+      closingBet: engine('closingBet', 'closing-bet', '종가매매', 'ENGINE_LIVE_SCAN', []),
+      alerts: { ...section('x', '2026-10-14T14:57:59+09:00'), signals: [] },
     },
   } as unknown as MainConditionResponse
   vi.stubGlobal('fetch', withEngine(vi.fn()))
   render(tree())
   const leaders = document.getElementById('leaders')!
-  expect(within(leaders).getByText('상대강도')).toBeTruthy()
-  expect(within(leaders).getByText('상위 2%')).toBeTruthy()
-  expect(within(leaders).getByText(/20거래일 보유/)).toBeTruthy()
-  const swing = document.getElementById('swing')!
-  expect(within(swing).getByText('눌림 폭')).toBeTruthy()
-  expect(within(swing).getByText('고점 대비 -9.6%')).toBeTruthy()
+  for (const col of ['포착가', '현재가', '포착 후']) expect(within(leaders).getByText(col)).toBeTruthy()
+  expect(within(leaders).getByText('61,700')).toBeTruthy()
+  expect(within(leaders).getByText('62,000')).toBeTruthy()
+  expect(within(leaders).getByText('+0.5%')).toBeTruthy()
+  expect(within(leaders).getByText(/포착 오전 09:03/)).toBeTruthy()
+  expect(within(leaders).getByText(/실시간 조건검색 · 3분 갱신/)).toBeTruthy()
+  expect(within(document.getElementById('swing')!).getByText(/포착 오전 10:12/)).toBeTruthy()
   expect(within(document.getElementById('short-term')!).getByText('오늘 시가 갭 하락으로 출발한 관찰 종목이 없습니다.')).toBeTruthy()
-  expect(within(document.getElementById('closing-bet')!).getByText('오늘은 테마가 점화된 업종이 없습니다.')).toBeTruthy()
+  expect(within(document.getElementById('closing-bet')!).getByText('현재 테마가 점화된 업종이 없습니다.')).toBeTruthy()
   expect(within(document.getElementById('themes')!).getByText(/대장주 추격은 과거 손실/)).toBeTruthy()
 })
 
