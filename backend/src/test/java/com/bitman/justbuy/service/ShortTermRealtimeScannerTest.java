@@ -12,6 +12,40 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ShortTermRealtimeScannerTest {
+    @Test void realMoneyRankingAddsEarlyMoversAbsentFromVolumeAndGainers() throws Exception {
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        try (var input = getClass().getResourceAsStream("/condition/ranking-coverage-20261014.json")) {
+            var fixture = mapper.readTree(input);
+            java.util.function.Function<com.fasterxml.jackson.databind.JsonNode,List<KisApiService.RankedStock>> rows = node -> {
+                var result = new java.util.ArrayList<KisApiService.RankedStock>();
+                for(var r:node) result.add(stock(r.path("hts_kor_isnm").asText(),
+                    r.has("mksc_shrn_iscd")?r.path("mksc_shrn_iscd").asText():r.path("stck_shrn_iscd").asText(),
+                    r.path("stck_prpr").asText(),r.path("prdy_ctrt").asText(),r.path("acml_vol").asText()));
+                return result;
+            };
+            var scanner = new ShortTermRealtimeScanner(null);
+            var now = ZonedDateTime.parse("2026-10-14T15:00:00+09:00");
+            var old = scanner.buildCandidates(rows.apply(fixture.get("volume")),rows.apply(fixture.get("gainers")),List.of(),now,200,false,List.of());
+            var expanded = scanner.buildCandidates(rows.apply(fixture.get("volume")),rows.apply(fixture.get("gainers")),List.of(),now,200,false,rows.apply(fixture.get("turnover")));
+            assertThat(old).extracting(ConditionSignalDto::stockCode).doesNotContain("006400","278470","096770");
+            assertThat(expanded).extracting(ConditionSignalDto::stockCode).contains("006400","278470","096770");
+            assertThat(expanded).noneMatch(s -> s.stockName().startsWith("KODEX") || s.stockName().startsWith("TIGER"));
+        }
+    }
+
+    @Test void verificationRejectionBackfillsFromTheNextQualifiedCandidate() {
+        var verifier = org.mockito.Mockito.mock(DeepSeekConditionVerifier.class);
+        org.mockito.Mockito.when(verifier.isAvailable()).thenReturn(true);
+        org.mockito.Mockito.when(verifier.verify(org.mockito.ArgumentMatchers.anyList())).thenReturn(java.util.Map.of(
+            "100000", new com.bitman.justbuy.dto.condition.EvidenceVerdict("100000", 0, "REJECT", "위험", List.of(), List.of(), "", "")));
+        var scanner = new ShortTermRealtimeScanner(null, (TrackRecordService) null, verifier);
+        var pool = java.util.stream.IntStream.range(100000, 100006)
+            .mapToObj(i -> ConditionLiquidityServiceTest.signal(Integer.toString(i), 80)).toList();
+        var result = scanner.publishVerified(pool, ZonedDateTime.parse("2026-10-14T12:00:00+09:00"), KiwoomConditionEnricher.empty("NOT_CONFIGURED"));
+        assertThat(result).extracting(ConditionSignalDto::stockCode).containsExactly("100001", "100002", "100003");
+        assertThat(result).extracting(ConditionSignalDto::rank).containsExactly(1, 2, 3);
+    }
+
 
     @Test
     void scheduledScanRunsEveryThreeMinutesByDefault() throws NoSuchMethodException {

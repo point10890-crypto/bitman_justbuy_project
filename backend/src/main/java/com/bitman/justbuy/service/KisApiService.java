@@ -1034,6 +1034,10 @@ public class KisApiService {
             "/uapi/domestic-stock/v1/quotations/volume-rank", "J", limit, false, Duration.ofSeconds(50));
     }
 
+    public List<RankedStock> fetchRealtimeTurnoverRankingStocks(int limit) {
+        return fetchRankingStocks("kis_rt_rank_turnover_structured_" + limit, "FHPST01710000",
+            "/uapi/domestic-stock/v1/quotations/volume-rank", "J", limit, false, Duration.ofSeconds(50), true);
+    }
     public List<RankedStock> fetchRealtimeGainersRankingStocks(int limit) {
         return fetchRankingStocks("kis_rt_rank_gainers_structured_" + limit, "FHPST01700000",
             "/uapi/domestic-stock/v1/ranking/fluctuation", "J", limit, true, Duration.ofSeconds(50));
@@ -1241,6 +1245,10 @@ public class KisApiService {
 
     private List<RankedStock> fetchRankingStocks(String cacheKey, String trId, String path, String marketDiv,
                                                 int limit, boolean sortByChange, Duration ttl) {
+        return fetchRankingStocks(cacheKey, trId, path, marketDiv, limit, sortByChange, ttl, false);
+    }
+    private List<RankedStock> fetchRankingStocks(String cacheKey, String trId, String path, String marketDiv,
+            int limit, boolean sortByChange, Duration ttl, boolean turnover) {
         if (!isAvailable() || limit <= 0) return List.of();
         int resultLimit = Math.min(limit, 100);
 
@@ -1268,7 +1276,7 @@ public class KisApiService {
                 + "&FID_COND_SCR_DIV_CODE=20171"
                 + "&FID_INPUT_ISCD=0000"
                 + "&FID_DIV_CLS_CODE=0"
-                + "&FID_BLNG_CLS_CODE=0"
+                + "&FID_BLNG_CLS_CODE=" + (turnover ? "3" : "0")
                 + "&FID_TRGT_CLS_CODE=111111111"
                 + "&FID_TRGT_EXLS_CLS_CODE=000000000"
                 + "&FID_INPUT_PRICE_1=0"
@@ -1400,6 +1408,14 @@ public class KisApiService {
         String volumeRank = fetchVolumeRanking();
         if (!volumeRank.isEmpty()) sb.append(volumeRank);
 
+        // Monetary participation is a separate source; do not label it as share-volume rank.
+        var turnover = fetchRealtimeTurnoverRankingStocks(30);
+        if (!turnover.isEmpty()) {
+            sb.append("\n[거래대금 상위 후보 — KIS 거래금액순]\n");
+            for (var stock : turnover) sb.append(stock.name()).append(" (").append(stock.code())
+                .append(") 현재가 ").append(stock.currentPrice()).append("원, 등락률 ")
+                .append(stock.changeRate()).append("%\n");
+        }
         // 외국인 순매수
         String foreignRank = fetchForeignNetBuyRanking();
         if (!foreignRank.isEmpty()) sb.append(foreignRank);

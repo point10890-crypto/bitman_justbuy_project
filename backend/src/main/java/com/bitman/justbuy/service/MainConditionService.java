@@ -252,10 +252,18 @@ public class MainConditionService {
     @Autowired
     public void configureLiquidity(ConditionLiquidityService liquidity) { this.liquidity = liquidity; }
 
+    private ConditionCaptureStore captures;
+    @Autowired(required=false) public void configureCaptures(ConditionCaptureStore captures) { this.captures=captures; }
+
     public ConditionSectionResponse getSection(ConditionSection section) {
         ConditionSectionResponse raw = rawSection(section);
         if (liquidity == null || !section.hasAnalysisMode() || raw.signals().isEmpty()) return raw;
         var signals = liquidity.filterSignals(section.legacyMode(), raw.signals(), 3);
+        if (captures != null) {
+            captures.record("publication",section.legacyMode(),"pool",Instant.now(),Map.of(
+                "sourceStatus",raw.sourceStatus(),"sourceAsOf",raw.asOf(),"signals",signals));
+            captures.watch(signals);
+        }
         return new ConditionSectionResponse(raw.key(), raw.slug(), raw.title(), raw.mode(), raw.endpoint(),
             raw.asOf(), signals.isEmpty() ? "LIQUIDITY_UNCONFIRMED" : raw.sourceStatus(), signals, raw.latestAnalysis());
     }
@@ -544,10 +552,11 @@ public class MainConditionService {
         }
 
         JsonNode latest = jonggaV2SearchService.latest();
+        if (captures != null) captures.record("source", "JONGGA_V2", "pool", Instant.now(), latest);
         List<ConditionSignalDto> signals = new ArrayList<>();
         int rank = 1;
         for (JsonNode signal : latest.path("signals")) {
-            if (rank > (liquidity == null ? 3 : 30)) break;
+            if (liquidity == null && rank > 3) break;
             signals.add(toClosingBetSignal(signal, rank++));
         }
 
@@ -661,7 +670,7 @@ public class MainConditionService {
             // Proven historical rows retain STALE_CACHE; absent or invalid provenance cannot become signals.
             .filter(pick -> AnalysisOutcome.isVerifiedPick(pick, Instant.now(), Long.MAX_VALUE))
             .filter(pick -> isEligiblePick(section, pick))
-            .limit(liquidity == null ? 3 : 30)
+            .limit(liquidity == null ? 3 : Long.MAX_VALUE)
             .toList();
 
         List<ConditionSignalDto> signals = new ArrayList<>();

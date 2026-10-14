@@ -154,3 +154,6 @@ backend/start.bat
 
 # condition engine local data (bars, ledger)
 condition_engine/var/
+
+# Market-only capture journals and restartable follow-up watchlists
+**/data/condition-captures/

@@ -22,7 +22,8 @@ import java.util.concurrent.TimeUnit;
 public class ConditionLiquidityService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final String EVIDENCE_PREFIX = "유동성: ";
-    private static final int CANDIDATE_LIMIT = 30;
+    private ConditionCaptureStore captures;
+    @Autowired(required=false) public void configureCaptures(ConditionCaptureStore captures) { this.captures = captures; }
     private final KisApiService kis;
     private final Clock clock;
     private final Cache<String, Amounts> cache = Caffeine.newBuilder()
@@ -44,10 +45,10 @@ public class ConditionLiquidityService {
         long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
         Map<String, Integer> bonuses = new HashMap<>();
         List<StockPick> picks = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
+        Set<String> seen = new LinkedHashSet<>();
         for (StockPick pick : response.stockPicks()) {
             if (pick == null || !seen.add(pick.code())) continue;
-            if (seen.size() > CANDIDATE_LIMIT) break;
+
             var decision = evaluate(mode, pick.code(), deadline);
             if (!decision.eligible()) continue;
             bonuses.put(pick.code(), decision.bonus());
@@ -102,11 +103,13 @@ public class ConditionLiquidityService {
     public List<ConditionSignalDto> filterSignals(String mode, List<ConditionSignalDto> signals, int limit) {
         long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
         List<Ranked> eligible = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
+        List<Map<String, Object>> decisions = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
         if (signals != null) for (ConditionSignalDto signal : signals) {
-            if (signal == null || !seen.add(signal.stockCode())) continue;
-            if (seen.size() > CANDIDATE_LIMIT) break;
+            if (signal == null || signal.stockCode() == null || !signal.stockCode().matches("[0-9]{6}") || !seen.add(signal.stockCode())) continue;
+
             var result = evaluate(mode, signal.stockCode(), deadline);
+            decisions.add(Map.of("code", signal.stockCode(), "eligible", result.eligible(), "reason", result.reason(), "bonus", result.bonus(), "status", (result.observedAt() == null || result.reason().contains("미확인")) ? "UNKNOWN" : result.eligible() ? "PASS" : "FAIL"));
             if (result.eligible()) eligible.add(new Ranked(signal, result));
         }
         eligible.sort(Comparator.comparingInt((Ranked item) -> item.signal().finalScore() + item.result().bonus()).reversed());
@@ -142,6 +145,16 @@ public class ConditionLiquidityService {
                 s.capturePrice(), s.currentPrice(), s.highPrice(), s.stopLoss(), s.maxReturnPct(), s.status(),
                 s.ruleScore(), s.aiScore(), s.finalScore(), s.summary(), List.copyOf(evidence), s.riskFlags(),
                 s.invalidation(), s.capturedAt(), checks));
+        }
+        if (captures != null) {
+            var legacyPrefix = seen.stream().limit(30).collect(java.util.stream.Collectors.toSet());
+            var legacySelected = eligible.stream().filter(item -> legacyPrefix.contains(item.signal().stockCode())).limit(limit).map(item -> item.signal().stockCode()).toList();
+            captures.record(limit > 3 ? "candidate_selection" : "selection", mode, "pool", clock.instant(), Map.of(
+                "candidates", signals == null ? List.of() : signals, "decisions", decisions,
+                "selected", result, "legacyPrefixSelectedCodes", legacySelected, "algorithm", "FULL_POOL_LIQUIDITY_V2",
+                "timeBudgetSeconds", 15, "unavailableIsNotRejectionEvidence", true));
+            captures.watch(java.util.stream.Stream.concat(result.stream(), eligible.stream()
+                .filter(item -> legacySelected.contains(item.signal().stockCode())).map(Ranked::signal)).toList());
         }
         return List.copyOf(result);
     }
@@ -179,6 +192,7 @@ public class ConditionLiquidityService {
         }
         BigDecimal today = amounts.get(date);
         if (today == null) return null;
+        if (captures != null) captures.record("daily", "ALL_SECTIONS", code, response.fetchedAt(), body);
         BigDecimal sum = BigDecimal.ZERO;
         LocalDate previous = date;
         boolean complete = true;

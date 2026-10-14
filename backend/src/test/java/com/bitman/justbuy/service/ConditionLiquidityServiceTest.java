@@ -12,6 +12,23 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class ConditionLiquidityServiceTest {
+    @Test void allSectionsCanDiscoverQualifiedCandidatesBeyondTheOldThirtyRowCutoff() {
+        when(kis.fetchVerifiedReadOnly(anyString(), anyString(), anyMap(), anyLong())).thenAnswer(call -> {
+            java.util.Map<String, String> params = call.getArgument(2);
+            String code = params.get("FID_INPUT_ISCD");
+            boolean qualified = code.equals("005930");
+            var body = daily(qualified ? 100_000_000_000L : 1L, qualified ? 30_000_000_000L : 1L, 20);
+            ((ObjectNode) body.path("output1")).put("stck_shrn_iscd", code);
+            return new KisApiService.ReadOnlySnapshot("AVAILABLE", now, body);
+        });
+        var candidates = new java.util.ArrayList<ConditionSignalDto>();
+        for (int i = 100000; i < 100030; i++) candidates.add(signal(Integer.toString(i), 99));
+        candidates.add(signal("005930", 80));
+        for (String mode : ConditionLiquidityPolicy.RULES.keySet()) {
+            assertThat(service.filterSignals(mode, candidates, 3)).as(mode)
+                .extracting(ConditionSignalDto::stockCode).containsExactly("005930");
+        }
+    }
     @Test void newerMissingBarsCannotKeepAPreviousRefreshPass() {
         stub(daily(30_000_000_000L, 10_000_000_000L, 20));
         var checks = new java.util.ArrayList<>(com.bitman.justbuy.dto.condition.ConditionCheck.unknown("BREAKOUT"));

@@ -55,6 +55,13 @@ class KisApiRetryTest {
             .thenReturn(ResponseEntity.ok(tokenJson));
     }
 
+    @Test void turnoverRankingRequestsMoneyOrderInsteadOfReusingVolumeCache() {
+        when(restTemplate.exchange(contains("/uapi/domestic-stock/v1/quotations/volume-rank"),
+            eq(HttpMethod.GET), any(), eq(String.class)))
+            .thenReturn(ResponseEntity.ok("{\"rt_cd\":\"0\",\"output\":[{\"hts_kor_isnm\":\"삼성SDI\",\"mksc_shrn_iscd\":\"006400\",\"stck_prpr\":\"100000\",\"prdy_ctrt\":\"6.43\",\"acml_vol\":\"500000\"}]}"));
+        assertThat(service.fetchRealtimeTurnoverRankingStocks(30)).hasSize(1);
+        verify(restTemplate).exchange(contains("FID_BLNG_CLS_CODE=3"),eq(HttpMethod.GET),any(),eq(String.class));
+    }
     @Test
     void fetchCurrentPrice_retriesOnRateLimit() {
         String rateLimitBody =
