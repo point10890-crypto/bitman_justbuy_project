@@ -120,6 +120,14 @@ class MainConditionAnalysisStatusTest {
     private static AnnotationConfigApplicationContext context(ConditionSearchPipeline pipeline, ConditionRunService runs) {
         var context = new AnnotationConfigApplicationContext();
         context.registerBean(ConditionRunService.class, () -> runs);
+        // This slice tests run metadata; liquidity gating has its own integration tests.
+        context.registerBean(ConditionLiquidityService.class, () -> {
+            var liquidity = mock(ConditionLiquidityService.class);
+            org.mockito.Mockito.when(liquidity.filterSignals(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenAnswer(call -> call.getArgument(1));
+            return liquidity;
+        });
         context.registerBean(MainConditionService.class, () -> new MainConditionService(pipeline));
         context.refresh();
         return context;

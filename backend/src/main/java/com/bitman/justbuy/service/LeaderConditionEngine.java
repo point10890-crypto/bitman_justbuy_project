@@ -57,6 +57,9 @@ public class LeaderConditionEngine {
     private final KisApiService kisApiService;
     private final DeepSeekConditionVerifier verifier;
     private KiwoomConditionEnricher kiwoomEnricher;
+    private ConditionLiquidityService liquidity;
+    @Autowired
+    public void configureLiquidity(ConditionLiquidityService liquidity) { this.liquidity = liquidity; }
     @Autowired(required=false)
     public void configureKiwoomEnricher(KiwoomConditionEnricher enricher) { this.kiwoomEnricher=enricher; }
     private record Capture(String capturedAt, String price) {}
@@ -137,12 +140,19 @@ public class LeaderConditionEngine {
         if (rawCandidates == null || rawCandidates.isEmpty()) return List.of();
 
         List<Scored> scored = new ArrayList<>();
+        Map<String, Integer> liquidityBonuses = new LinkedHashMap<>();
+        long liquidityDeadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
         int rank = 1;
         for (KisApiService.ConditionCandidate candidate : rawCandidates) {
             if (candidate.code() == null || !candidate.code().matches("\\d{6}")) continue;
             if (candidate.name() == null || candidate.name().isBlank()) continue;
             if (StockUniverseFilters.isExchangeTradedProductName(candidate.name())) continue;
             if (parsePrice(candidate.currentPrice()) <= 0) continue;
+            if (liquidity != null) {
+                var decision = liquidity.evaluate("FLOW_LEADER", candidate.code(), liquidityDeadline);
+                if (!decision.eligible()) continue;
+                liquidityBonuses.put(candidate.code(), decision.bonus());
+            }
 
             double changeRate = parseDouble(candidate.changeRate());
             ConditionSignalScoring.ScoreBreakdown breakdown = ConditionSignalScoring.leader(
@@ -158,7 +168,8 @@ public class LeaderConditionEngine {
 
         if (scored.isEmpty()) return List.of();
 
-        scored.sort(Comparator.comparingInt((Scored s) -> s.breakdown.finalScore()).reversed());
+        scored.sort(Comparator.comparingInt((Scored s) -> s.breakdown.finalScore()
+            + liquidityBonuses.getOrDefault(s.candidate.code(), 0)).reversed());
         List<Scored> verifyPool = scored.size() > VERIFY_LIMIT ? scored.subList(0, VERIFY_LIMIT) : scored;
 
         var independent=KiwoomConditionEnricher.empty("NOT_CONFIGURED");
@@ -183,7 +194,7 @@ public class LeaderConditionEngine {
             signals.add(independent.attach(toSignal(s, verdict, signalRank++, capture)));
             if (signals.size() >= SIGNAL_LIMIT) break;
         }
-        return signals;
+        return liquidity == null ? signals : liquidity.filterSignals("FLOW_LEADER", signals, SIGNAL_LIMIT);
     }
 
     private Map<String, EvidenceVerdict> verifyVerdicts(List<Scored> pool, ZonedDateTime now, KiwoomConditionEnricher.Result independent) {

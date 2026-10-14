@@ -247,7 +247,20 @@ public class MainConditionService {
         );
     }
 
+    private ConditionLiquidityService liquidity;
+
+    @Autowired
+    public void configureLiquidity(ConditionLiquidityService liquidity) { this.liquidity = liquidity; }
+
     public ConditionSectionResponse getSection(ConditionSection section) {
+        ConditionSectionResponse raw = rawSection(section);
+        if (liquidity == null || !section.hasAnalysisMode() || raw.signals().isEmpty()) return raw;
+        var signals = liquidity.filterSignals(section.legacyMode(), raw.signals(), 3);
+        return new ConditionSectionResponse(raw.key(), raw.slug(), raw.title(), raw.mode(), raw.endpoint(),
+            raw.asOf(), signals.isEmpty() ? "LIQUIDITY_UNCONFIRMED" : raw.sourceStatus(), signals, raw.latestAnalysis());
+    }
+
+    private ConditionSectionResponse rawSection(ConditionSection section) {
         if (!section.hasAnalysisMode()) {
             ConditionSectionResponse shortTerm = getSection(ConditionSection.SHORT_TERM);
             ConditionSectionResponse swing = getSection(ConditionSection.SWING);
@@ -534,7 +547,7 @@ public class MainConditionService {
         List<ConditionSignalDto> signals = new ArrayList<>();
         int rank = 1;
         for (JsonNode signal : latest.path("signals")) {
-            if (rank > 3) break;
+            if (rank > (liquidity == null ? 3 : 30)) break;
             signals.add(toClosingBetSignal(signal, rank++));
         }
 
@@ -644,7 +657,7 @@ public class MainConditionService {
             // Proven historical rows retain STALE_CACHE; absent or invalid provenance cannot become signals.
             .filter(pick -> AnalysisOutcome.isVerifiedPick(pick, Instant.now(), Long.MAX_VALUE))
             .filter(pick -> isEligiblePick(section, pick))
-            .limit(3)
+            .limit(liquidity == null ? 3 : 30)
             .toList();
 
         List<ConditionSignalDto> signals = new ArrayList<>();

@@ -48,6 +48,9 @@ public class ShortTermRealtimeScanner {
     private final TrackRecordService trackRecordService;
     private final DeepSeekConditionVerifier verifier;
     private KiwoomConditionEnricher kiwoomEnricher;
+    private ConditionLiquidityService liquidity;
+    @Autowired
+    public void configureLiquidity(ConditionLiquidityService liquidity) { this.liquidity = liquidity; }
     @Autowired(required=false)
     public void configureKiwoomEnricher(KiwoomConditionEnricher enricher) { this.kiwoomEnricher=enricher; }
     private record Capture(String capturedAt, String price) {}
@@ -184,15 +187,19 @@ public class ShortTermRealtimeScanner {
         resetDailySeen(now.toLocalDate());
 
         List<Candidate> sorted=rankCandidates(volume,gainers,foreignNetBuy).stream()
-            .filter(candidate -> candidate.score >= 58).limit(3).toList();
+            .filter(candidate -> candidate.score >= 58).limit(liquidity == null ? 3 : 30).toList();
         List<ConditionSignalDto> signals = new ArrayList<>();
         int signalRank = 1;
         for (Candidate candidate : sorted) {
-            Capture capture = firstSeenByCode.computeIfAbsent(candidate.code,
-                ignored -> new Capture(nowKst(now), formatPrice(candidate.currentPrice)));
+            Capture capture = firstSeenByCode.getOrDefault(candidate.code,
+                new Capture(nowKst(now), formatPrice(candidate.currentPrice)));
             signals.add(candidate.toSignal(signalRank++, capture));
         }
-        return signals;
+        List<ConditionSignalDto> accepted = liquidity == null ? signals : liquidity.filterSignals("BREAKOUT", signals, 3);
+        for (ConditionSignalDto signal : accepted) {
+            firstSeenByCode.putIfAbsent(signal.stockCode(), new Capture(signal.capturedAt(), signal.capturePrice()));
+        }
+        return accepted;
     }
 
     /** Queue cross-provider facts for the ranked original pool, before the published TOP3 reduction. */

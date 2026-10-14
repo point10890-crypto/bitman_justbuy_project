@@ -55,6 +55,10 @@ public class ConditionSearchPipeline {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("name", "BitMan condition-search pipeline");
         result.put("version", "v2");
+        result.put("liquidityRules", ConditionLiquidityPolicy.RULES);
+        result.put("liquidityAmountUnit", "100000000_KRW");
+        result.put("liquidityMorningMinimumEok", Map.of("before10", Map.of("BREAKOUT", 30, "CATALYST_BURST", 30, "FLOW_LEADER", 150),
+            "before11", Map.of("BREAKOUT", 50, "CATALYST_BURST", 50, "FLOW_LEADER", 250)));
         if (sourceExpansion != null) result.put("sourceExpansion", sourceExpansion.readiness());
         if (kiwoomSupplement != null) result.put("kiwoomSupplement", kiwoomSupplement.readiness());
         result.put("entrypoints", Map.of(

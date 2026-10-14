@@ -166,6 +166,7 @@ class PricePerformanceIntegrityTest {
                 Map.of("bitman.performance.measured-since", "2026-05-18")));
             context.registerBean(ConditionSearchPipeline.class, () -> mock(ConditionSearchPipeline.class));
             context.registerBean(TrackRecordService.class, () -> tracking);
+            context.registerBean(ConditionLiquidityService.class, () -> new ConditionLiquidityService(mock(KisApiService.class)));
             context.register(MainConditionService.class);
             context.refresh();
 
@@ -188,6 +189,7 @@ class PricePerformanceIntegrityTest {
                 Map.of("bitman.performance.measured-since", "2026-05-18")));
             context.registerBean(ConditionSearchPipeline.class, () -> mock(ConditionSearchPipeline.class));
             context.registerBean(TrackRecordService.class, () -> tracking);
+            context.registerBean(ConditionLiquidityService.class, () -> new ConditionLiquidityService(mock(KisApiService.class)));
             context.register(MainConditionService.class);
             context.refresh();
             assertThat(context.getBean(MainConditionService.class).getMain().trackRecord().totalSignals()).isZero();
@@ -210,6 +212,7 @@ class PricePerformanceIntegrityTest {
                 Map.of("bitman.performance.measured-since", "2026-05-19")));
             context.registerBean(ConditionSearchPipeline.class, () -> mock(ConditionSearchPipeline.class));
             context.registerBean(TrackRecordService.class, () -> tracking);
+            context.registerBean(ConditionLiquidityService.class, () -> new ConditionLiquidityService(mock(KisApiService.class)));
             context.register(MainConditionService.class);
             context.refresh();
             var summary = context.getBean(MainConditionService.class).getMain().trackRecord();

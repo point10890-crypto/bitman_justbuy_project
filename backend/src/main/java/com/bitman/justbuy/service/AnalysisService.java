@@ -66,6 +66,13 @@ public class AnalysisService {
     private final Clock clock;
     private TrackRecordService trackRecordService;
     private AnalysisEvidenceJournalService evidenceJournal;
+    private ConditionLiquidityService liquidity;
+    @Autowired
+    public void configureLiquidity(ConditionLiquidityService liquidity) { this.liquidity = liquidity; }
+
+    private AnalysisResponse applyLiquidity(String mode, AnalysisResponse response) {
+        return liquidity == null ? response : liquidity.filterAnalysis(mode, response);
+    }
     private final Semaphore executionSlots = new Semaphore(4);
     @Value("${bitman.analysis.run-timeout-ms:120000}")
     private long runTimeoutMs = 120_000L;
@@ -127,7 +134,7 @@ public class AnalysisService {
                 log.info("[Storage] {} fresh cache unavailable: {}", mode, invalidReason);
                 return null;
             }
-            return data;
+            return applyLiquidity(mode, data);
         } catch (IOException e) {
             log.error("Failed to load precomputed result for {}: {}", mode, e.getMessage());
             return null;
@@ -140,7 +147,7 @@ public class AnalysisService {
 
         try {
             String json = Files.readString(file);
-            return mapper.readValue(json, AnalysisResponse.class);
+            return applyLiquidity(mode, mapper.readValue(json, AnalysisResponse.class));
         } catch (IOException e) {
             log.error("Failed to load stored precomputed result for {}: {}", mode, e.getMessage());
             return null;
@@ -175,7 +182,7 @@ public class AnalysisService {
         if (cached != null && !cached.isExpired() && cacheValidationError(mode, cached.response(), clock.instant()) == null) {
             log.info("[Cache] 라이브 캐시 적중: {} ({}분 전)", key,
                 (System.currentTimeMillis() - cached.timestamp) / 60000);
-            return cached.response;
+            return applyLiquidity(mode, cached.response);
         }
         return null;
     }
@@ -198,9 +205,9 @@ public class AnalysisService {
             runningAnalyses.remove(key);
             throw new IllegalStateException("Analysis capacity is busy; retry after the current runs finish");
         }
-        var task = new FutureTask<AnalysisResponse>(() -> keywordConditionAnalysisService != null
+        var task = new FutureTask<AnalysisResponse>(() -> applyLiquidity(mode, keywordConditionAnalysisService != null
             && keywordConditionAnalysisService.supports(query, mode)
-            ? keywordConditionAnalysisService.analyze(query, mode) : orchestrator.runAnalysis(query, mode));
+            ? keywordConditionAnalysisService.analyze(query, mode) : orchestrator.runAnalysis(query, mode)));
         Thread.startVirtualThread(() -> {
             try { task.run(); }
             finally {
