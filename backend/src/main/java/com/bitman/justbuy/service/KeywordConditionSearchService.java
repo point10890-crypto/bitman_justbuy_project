@@ -150,7 +150,9 @@ public class KeywordConditionSearchService {
             }
             Map<String,Object> kisProgress=data.kisQuoteProgress(crossCodes);
             int kisPending=kisProgress==null?0:count(kisProgress.get("pendingCodes"),crossCodes.size());
-            if(kisPending>0)warnings.add("KIS 주시세 추가 교차 조회가 진행 중입니다. 확인된 결과를 먼저 표시합니다.");
+            if(kisPending>0)warnings.add(requestedParts.contains("investorDaily")
+                ? "최초 검색에서 KIS 주시세 추가 교차 조회에 대기 상태가 있었습니다. 수급 확인 상태는 별도로 표시합니다."
+                : "KIS 주시세 추가 교차 조회가 진행 중입니다. 확인된 결과를 먼저 표시합니다.");
             else if(checked==0)warnings.add("KIS 주시세 교차 조회 미확인: 확인된 다른 공급자의 결과를 유지합니다.");
             else if(checked<crossCodes.size())warnings.add("KIS 주시세 교차 조회는 일부 후보만 확인했습니다.");
             String kisStatus=checked==0?kisPending>0?"PENDING":"UNAVAILABLE":checked<crossCodes.size()||kisPending>0?"PARTIAL":"AVAILABLE";
@@ -170,7 +172,9 @@ public class KeywordConditionSearchService {
                 if(verified)usable++;
             }
             secondaryPending=count(secondary.get("pendingCodes"),crossCodes.size());
-            if(secondaryPending>0)warnings.add("키움 REST 추가 근거를 순차 확인하고 있습니다. 확인된 결과를 먼저 표시하며 대기 중인 값을 조건에 사용하지 않습니다.");
+            if(secondaryPending>0)warnings.add(requestedParts.contains("investorDaily")
+                ? "최초 검색에서 키움 REST 추가 교차 근거 일부는 대기 상태였습니다. 수급 확인 상태는 별도로 표시합니다."
+                : "키움 REST 추가 근거를 순차 확인하고 있습니다. 확인된 결과를 먼저 표시하며 대기 중인 값을 조건에 사용하지 않습니다.");
             else if(usable==0)warnings.add("키움 REST 교차 근거 미확인: 확인된 주시세와 조건 근거를 유지합니다.");
             String providerSource=string(readiness.get("source")),providerEnvironment=string(readiness.get("environment"));
             String secondaryStatus=usable==0?secondaryPending>0?"PENDING":"UNAVAILABLE":secondaryPending>0||usable<crossCodes.size()

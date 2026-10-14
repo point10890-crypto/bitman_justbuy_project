@@ -177,6 +177,16 @@ const showMixed = (response: KeywordSearchResponse, upgrade = mixed(response)) =
 )
 
 describe('required flow readiness presentation', () => {
+  it('distinguishes the live candidate lookup cap from the final mixed-result cap without changing source conditions', () => {
+    const live = { ...result, appliedConditions: ['최근 실제 1거래일 수급 합산', '결과 최대 10종목'] }
+    showMixed(live)
+    const scope = within(screen.getByRole('region', { name: '검색 조건과 범위' }))
+    expect(scope.getByText('수급 조회 결과 최대 10종목')).toBeTruthy()
+    expect(scope.getByText('최종 결합 결과 최대 3종목')).toBeTruthy()
+    expect(scope.queryByText('결과 최대 10종목')).toBeNull()
+    expect(live.appliedConditions).toEqual(['최근 실제 1거래일 수급 합산', '결과 최대 10종목'])
+  })
+
   it('does not call a completed partial search processing when only optional provider work is pending', () => {
     const live = { ...result, outcome: 'PARTIAL' as const,
       flowCoverage: { requestedCount: 20, availableCount: 20, pendingCount: 0, unavailableCount: 0 },

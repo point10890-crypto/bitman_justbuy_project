@@ -261,8 +261,9 @@ function EngineBody({ up }: { up: Extract<SearchUpgrade, { mode: 'engine' }> }) 
         <h3>적용한 조건</h3>
         <ul>
           {t.conditions.map(c => <li key={`d-${c}`}>{c}</li>)}
-          {(live?.appliedConditions ?? []).map(c => <li key={`r-${c}`}>{c}</li>)}
+          {(live?.appliedConditions ?? []).map(c => <li key={`r-${c}`}>{/^결과\s+최대\s+\d+\s*종목$/.test(c) ? `수급 조회 ${c}` : c}</li>)}
         </ul>
+        {mixed && <p>최종 결합 결과 최대 {s.strategy.top_n}종목</p>}
         {t.assumptions.map(a => <p key={a}>{a}</p>)}
         <p>일봉 조건: 분석 대상 {s.counts.universe.toLocaleString('ko-KR')}개 · 조건 통과 {s.counts.passing.toLocaleString('ko-KR')}개 · 위험 신호 제외 {s.counts.guard_excluded.toLocaleString('ko-KR')}개 · 시장 국면 {s.regime.label}</p>
         {live && !realtime?.error && <p>수급 조건: {live.scope.label} · 조건 일치 {live.scope.matchedCount.toLocaleString('ko-KR')}개 → 두 조건 모두 일치 {combined?.length ?? 0}개</p>}

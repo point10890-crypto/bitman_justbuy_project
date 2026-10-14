@@ -239,4 +239,29 @@ class KeywordFlowReadinessTest {
             }
         }
     }
+    @Test void completedFlowKeepsInitialCrossChecksAsHistoricalWarningsWithoutClaimingJobsStillRun() {
+        UUID owner=UUID.randomUUID();var pending=batch(Map.of("investorDaily",pendingInvestor()));
+        when(data.kisQuoteProgress(anyList())).thenReturn(Map.of("pendingCodes",1));
+        when(data.kiwoomEvidence(anyList(),anyList())).thenReturn(pending);when(data.cachedInvestorEvidence(anyList(),eq(end))).thenReturn(pending);
+        var first=service.search("최근 3거래일 외국인 순매수",owner);assertThat(first.progress()).isNotNull();
+        when(data.cachedInvestorEvidence(anyList(),eq(end))).thenReturn(batch(Map.of("investorDaily",investor(3))));
+        clearInvocations(data);var ready=service.progress(owner,first.progress().id());
+        assertThat(ready.flowCoverage()).isEqualTo(new com.bitman.justbuy.dto.KeywordSearchResponse.FlowCoverage(1,1,0,0));
+        assertThat(ready.progress()).isNull();assertThat(ready.matches()).hasSize(1);
+        assertThat(ready.warnings()).noneMatch(warning->warning.contains("조회가 진행 중")||warning.contains("순차 확인하고 있습니다")||warning.contains("대기 중인 값을"));
+        assertThat(first.warnings()).anyMatch(warning->warning.startsWith("최초 검색에서 KIS"));
+        assertThat(first.warnings()).anyMatch(warning->warning.startsWith("최초 검색에서 키움 REST"));
+        assertThat(ready.warnings()).anyMatch(warning->warning.startsWith("최초 검색에서 KIS"));
+        assertThat(ready.warnings()).anyMatch(warning->warning.startsWith("최초 검색에서 키움 REST"));
+        assertThat(ready.providers()).isEqualTo(first.providers());assertThat(ready.fetchedAt()).isEqualTo(first.fetchedAt());
+        verify(data).cachedInvestorEvidence(List.of(code),end);verifyNoMoreInteractions(data);
+    }
+    @Test void nonFlowSearchRetainsItsOriginalCurrentCrossCheckWarningContract() {
+        when(data.kisQuoteProgress(anyList())).thenReturn(Map.of("pendingCodes",1));
+        when(data.kiwoomEvidence(anyList(),anyList())).thenReturn(batch(Map.of("quote",pendingInvestor())));
+        var result=service.search("삼성전자",UUID.randomUUID());
+        assertThat(result.warnings()).anyMatch(warning->warning.contains("KIS 주시세 추가 교차 조회가 진행 중"));
+        assertThat(result.warnings()).anyMatch(warning->warning.contains("키움 REST 추가 근거를 순차 확인하고 있습니다"));
+        assertThat(result.flowCoverage()).isNull();assertThat(result.progress()).isNull();assertThat(result.matches()).hasSize(1);
+    }
 }

@@ -232,6 +232,81 @@ it.each(['engine', 'keyword'] as const)('pins %s risk enrichment to the original
   expect(JSON.parse(String(calls.at(-1)?.[1]?.body)).as_of).toBe('2026-10-13')
 })
 
+it('uses an explicit result count in both engine requests and keeps that cap across flow progress', async () => {
+  const modelStrategy = { ...strategy, id: 'adhoc_model_default10', top_n: 10, guard: { exclude_risk: ['high_vol'] } }
+  const modelTranslation = { ...translation, strategy: modelStrategy, source: 'openai', assumptions: [
+    '개수를 말하지 않아 기본 10개로 검색합니다.', '20일선 위 조건을 적용했습니다.', '종목 수급은 최근 1거래일을 합산합니다.',
+  ] }
+  const initialCodes = ['000004', '000003', '000002', '000001']
+  const initial = pending(initialCodes, { flowCoverage: { requestedCount: 5, availableCount: 4, pendingCount: 1, unavailableCount: 0 } })
+  const normalRoutes = routes(initial, () => response([...initialCodes, '000005'], {
+    flowCoverage: { requestedCount: 5, availableCount: 5, pendingCount: 0, unavailableCount: 0 }, progress: null,
+  }))
+  const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+    if (url.endsWith('/api/engine/translate')) return Promise.resolve(json(modelTranslation))
+    if (url.endsWith('/api/engine/screen')) {
+      const body = JSON.parse(String(init?.body))
+      const rows = ['000001', '000002', '000003', '000004', '000005'].map((code, index) => ({ ...screen.results[0], code, rank: index + 1 }))
+      return Promise.resolve(json({ ...screen, strategy: body.strategy,
+        results: rows.slice(0, body.strategy.top_n), below_top_n: rows.slice(body.strategy.top_n).map(row => row.code) }))
+    }
+    return normalRoutes(url, init)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  const { result } = renderHook(() => useSearchUpgrade('최근 1거래일 외국인 순매수 20일선 위 3개', { result: refused, loading: false, error: null }))
+  await tick()
+  const first = engineState(result.current)
+  expect(first.combined?.map(row => row.code)).toEqual(['000001', '000002', '000003'])
+  expect(first.translation.strategy?.top_n).toBe(3)
+  expect(first.translation.strategy?.id).toBeUndefined()
+  expect(first.translation.strategy?.when).toEqual({ f: 'gap_ma20', op: '>', v: 0 })
+  expect(first.translation.strategy?.rank_by).toEqual({ f: 'quality_score', desc: true })
+  expect(first.translation.strategy?.guard).toEqual({ exclude_risk: ['high_vol'] })
+  expect(first.translation.assumptions).not.toContain('개수를 말하지 않아 기본 10개로 검색합니다.')
+  expect(first.translation.assumptions).toContain('20일선 위 조건을 적용했습니다.')
+  expect(first.translation.assumptions).toContain('종목 수급은 최근 1거래일을 합산합니다.')
+  expect(first.translation.assumptions.some(note => /3종목/.test(note))).toBe(true)
+  for (const path of ['/api/engine/screen', '/api/engine/backtest']) {
+    const call = fetchMock.mock.calls.find(([url]) => url.endsWith(path))!
+    expect(JSON.parse(String(call[1]?.body)).strategy.top_n).toBe(3)
+    expect(JSON.parse(String(call[1]?.body)).strategy.id).toBeUndefined()
+  }
+  await tick(10_000)
+  expect(engineState(result.current).combined?.map(row => row.code)).toEqual(['000001', '000002', '000003'])
+  expect(engineState(result.current).screen.strategy.top_n).toBe(3)
+  expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/api/engine/screen'))).toHaveLength(1)
+})
+
+it.each([
+  { query: '외국인 순매수 20일선 위 3개 3종목', expected: 3, changed: true },
+  { query: '외국인 순매수 20일선 위 70종목', expected: 50, changed: true },
+  { query: '외국인 순매수 20일선 위 0개', expected: 1, changed: true },
+  { query: '외국인 순매수 20일선 위', expected: 10, changed: false },
+  { query: '외국인 순매수 20일선 위 3개 또는 5종목', expected: 10, changed: false },
+  { query: '최근 3개월 외국인 순매수 20일선 위', expected: 10, changed: false },
+  { query: '2개국에 수출하는 20일선 위 종목', expected: 10, changed: false },
+  { query: '2개사가 합병한 20일선 위 종목', expected: 10, changed: false },
+  { query: '최근 3개 거래일 외국인 순매수 20일선 위', expected: 10, changed: false },
+  { query: '최근 3개 영업일 외국인 순매수 20일선 위', expected: 10, changed: false },
+  { query: '최근 3일 상승률 7% 이상 20일선 위 종목', expected: 10, changed: false },
+  { query: '최근 3개월 외국인 순매수 20일선 위 2종목', expected: 2, changed: true },
+  { query: '최근 3개 거래일 외국인 순매수 20일선 위 2개', expected: 2, changed: true },
+])('normalizes only an unambiguous explicit count: $query', async ({ query, expected, changed }) => {
+  const normalRoutes = routes(response([]), () => complete())
+  const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+    if (url.endsWith('/api/engine/translate')) return Promise.resolve(json({ ...translation, strategy: { ...strategy, id: 'adhoc_model10', top_n: 10 } }))
+    if (url.endsWith('/api/engine/screen')) return Promise.resolve(json({ ...screen, strategy: JSON.parse(String(init?.body)).strategy }))
+    return normalRoutes(url, init)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  const { result } = renderHook(() => useSearchUpgrade(query, { result: refused, loading: false, error: null }))
+  await tick()
+  expect(engineState(result.current).translation.strategy?.top_n).toBe(expected)
+  expect(engineState(result.current).translation.strategy?.id).toBe(changed ? undefined : 'adhoc_model10')
+  const call = fetchMock.mock.calls.find(([url]) => url.endsWith('/api/engine/backtest'))!
+  expect(JSON.parse(String(call[1]?.body)).strategy.top_n).toBe(expected)
+})
+
 it('does not overlap progress requests while the preceding response is pending', async () => {
   let resolve!: (value: Response) => void
   const fetchMock = routes(pending(), attempt => attempt === 1 ? new Promise<Response>(done => { resolve = done }) : json(complete()))

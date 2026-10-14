@@ -84,6 +84,25 @@ export function engineShouldLead(result: KeywordSearchResponse | null, error: st
   return result.outcome === 'UNSUPPORTED' || result.outcome === 'UNAVAILABLE' || fellBackToNameSearch(result)
 }
 
+/** An explicit result count is deterministic; only the remaining conditions need AI translation. */
+function applyRequestedCount(query: string, value: Translation): Translation {
+  if (!value.strategy) return value
+  const counts = [...new Set([...query.matchAll(/(?<![\d.,+\-])(\d+)\s*(?:개(?!\s*(?:거래일|영업일))|종목)(?![가-힣])/g)].map(match => Number(match[1])))]
+  if (counts.length !== 1 || !Number.isSafeInteger(counts[0])) return value
+  const requested = counts[0]
+  const topN = Math.max(1, Math.min(50, requested))
+  const countAssumption = /top_n|(?:결과|종목)\s*(?:개수|최대)|(?:결과|종목)\s*수(?:\s|[=:은는가를]|$)|(?:상위|최대|기본)\s*\d+\s*(?:개|종목)/i
+  const assumptions = value.assumptions.filter(note => !countAssumption.test(note))
+  const changed = value.strategy.top_n !== topN
+  if (!changed && assumptions.length === value.assumptions.length) return value
+  const strategy = { ...value.strategy, top_n: topN }
+  if (changed) delete strategy.id // Let the engine regenerate the ID from the corrected DSL.
+  assumptions.push(requested === topN
+    ? `요청한 결과 수를 적용해 최대 ${topN}종목을 표시합니다.`
+    : `요청한 ${requested}종목은 엔진 개수 제한에 따라 최대 ${topN}종목으로 적용합니다.`)
+  return { ...value, strategy, assumptions }
+}
+
 export function useSearchUpgrade(
   query: string,
   keyword: { result: KeywordSearchResponse | null; loading: boolean; error: string | null },
@@ -98,7 +117,7 @@ export function useSearchUpgrade(
     if (!query) return
     const ctl = new AbortController()
     engineApi.translate(query, ctl.signal).then(
-      value => { if (!ctl.signal.aborted) setTranslation({ query, value, error: null }) },
+      value => { if (!ctl.signal.aborted) setTranslation({ query, value: applyRequestedCount(query, value), error: null }) },
       e => { if (!ctl.signal.aborted) setTranslation({ query, value: null, error: message(e) }) },
     )
     return () => ctl.abort()
