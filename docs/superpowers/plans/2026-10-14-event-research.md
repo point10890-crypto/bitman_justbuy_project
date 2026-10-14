@@ -59,10 +59,17 @@ Files: create `frontend/src/api/eventResearchApi.ts`, `pages/EventResearchPage.t
 
 - [x] Review whole diff independently; fix evidence correctness, security, restart/concurrency and UI failures with regressions.
 - [x] Entire backend/frontend suites, bootJar; count tests/skips from reports.
-- [ ] Commit only intended source/docs/tests; integrate and push main; verify remote hash.
-- [ ] Repository MiniPC deploy and both Pages deploy; confirm JAR local/public health, asset/SW hashes.
-- [ ] Exact public UI DOM and operational stored-data/API checks; record limitations and final SHA in verification report.
+- [x] Commit only intended source/docs/tests; integrate and push main; verify remote hash.
+- [x] Repository MiniPC deploy and both Pages deploy; confirm JAR local/public health, asset/SW hashes.
+- [x] Exact public UI DOM and operational stored-data/API checks; record limitations and deployed code SHA in verification report. KIS expanded research activation remains pending the user's factual information-rights confirmation; no license flag was invented.
 
 ## Progress
 
 2026-10-14: User explicitly selected full implementation and deployment in this thread. Native isolated worktree created on `codex/event-research`; initial unrelated primary changes preserved.
+
+### Final runtime stability correction
+
+- [x] Reproduce same contract/raw ZIP hash changes creating duplicate v2 publications after restart.
+- [x] RED/GREEN stable observed-content identity tests; preserve raw archive evidence and frozen results, separate v3 policy without backdating or migrating old cases.
+- [x] Independent correction review and full backend suite/bootJar, including transient financial-stage recovery (null/UNAVAILABLE/throw across restarts).
+- [ ] Commit/push/deploy correction; verify actual v3 collection, repeat/restart identity and exact live UI/API/hash evidence.

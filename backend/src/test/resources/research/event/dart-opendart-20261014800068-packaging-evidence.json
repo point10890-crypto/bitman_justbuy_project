@@ -1,0 +1,75 @@
+{
+  "receiptNo": "20261014800068",
+  "origin": "https://opendart.fss.or.kr/api/document.xml?rcept_no=20261014800068",
+  "viewerUrl": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261014800068",
+  "freshCapturedAt": "2026-10-14T02:10:17.370266100Z",
+  "originalFixture": "dart-opendart-20261014800068-original.zip",
+  "repackedFixture": "dart-opendart-20261014800068-repacked.zip",
+  "requestRedaction": "Authentication query parameter omitted. Captured with existing MiniPC runtime configuration; no secret value retained.",
+  "comparison": {
+    "previousArchiveSha256": "ffec02464bcd53ac2c54908271d326152b70578268ffe030e19467f73ce857a0",
+    "freshArchiveSha256": "ce3aa65f41e3c15d5cb6e49c74bca308a4d594e89154c46a0cc75124fc370536",
+    "archiveBytes": [
+      1794,
+      1794
+    ],
+    "entryName": [
+      "20261014800068.xml",
+      "20261014800068.xml"
+    ],
+    "entryByteLength": [
+      7777,
+      7777
+    ],
+    "entryBytesEqual": true,
+    "entryContentSha256": [
+      "9f8c7f6e273c63afef3cd726e2bd5fab59e34db17847f32863c97da14e50d467",
+      "9f8c7f6e273c63afef3cd726e2bd5fab59e34db17847f32863c97da14e50d467"
+    ],
+    "strictUtf8TextEqual": true,
+    "compressedPayloadEqual": true,
+    "crc32": [
+      "0x9e22295d",
+      "0x9e22295d"
+    ],
+    "zipEntryTimestamp": [
+      [
+        2107,
+        15,
+        2,
+        15,
+        11,
+        8
+      ],
+      [
+        2107,
+        15,
+        2,
+        16,
+        12,
+        24
+      ]
+    ],
+    "localDateTimeBytes": [
+      "6479e2ff",
+      "8c81e2ff"
+    ],
+    "centralDateTimeBytes": [
+      "6479e2ff",
+      "8c81e2ff"
+    ],
+    "centralOffset": [
+      1708,
+      1708
+    ],
+    "differingByteOffsets": [
+      10,
+      11,
+      1720,
+      1721
+    ],
+    "allDifferencesAreLocalOrCentralDateTime": true
+  },
+  "conclusion": "Actual archive samples have identical uncompressed original bytes, strict UTF-8 text, compressed payload, entry CRC and size. Only ZIP local and central DOS time fields differ at byte offsets 10, 11, 1720, 1721.",
+  "scopeLimit": "This comparison directly proves packaging-only change for these two saved samples. Previously stored runtime raw hashes without saved archives are not directly byte-compared here."
+}

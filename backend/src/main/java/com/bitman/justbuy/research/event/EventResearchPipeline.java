@@ -26,7 +26,7 @@ import java.util.function.*;
 @Service
 public class EventResearchPipeline implements AutoCloseable {
     private static final ZoneId KST=ZoneId.of("Asia/Seoul");
-    private static final String VERSION="event-research-v2";
+    private static final String VERSION="event-research-v3";
     public interface Bars { List<ResearchOutcomeEvaluator.SessionBar> read(String code,LocalDate from,LocalDate to); }
     public record Ports(Supplier<DartSupplyContractSource.Snapshot> contracts,Supplier<KindBuybackSource.Snapshot> buybacks,
         Function<List<String>,DartFinancialEvidenceService.EvidenceSnapshot> financial,
@@ -96,10 +96,12 @@ public class EventResearchPipeline implements AutoCloseable {
             var issues=new LinkedHashSet<>(source.issues());List<DartSupplyContractSource.Contract> contracts=source.contracts().stream().filter(c->c!=null&&c.supplierCode()!=null&&c.supplierCode().matches("[0-9]{6}")
                 &&c.receiptNo()!=null&&c.receiptNo().matches("[0-9]{14}")&&c.firstSeenAt()!=null&&!c.firstSeenAt().isAfter(clock.instant())).limit(12).toList();
             JsonNode lastCommitted=store.load().orElse(null);
+            List<JsonNode> previousContracts=store.relationshipHistory();
+            Map<String,ObjectNode> retainedFinancialCases=retainedFinancialCases(previousContracts,lastCommitted,clock.instant());
             List<DartSupplyContractSource.Contract> relationshipEvidence=new ArrayList<>();
             // Fresh amendments/withdrawals must precede the bounded archive inspection.
             for(var c:contracts)relationshipEvidence.add(withFirstSeen(c,store.firstSeen(c.receiptNo(),c.firstSeenAt())));
-            for(JsonNode c:store.relationshipHistory())if(!"CUSTOMER_EVENT_PROPAGATION".equals(c.path("origin").asText()))relationshipEvidence.add(relationshipContract(c));
+            for(JsonNode c:previousContracts)if(!"CUSTOMER_EVENT_PROPAGATION".equals(c.path("origin").asText()))relationshipEvidence.add(relationshipContract(c));
             var graph=new EconomicLinkService();var links=graph.relationships(relationshipEvidence,clock.instant());
             List<DartSupplyContractSource.Filing> filings=new ArrayList<>();
             for(var f:ports.filings().get())filings.add(new DartSupplyContractSource.Filing(f.stockCode(),f.corpName(),f.receiptNo(),f.title(),f.filingDate(),store.firstSeen(f.receiptNo(),f.firstSeenAt()),f.sourceUrl()));
@@ -113,15 +115,19 @@ public class EventResearchPipeline implements AutoCloseable {
                 budget(deadline);try{var k=ports.kis().apply(batch);if(k!=null&&k.candidates()!=null)for(var stock:k.candidates())if(batch.contains(stock.stockCode()))markets.put(stock.stockCode(),stock);}catch(RuntimeException e){issues.add("KIS_SOURCE_UNAVAILABLE");}
                 budget(deadline);try{var k=ports.kiwoom().apply(batch);if(k!=null&&k.get("candidates") instanceof Map<?,?> candidates)for(String code:batch)if(candidates.get(code) instanceof Map<?,?> facts){var factsWithSource=new LinkedHashMap<String,Object>();facts.forEach((key,value)->factsWithSource.put(key.toString(),value));factsWithSource.put("source",k.get("source"));factsWithSource.put("environment",k.get("environment"));factsWithSource.put("status",k.get("status"));kiwoom.put(code,factsWithSource);}}catch(RuntimeException e){issues.add("KIWOOM_SOURCE_UNAVAILABLE");}
             }
-            long financeAvailable=finances.values().stream().filter(f->f.facts()!=null&&"KRW".equals(f.facts().currency())&&f.facts().revenue()!=null).count();
+            long financeAvailable=finances.values().stream().filter(f->verifiedFinancialReceipt(f,f.stockCode(),clock.instant())!=null&&f.facts().revenue()!=null).count();
             long kisAvailable=markets.values().stream().filter(m->"AVAILABLE".equals(m.valuation().get("status"))).count();
             if(financeAvailable<codes.size())issues.add("FINANCIAL_COVERAGE_PARTIAL");if(kisAvailable<codes.size())issues.add("KIS_PRICE_COVERAGE_PARTIAL");
             Instant cutoff=clock.instant();ArrayNode candidates=mapper.createArrayNode();var aiBudget=new AiRunBudget();
             for(var original:contracts) {
                 budget(deadline);Instant first=store.firstSeen(original.receiptNo(),original.firstSeenAt());var contract=withFirstSeen(original,first);
-                var financial=finances.get(contract.supplierCode());String financialReceipt=financial==null||financial.facts()==null?"UNKNOWN":financial.facts().receiptNo();
-                String id=hash(VERSION+":"+contract.receiptNo()+":"+contract.documentHash()+":"+financialReceipt);
-                ObjectNode prior=store.caseById(id).map(n->(ObjectNode)n).orElse(null);
+                var financial=finances.get(contract.supplierCode());String financialReceipt=verifiedFinancialReceipt(financial,contract.supplierCode(),cutoff);
+                String contractFingerprint=contractFingerprint(contract);
+                String id=hash(VERSION+":"+contract.receiptNo()+":"+contractFingerprint+":"+Objects.toString(financialReceipt,"UNKNOWN"));
+                // A temporary financial-stage outage cannot replace previously verified facts with UNKNOWN.
+                ObjectNode retained=financialReceipt==null?retainedFinancialCases.get(contractFingerprint):null;
+                ObjectNode prior=retained!=null?retained.deepCopy():store.caseById(id).map(n->(ObjectNode)n).orElse(null);
+                if(retained!=null)issues.add("FINANCIAL_PRIOR_EVIDENCE_RETAINED");
                 if(prior!=null) {
                     prior.set("currentMarket",marketContext(contract.supplierCode(),markets,kiwoom));
                     retryVerification(prior,contract,aiBudget);
@@ -132,7 +138,7 @@ public class EventResearchPipeline implements AutoCloseable {
                 var candidate=mapper.createObjectNode();candidate.put("caseId",id);candidate.put("stockCode",contract.supplierCode());candidate.put("stockName",contract.supplierName());
                 candidate.put("customerName",contract.customerName());candidate.put("product",contract.product());candidate.put("contractAmountWon",decimal(contract.amountWon()));candidate.put("contractDeltaWon",decimal(calculation.incrementalContractAmountWon()));
                 candidate.put("sourceUrl",contract.sourceUrl());candidate.put("receiptNo",contract.receiptNo());candidate.put("firstSeenAt",first.toString());candidate.put("publishedAt",cutoff.toString());candidate.put("filingDate",Objects.toString(contract.filingDate(),null));
-                candidate.put("amendmentStatus",contract.amendmentStatus());candidate.put("evidenceText",contract.evidenceText());candidate.put("documentHash",contract.documentHash());candidate.put("policyVersion",VERSION);
+                candidate.put("amendmentStatus",contract.amendmentStatus());candidate.put("evidenceText",contract.evidenceText());candidate.put("documentHash",contract.documentHash());candidate.put("contractFingerprint",contractFingerprint);candidate.put("policyVersion",VERSION);
                 candidate.put("contractStartDate",Objects.toString(contract.startDate(),null));candidate.put("contractEndDate",Objects.toString(contract.endDate(),null));
                 candidate.set("financial",exactNumbers(mapper.valueToTree(financial)));candidate.set("scenario",exactNumbers(mapper.valueToTree(calculation)));
                 writeVerification(candidate,checked);
@@ -170,6 +176,32 @@ public class EventResearchPipeline implements AutoCloseable {
     }
     private ObjectNode marketContext(String code,Map<String,KisResearchEvidenceService.CandidateEvidence> markets,Map<String,Object> kiwoom) {
         var market=mapper.createObjectNode();market.set("kis",exactNumbers(mapper.valueToTree(markets.get(code))));market.set("kiwoom",exactNumbers(mapper.valueToTree(kiwoom.get(code))));return market;
+    }
+    private static String verifiedFinancialReceipt(DartFinancialEvidenceService.StockEvidence evidence,String code,Instant cutoff) {
+        if(evidence==null||!Objects.equals(code,evidence.stockCode())||!Set.of("COMPLETE","PARTIAL","AVAILABLE","PARTIAL_COVERAGE").contains(Objects.toString(evidence.status(),""))
+            ||evidence.capturedAt()==null||evidence.capturedAt().isAfter(cutoff)||evidence.facts()==null)return null;
+        var facts=evidence.facts();LocalDate date=cutoff.atZone(KST).toLocalDate();String receipt=facts.receiptNo();
+        return receipt!=null&&receipt.matches("[0-9]{14}")&&"KRW".equals(facts.currency())&&facts.businessYear()<=date.getYear()
+            &&(facts.filingDate()==null||!facts.filingDate().isAfter(date))&&EventEvidenceVerifier.officialSource(facts.sourceUrl())?receipt:null;
+    }
+    private Map<String,ObjectNode> retainedFinancialCases(List<JsonNode> history,JsonNode latest,Instant cutoff) {
+        var retained=new HashMap<String,ObjectNode>();List<JsonNode> bounded=new ArrayList<>(history);
+        if(latest!=null)latest.path("candidates").forEach(bounded::add);
+        for(JsonNode candidate:bounded)try {
+            String fingerprint=candidate.path("contractFingerprint").asText(),code=candidate.path("stockCode").asText(),receipt=candidate.path("receiptNo").asText();
+            Instant published=parseInstant(candidate.path("publishedAt").asText());
+            if(!VERSION.equals(candidate.path("policyVersion").asText())||!"SUPPLIER_CONTRACT".equals(candidate.path("origin").asText())||!fingerprint.matches("[a-f0-9]{64}")
+                ||published==null||published.isAfter(cutoff))continue;
+            var financial=mapper.treeToValue(candidate.path("financial"),DartFinancialEvidenceService.StockEvidence.class);
+            String financialReceipt=verifiedFinancialReceipt(financial,code,published);
+            JsonNode observed=candidate.path("scenario").path("observed");Instant known=parseInstant(observed.path("financialKnownAt").asText());
+            if(financialReceipt==null||known==null||known.isAfter(published)||!code.equals(observed.path("supplierCode").asText())||!receipt.equals(observed.path("receiptNo").asText())
+                ||number(observed.path("historicalRevenueWon"))==null||number(observed.path("historicalOperatingProfitWon"))==null
+                ||!candidate.path("caseId").asText().equals(hash(VERSION+":"+receipt+":"+fingerprint+":"+financialReceipt)))continue;
+            ObjectNode prior=retained.get(fingerprint);Instant priorPublication=prior==null?null:parseInstant(prior.path("publishedAt").asText());
+            if(priorPublication==null||published.isAfter(priorPublication))retained.put(fingerprint,((ObjectNode)candidate).deepCopy());
+        }catch(Exception ignored){} // Malformed/legacy evidence is never promoted into a current-policy case.
+        return retained;
     }
     private static final class AiRunBudget {private int providerCalls;}
     private record VerificationCheck(EventEvidenceVerifier.Verdict verdict,int providerAttempts,boolean providerAttempted) {}
@@ -343,6 +375,21 @@ public class EventResearchPipeline implements AutoCloseable {
         if(node.isArray()){ArrayNode result=JsonNodeFactory.instance.arrayNode();node.forEach(n->result.add(exactNumbers(n)));return result;}return node;
     }
     private static Instant parseInstant(String value){try{return Instant.parse(value);}catch(RuntimeException e){return null;}}
+    private static String contractFingerprint(DartSupplyContractSource.Contract contract) {
+        // DART may repackage identical document content with a different ZIP timestamp/hash.
+        // Identity follows source facts and evidence, while documentHash still identifies the original fetched bytes.
+        var facts=JsonNodeFactory.instance.objectNode().put("format","CONTRACT_FACTS_V1")
+            .put("supplierCode",canonicalText(contract.supplierCode())).put("supplierName",canonicalText(contract.supplierName()))
+            .put("customerName",canonicalText(contract.customerName())).put("product",canonicalText(contract.product()))
+            .put("amountWon",canonicalDecimal(contract.amountWon())).put("previousAmountWon",canonicalDecimal(contract.previousAmountWon()))
+            .put("recentSalesWon",canonicalDecimal(contract.recentSalesWon())).put("startDate",Objects.toString(contract.startDate(),null))
+            .put("endDate",Objects.toString(contract.endDate(),null)).put("filingDate",Objects.toString(contract.filingDate(),null))
+            .put("receiptNo",canonicalText(contract.receiptNo())).put("sourceUrl",canonicalText(contract.sourceUrl()))
+            .put("amendmentStatus",canonicalText(contract.amendmentStatus())).put("evidenceText",canonicalText(contract.evidenceText()));
+        return hash(facts.toString());
+    }
+    private static String canonicalText(String value){return value==null?null:value.replaceAll("[\\s\\u00a0]+"," ").strip();}
+    private static String canonicalDecimal(BigDecimal value){return value==null?null:value.stripTrailingZeros().toPlainString();}
     private static String hash(String input){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(input.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException("HASH_UNAVAILABLE");}}
     private static void budget(long deadline){if(Thread.currentThread().isInterrupted()||System.nanoTime()>deadline)throw new IllegalStateException("RESEARCH_BUDGET_EXCEEDED");}
     @PreDestroy @Override public void close(){worker.shutdownNow();}

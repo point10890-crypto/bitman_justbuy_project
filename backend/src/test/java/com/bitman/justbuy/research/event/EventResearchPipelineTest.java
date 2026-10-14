@@ -233,6 +233,129 @@ class EventResearchPipelineTest {
         }
     }
 
+    @Test void packagingHashAndCaptureTimeChangesCannotRepublishSameFactsAfterRestart() {
+        var mapper=new ObjectMapper().findAndRegisterModules();var store=new EventResearchStore(directory,mapper);var clock=new MutableClock(now);
+        var current=new java.util.concurrent.atomic.AtomicReference<>(contract(now));var price=new java.util.concurrent.atomic.AtomicReference<>("12000");
+        var ports=changingContractPorts(clock,current,codes->finance("100","10",clock.instant()),codes->new KisResearchEvidenceService.EvidenceBatch("AVAILABLE",clock.instant(),List.of(market("AVAILABLE",price.get(),clock.instant()))));
+        JsonNode original;
+        try(var pipeline=new EventResearchPipeline(ports,new EventEvidenceVerifier(null,mapper),store,mapper,clock,true)) {
+            pipeline.refreshNow();original=pipeline.snapshot().path("candidates").get(0).deepCopy();
+        }
+        clock.value=clock.value.plusSeconds(1800);var c=current.get();
+        current.set(new DartSupplyContractSource.Contract(c.supplierCode(),c.supplierName(),c.customerName(),c.product(),new BigDecimal("1000000.000"),c.previousAmountWon(),c.recentSalesWon(),
+            c.startDate(),c.endDate(),c.filingDate(),c.receiptNo(),c.sourceUrl(),clock.instant(),c.amendmentStatus(),"\n  원문   근거  ","b".repeat(64)));price.set("13000");
+        try(var restarted=new EventResearchPipeline(ports,new EventEvidenceVerifier(null,mapper),store,mapper,clock,true)) {
+            restarted.refreshNow();var currentCase=restarted.snapshot().path("candidates").get(0);
+            assertEquals(original.path("caseId"),currentCase.path("caseId"));assertEquals(original.path("publishedAt"),currentCase.path("publishedAt"));
+            assertEquals(original.path("firstSeenAt"),currentCase.path("firstSeenAt"));assertEquals(original.path("scenario"),currentCase.path("scenario"));
+            assertEquals(original.path("evaluationPublishedAt"),currentCase.path("evaluationPublishedAt"));assertEquals(original.path("outcomes"),currentCase.path("outcomes"));
+            assertEquals(original.path("financial"),currentCase.path("financial"));assertEquals(original.path("market"),currentCase.path("market"));
+            assertEquals("a".repeat(64),currentCase.path("documentHash").asText());assertEquals("13000",currentCase.path("currentMarket").path("kis").path("valuation").path("currentPrice").asText());
+            assertEquals("event-research-v3",currentCase.path("policyVersion").asText());assertTrue(currentCase.path("contractFingerprint").asText().matches("[a-f0-9]{64}"));
+            assertEquals(1,store.cases().size());
+        }
+    }
+
+    @Test void actualContractFactOrEvidenceChangeCreatesNewCaseEvenWhenTransportHashIsSame() {
+        var mapper=new ObjectMapper().findAndRegisterModules();var store=new EventResearchStore(directory,mapper);var clock=new MutableClock(now);
+        var current=new java.util.concurrent.atomic.AtomicReference<>(contract(now));var ports=changingContractPorts(clock,current,codes->null,codes->null);
+        try(var pipeline=new EventResearchPipeline(ports,new EventEvidenceVerifier(null,mapper),store,mapper,clock,true)) {
+            pipeline.refreshNow();var original=pipeline.snapshot().path("candidates").get(0).deepCopy();String originalId=original.path("caseId").asText();
+            clock.value=clock.value.plusSeconds(1800);var c=current.get();
+            current.set(new DartSupplyContractSource.Contract(c.supplierCode(),c.supplierName(),c.customerName(),c.product(),new BigDecimal("2000000"),c.previousAmountWon(),c.recentSalesWon(),
+                c.startDate(),c.endDate(),c.filingDate(),c.receiptNo(),c.sourceUrl(),clock.instant(),c.amendmentStatus(),c.evidenceText(),c.documentHash()));
+            pipeline.refreshNow();var revised=pipeline.snapshot().path("candidates").get(0).deepCopy();assertNotEquals(originalId,revised.path("caseId").asText());
+            assertEquals("2000000",revised.path("contractAmountWon").asText());assertEquals(original.path("publishedAt"),store.caseById(originalId).orElseThrow().path("publishedAt"));
+            clock.value=clock.value.plusSeconds(1800);c=current.get();
+            current.set(new DartSupplyContractSource.Contract(c.supplierCode(),c.supplierName(),c.customerName(),c.product(),c.amountWon(),c.previousAmountWon(),c.recentSalesWon(),
+                c.startDate(),c.endDate(),c.filingDate(),c.receiptNo(),c.sourceUrl(),clock.instant(),c.amendmentStatus(),"원문 근거. 계약 해제 조건 추가",c.documentHash()));
+            pipeline.refreshNow();assertNotEquals(revised.path("caseId"),pipeline.snapshot().path("candidates").get(0).path("caseId"));assertEquals(3,store.cases().size());
+        }
+    }
+
+    @Test void differentFinancialReceiptCreatesSeparateImmutableRevision() {
+        var mapper=new ObjectMapper().findAndRegisterModules();var store=new EventResearchStore(directory,mapper);var clock=new MutableClock(now);
+        var current=new java.util.concurrent.atomic.AtomicReference<>(contract(now));var receipt=new java.util.concurrent.atomic.AtomicReference<>("20260814000123");
+        var ports=changingContractPorts(clock,current,codes->finance("100","10",clock.instant(),receipt.get()),codes->null);
+        try(var pipeline=new EventResearchPipeline(ports,new EventEvidenceVerifier(null,mapper),store,mapper,clock,true)) {
+            pipeline.refreshNow();var original=pipeline.snapshot().path("candidates").get(0).deepCopy();
+            clock.value=clock.value.plusSeconds(1800);receipt.set("20260814000124");pipeline.refreshNow();var revised=pipeline.snapshot().path("candidates").get(0);
+            assertNotEquals(original.path("caseId"),revised.path("caseId"));assertEquals("20260814000124",revised.path("financial").path("facts").path("receiptNo").asText());
+            assertEquals(original.path("publishedAt"),store.caseById(original.path("caseId").asText()).orElseThrow().path("publishedAt"));
+            assertEquals(original.path("financial"),store.caseById(original.path("caseId").asText()).orElseThrow().path("financial"));assertEquals(2,store.cases().size());
+        }
+    }
+
+    @Test void v2CasesAndComparisonsRemainSeparateFromStableIdentityPolicy() {
+        var mapper=new ObjectMapper().findAndRegisterModules();var store=new EventResearchStore(directory,mapper);var clock=new MutableClock(now);
+        var legacy=capture(mapper,"2026-09-01",true).put("challengerPolicyId","event-research-v2").put("inputVersion","event-research-v2");store.capturePortfolio(legacy);
+        var initial=mapper.createObjectNode().put("status","PARTIAL").put("asOf",now.toString());
+        var previous=initial.putArray("candidates").addObject().put("caseId","f".repeat(64)).put("stockCode","000660").put("policyVersion","event-research-v2")
+            .put("publishedAt",now.minusSeconds(3600).toString()).put("firstSeenAt",now.minusSeconds(3600).toString()).put("documentHash","a".repeat(64));previous.putObject("scenario").put("status","PARTIAL");
+        initial.putArray("issues");initial.putObject("coverage");initial.putObject("buybacks").putArray("rows");store.save(initial);
+        var frozen=previous.deepCopy();var current=new java.util.concurrent.atomic.AtomicReference<>(contract(now));
+        try(var pipeline=new EventResearchPipeline(changingContractPorts(clock,current,codes->null,codes->null),new EventEvidenceVerifier(null,mapper),store,mapper,clock,true)) {
+            pipeline.refreshNow();assertEquals("event-research-v3",pipeline.snapshot().path("candidates").get(0).path("policyVersion").asText());
+            assertEquals(0,pipeline.snapshot().path("comparison").path("capturedDates").asInt());assertEquals(legacy,store.portfolios().getFirst());
+            var old=store.caseById("f".repeat(64)).orElseThrow();for(String field:List.of("caseId","policyVersion","publishedAt","firstSeenAt","documentHash","scenario"))assertEquals(frozen.path(field),old.path(field));
+        }
+    }
+
+    @Test void transientFinancialNullUnavailableAndExceptionPreserveCompletedEvidenceAcrossRestarts() {
+        var mapper=new ObjectMapper().findAndRegisterModules();var store=new EventResearchStore(directory,mapper);var clock=new MutableClock(now);
+        var current=new java.util.concurrent.atomic.AtomicReference<>(contract(now));var phase=new AtomicInteger();var price=new java.util.concurrent.atomic.AtomicReference<>("12000");
+        var ports=changingContractPorts(clock,current,codes->{
+            if(phase.get()==1)return null;
+            if(phase.get()==2)return new DartFinancialEvidenceService.EvidenceSnapshot("UNAVAILABLE",clock.instant(),List.of(new DartFinancialEvidenceService.StockEvidence("000660","00000001","UNAVAILABLE",clock.instant(),null,List.of("TRANSPORT_OR_PARSE_ERROR"))));
+            if(phase.get()==3)throw new IllegalStateException("transport failure");
+            var result=finance("100","10",clock.instant());var stock=result.stocks().getFirst();
+            return new DartFinancialEvidenceService.EvidenceSnapshot("COMPLETE",clock.instant(),List.of(new DartFinancialEvidenceService.StockEvidence(stock.stockCode(),stock.corpCode(),"COMPLETE",stock.capturedAt(),stock.facts(),stock.issues())));
+        },codes->new KisResearchEvidenceService.EvidenceBatch("AVAILABLE",clock.instant(),List.of(market("AVAILABLE",price.get(),clock.instant()))));
+        JsonNode original;
+        try(var pipeline=new EventResearchPipeline(ports,new EventEvidenceVerifier(null,mapper),store,mapper,clock,true)) {pipeline.refreshNow();original=pipeline.snapshot().path("candidates").get(0).deepCopy();}
+        assertEquals("COMPLETE",original.path("financial").path("status").asText());assertEquals("PARTIAL",original.path("scenario").path("status").asText());
+        for(int i=1;i<=3;i++) {
+            phase.set(i);clock.value=clock.value.plusSeconds(1800);price.set(Integer.toString(12000+i*1000));
+            try(var restarted=new EventResearchPipeline(ports,new EventEvidenceVerifier(null,mapper),store,mapper,clock,true)) {
+                restarted.refreshNow();var snapshot=restarted.snapshot();var preserved=snapshot.path("candidates").get(0);
+                for(String field:List.of("caseId","publishedAt","financial","scenario","market","evaluationPublishedAt","outcomes"))assertEquals(original.path(field),preserved.path(field),"Failed financial phase "+i+" must preserve "+field);
+                assertEquals(price.get(),preserved.path("currentMarket").path("kis").path("valuation").path("currentPrice").asText());
+                assertEquals(0,snapshot.path("coverage").path("financialReferences").asInt());assertTrue(snapshot.path("issues").toString().contains("FINANCIAL_COVERAGE_PARTIAL"));assertEquals(1,store.cases().size());
+            }
+        }
+    }
+
+    @Test void firstUnknownFinanceThenActualReceiptCreatesNewResearchInsteadOfRewritingUnknownCase() {
+        var mapper=new ObjectMapper().findAndRegisterModules();var store=new EventResearchStore(directory,mapper);var clock=new MutableClock(now);
+        var current=new java.util.concurrent.atomic.AtomicReference<>(contract(now));var available=new java.util.concurrent.atomic.AtomicBoolean();
+        var ports=changingContractPorts(clock,current,codes->available.get()?finance("100","10",clock.instant()):null,codes->null);
+        try(var pipeline=new EventResearchPipeline(ports,new EventEvidenceVerifier(null,mapper),store,mapper,clock,true)) {
+            pipeline.refreshNow();var unknown=pipeline.snapshot().path("candidates").get(0).deepCopy();
+            assertTrue(unknown.path("financial").isNull());clock.value=clock.value.plusSeconds(1800);available.set(true);pipeline.refreshNow();var observed=pipeline.snapshot().path("candidates").get(0);
+            assertNotEquals(unknown.path("caseId"),observed.path("caseId"));assertNotEquals(unknown.path("publishedAt"),observed.path("publishedAt"));
+            assertEquals("20260814000123",observed.path("financial").path("facts").path("receiptNo").asText());
+            assertTrue(store.caseById(unknown.path("caseId").asText()).orElseThrow().path("financial").isNull());assertEquals(2,store.cases().size());
+        }
+    }
+
+    @Test void temporaryFinancialFailureCannotInheritCompleteEvidenceFromLegacyOrDifferentContractFacts() {
+        var mapper=new ObjectMapper().findAndRegisterModules();var store=new EventResearchStore(directory,mapper);var clock=new MutableClock(now);
+        var current=new java.util.concurrent.atomic.AtomicReference<>(contract(now));JsonNode valid;
+        try(var pipeline=new EventResearchPipeline(changingContractPorts(clock,current,codes->finance("100","10",clock.instant()),codes->null),new EventEvidenceVerifier(null,mapper),store,mapper,clock,true)) {
+            pipeline.refreshNow();valid=pipeline.snapshot().path("candidates").get(0).deepCopy();
+        }
+        for(boolean legacy:List.of(true,false)) {
+            var isolated=new EventResearchStore(directory.resolve(legacy?"legacy-only":"other-fingerprint"),mapper);
+            var previous=(ObjectNode)valid.deepCopy();previous.put("caseId","e".repeat(64));
+            if(legacy)previous.put("policyVersion","event-research-v2");else previous.put("contractFingerprint","d".repeat(64));
+            var initial=mapper.createObjectNode().put("status","PARTIAL").put("asOf",clock.instant().toString());initial.putArray("candidates").add(previous);initial.putArray("issues");initial.putObject("coverage");initial.putObject("buybacks").putArray("rows");isolated.save(initial);
+            try(var pipeline=new EventResearchPipeline(changingContractPorts(clock,current,codes->null,codes->null),new EventEvidenceVerifier(null,mapper),isolated,mapper,clock,true)) {
+                pipeline.refreshNow();var candidate=pipeline.snapshot().path("candidates").get(0);
+                assertNotEquals("e".repeat(64),candidate.path("caseId").asText());assertTrue(candidate.path("financial").isNull());assertTrue(candidate.path("scenario").path("operatingProfitWon").isNull());
+            }
+        }
+    }
+
     private DartSupplyContractSource.Contract contract(Instant first) {
         return new DartSupplyContractSource.Contract("000660","공급사","확인고객","제품",new BigDecimal("1000000"),null,null,
             LocalDate.of(2026,10,14),LocalDate.of(2026,12,31),LocalDate.of(2026,10,14),"20261014000123","https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261014000123",first,"ORIGINAL","원문 근거","a".repeat(64));
@@ -246,14 +369,22 @@ class EventResearchPipelineTest {
         return new EventResearchPipeline.Ports(()->new DartSupplyContractSource.Snapshot("EMPTY",clock.instant(),List.of(),List.of()),
             ()->new KindBuybackSource.Snapshot("EMPTY",clock.instant(),List.of(),List.of()),codes->null,codes->null,codes->Map.of(),bars);
     }
+    private EventResearchPipeline.Ports changingContractPorts(MutableClock clock,java.util.concurrent.atomic.AtomicReference<DartSupplyContractSource.Contract> current,
+        java.util.function.Function<List<String>,DartFinancialEvidenceService.EvidenceSnapshot> finance,java.util.function.Function<List<String>,KisResearchEvidenceService.EvidenceBatch> kis) {
+        return new EventResearchPipeline.Ports(()->new DartSupplyContractSource.Snapshot("COMPLETE",clock.instant(),List.of(current.get()),List.of()),
+            ()->new KindBuybackSource.Snapshot("EMPTY",clock.instant(),List.of(),List.of()),finance,kis,codes->Map.of(),(code,from,to)->List.of());
+    }
     private static KisResearchEvidenceService.CandidateEvidence market(String status,String price,Instant time) {
         Map<String,Object> value=new LinkedHashMap<>();value.put("status",status);value.put("currentPrice",price);value.put("fetchedAt",time.toString());value.put("source","KIS OpenAPI");
         return new KisResearchEvidenceService.CandidateEvidence("000660",Map.of(),value,Map.of(),Map.of(),Map.of(),Map.of());
     }
     private static DartFinancialEvidenceService.EvidenceSnapshot finance(String revenue,String profit,Instant known) {
-        var facts=new DartFinancialEvidenceService.FinancialFacts(2026,"11012","CFS","KRW","20260814000123",LocalDate.of(2026,8,14),"2026-H1",
+        return finance(revenue,profit,known,"20260814000123");
+    }
+    private static DartFinancialEvidenceService.EvidenceSnapshot finance(String revenue,String profit,Instant known,String receipt) {
+        var facts=new DartFinancialEvidenceService.FinancialFacts(2026,"11012","CFS","KRW",receipt,LocalDate.of(2026,8,14),"2026-H1",
             new BigDecimal(revenue),new BigDecimal(profit),null,null,null,null,null,null,null,null,
-            "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260814000123",List.of(),null,null,"TEST_FIXTURE");
+            "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="+receipt,List.of(),null,null,"TEST_FIXTURE");
         return new DartFinancialEvidenceService.EvidenceSnapshot("AVAILABLE",known,List.of(new DartFinancialEvidenceService.StockEvidence("000660","00000001","AVAILABLE",known,facts,List.of())));
     }
     private static AiAgent agent(java.util.function.BooleanSupplier available,java.util.function.BiFunction<String,String,AgentResult> result) {
@@ -271,7 +402,7 @@ class EventResearchPipelineTest {
     private static JsonNode fact(JsonNode packet,String id){for(JsonNode f:packet.path("facts"))if(id.equals(f.path("id").asText()))return f;throw new AssertionError("Missing fact "+id);}
     private static ObjectNode capture(ObjectMapper mapper,String date,boolean verified) {
         var value=mapper.createObjectNode().put("captureId",date).put("decisionDate",date).put("decisionAt",date+"T08:00:00Z")
-            .put("baselinePolicyId","existing-swing-v1").put("challengerPolicyId","event-research-v2").put("inputVersion","event-research-v2")
+            .put("baselinePolicyId","existing-swing-v1").put("challengerPolicyId","event-research-v3").put("inputVersion","event-research-v3")
             .put("roundTripCostPct",verified?"0.2":null).put("costsVerified",verified);
         value.putObject("baselineWeights").put("005930","1");value.putObject("challengerWeights").put("000660","1");value.putArray("outcomes");return value;
     }
