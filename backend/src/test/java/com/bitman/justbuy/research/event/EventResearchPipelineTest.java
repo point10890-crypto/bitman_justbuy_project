@@ -219,6 +219,20 @@ class EventResearchPipelineTest {
         }
     }
 
+    @Test void earlierCalculationPolicyIsPreservedButExcludedFromCurrentLearning() {
+        var mapper=new ObjectMapper().findAndRegisterModules();var store=new EventResearchStore(directory,mapper);
+        var clock=new MutableClock(Instant.parse("2026-10-20T08:00:00Z"));
+        var legacy=capture(mapper,"2026-09-01",true).put("challengerPolicyId","event-research-v1").put("inputVersion","event-research-v1");
+        for(int horizon:new int[]{1,3,5,20})legacy.withArray("outcomes").addObject().put("horizonSessions",horizon).put("state","COMPLETE")
+            .put("baselineGross","5").put("challengerGross","8").put("baselineNet","4.8").put("challengerNet","7.8").put("netDelta","3").putArray("reasons");
+        store.capturePortfolio(legacy);
+        try(var pipeline=new EventResearchPipeline(emptyPorts(clock,(code,from,to)->{throw new AssertionError("Historic policy must not be rewritten");}),new EventEvidenceVerifier(null,mapper),store,mapper,clock,true)) {
+            pipeline.refreshNow();var comparison=pipeline.snapshot().path("comparison");
+            assertEquals(0,comparison.path("capturedDates").asInt());assertEquals(0,comparison.path("measuredDates").asInt());
+            assertEquals(0,comparison.path("independentDates").asInt());assertEquals(legacy,store.portfolios().getFirst());
+        }
+    }
+
     private DartSupplyContractSource.Contract contract(Instant first) {
         return new DartSupplyContractSource.Contract("000660","공급사","확인고객","제품",new BigDecimal("1000000"),null,null,
             LocalDate.of(2026,10,14),LocalDate.of(2026,12,31),LocalDate.of(2026,10,14),"20261014000123","https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261014000123",first,"ORIGINAL","원문 근거","a".repeat(64));
@@ -257,7 +271,7 @@ class EventResearchPipelineTest {
     private static JsonNode fact(JsonNode packet,String id){for(JsonNode f:packet.path("facts"))if(id.equals(f.path("id").asText()))return f;throw new AssertionError("Missing fact "+id);}
     private static ObjectNode capture(ObjectMapper mapper,String date,boolean verified) {
         var value=mapper.createObjectNode().put("captureId",date).put("decisionDate",date).put("decisionAt",date+"T08:00:00Z")
-            .put("baselinePolicyId","existing-swing-v1").put("challengerPolicyId","event-research-v1").put("inputVersion","event-research-v1")
+            .put("baselinePolicyId","existing-swing-v1").put("challengerPolicyId","event-research-v2").put("inputVersion","event-research-v2")
             .put("roundTripCostPct",verified?"0.2":null).put("costsVerified",verified);
         value.putObject("baselineWeights").put("005930","1");value.putObject("challengerWeights").put("000660","1");value.putArray("outcomes");return value;
     }

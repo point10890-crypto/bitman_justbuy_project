@@ -26,7 +26,7 @@ import java.util.function.*;
 @Service
 public class EventResearchPipeline implements AutoCloseable {
     private static final ZoneId KST=ZoneId.of("Asia/Seoul");
-    private static final String VERSION="event-research-v1";
+    private static final String VERSION="event-research-v2";
     public interface Bars { List<ResearchOutcomeEvaluator.SessionBar> read(String code,LocalDate from,LocalDate to); }
     public record Ports(Supplier<DartSupplyContractSource.Snapshot> contracts,Supplier<KindBuybackSource.Snapshot> buybacks,
         Function<List<String>,DartFinancialEvidenceService.EvidenceSnapshot> financial,
@@ -240,7 +240,9 @@ public class EventResearchPipeline implements AutoCloseable {
             }else captureStatus="CURRENT_BASELINE_UNAVAILABLE";
         }
         List<ResearchLearningService.Observation> learning=new ArrayList<>();Map<LocalDate,Set<String>> expected=new LinkedHashMap<>();int mature=0;JsonNode latestOutcomes=mapper.createArrayNode();
-        List<JsonNode> portfolioCaptures=store.portfolios();int cursor=portfolioCaptures.isEmpty()?0:store.load().map(n->n.path("portfolioEvaluationCursor").asInt()).orElse(0)%portfolioCaptures.size();
+        // A changed calculation policy cannot inherit or relabel prior policy outcomes.
+        List<JsonNode> portfolioCaptures=store.portfolios().stream().filter(c->VERSION.equals(c.path("inputVersion").asText())
+            &&VERSION.equals(c.path("challengerPolicyId").asText())).toList();int cursor=portfolioCaptures.isEmpty()?0:store.load().map(n->n.path("portfolioEvaluationCursor").asInt()).orElse(0)%portfolioCaptures.size();
         Set<String> selectedCaptures=new HashSet<>();int advanced=0;
         for(;advanced<portfolioCaptures.size()&&selectedCaptures.size()<2;advanced++) {
             JsonNode capture=portfolioCaptures.get((cursor+advanced)%portfolioCaptures.size());

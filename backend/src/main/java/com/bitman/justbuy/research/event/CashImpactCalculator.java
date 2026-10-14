@@ -34,7 +34,7 @@ public class CashImpactCalculator {
         var facts = finance == null ? null : finance.facts();
         LocalDate date = cutoff.atZone(KOREA).toLocalDate();
         boolean usableFinance = finance != null && contract.supplierCode() != null && contract.supplierCode().equals(finance.stockCode())
-            && Set.of("AVAILABLE", "PARTIAL", "PARTIAL_COVERAGE").contains(finance.status() == null ? "" : finance.status())
+            && Set.of("COMPLETE", "AVAILABLE", "PARTIAL", "PARTIAL_COVERAGE").contains(finance.status() == null ? "" : finance.status())
             && finance.capturedAt() != null && !finance.capturedAt().isAfter(cutoff) && facts != null && "KRW".equals(facts.currency())
             && facts.businessYear() <= date.getYear() && (facts.filingDate() == null || !facts.filingDate().isAfter(date))
             && money(facts.revenue()) && facts.revenue().signum() > 0 && money(facts.operatingProfit())
@@ -57,7 +57,9 @@ public class CashImpactCalculator {
         if (usableFinance) {
             BigDecimal full = facts.operatingProfit().divide(facts.revenue(), 18, RoundingMode.HALF_EVEN);
             BigDecimal half = full.multiply(new BigDecimal("0.5"));
-            margin = new Range(full.min(half), full.max(half));
+            // Multiplying an odd-ending 18-place ratio by one half creates 19 places.
+            // Quantize generated bounds outward to the supported precision; keep input validation strict.
+            margin = new Range(full.min(half).setScale(18,RoundingMode.FLOOR), full.max(half).setScale(18,RoundingMode.CEILING));
         }
         Assumptions assumptions = new Assumptions(point(BigDecimal.ONE), recognition, margin, null, null, null, null,
             forecastStart, forecastEnd, null, "HISTORICAL_ISSUER_MARGIN_PROXY");

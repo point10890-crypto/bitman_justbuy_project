@@ -130,6 +130,55 @@ class CashImpactCalculatorTest {
         }
     }
 
+    @Test void runtimeAdapterAcceptsActualCompleteStatusAndKeepsLossMakingIssuerMarginNegative() {
+        // Schema and disclosed scalar values reproduced from the final runtime adapter check.
+        // capturedAt below is deliberately a test cutoff edge, not a claimed historical capture.
+        var contract=new DartSupplyContractSource.Contract("010400","우진아이엔에스","롯데건설주식회사","공시 원문 계약",new BigDecimal("14378000000"),null,null,
+            LocalDate.parse("2026-10-13"),LocalDate.parse("2029-11-30"),LocalDate.parse("2026-10-14"),"20261014800068",
+            "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261014800068",Instant.parse("2026-10-14T01:32:39Z"),"ORIGINAL","원문 공급계약 근거","fixture-hash");
+        var result=calculator.calculate(contract,completeRuntimeFinance("010400",CUTOFF.minusSeconds(1)),CUTOFF);
+        assertThat(result.status()).withFailMessage("Expected parsed COMPLETE finance to be usable: %s",result.issues()).isEqualTo("PARTIAL");
+        assertThat(result.observed().historicalRevenueWon()).isEqualByComparingTo("60533656657");
+        assertThat(result.observed().historicalOperatingProfitWon()).isEqualByComparingTo("-1863539635");
+        assertThat(result.observed().financialPeriod()).isEqualTo("2026 반기 3개월");
+        assertThat(result.observed().financialSourceUrl()).endsWith("rcpNo=20260814000853");
+        assertThat(result.assumptions().operatingMargin()).isNotNull();
+        assertThat(result.assumptions().operatingMargin().lower()).isCloseTo(new BigDecimal("-0.030785181961818654"),within(new BigDecimal("0.00000000000001")));
+        assertThat(result.assumptions().operatingMargin().upper()).isNegative();
+        assertThat(result.operatingProfitWon()).isNotNull();assertThat(result.operatingProfitWon().lower()).isLessThanOrEqualTo(result.operatingProfitWon().upper());
+        assertThat(result.operatingProfitWon().upper()).isNegative();
+        assertThat(result.cashFlowWon()).isNull();
+        assertThat(result.issues()).contains("HISTORICAL_ISSUER_MARGIN_PROXY","FINANCIAL_FILING_DATE_UNKNOWN_CAPTURE_TIME_USED").doesNotContain("FINANCIAL_EVIDENCE_UNKNOWN");
+    }
+
+    @Test void completeProviderStatusDoesNotBypassIssuerOrFutureEvidenceValidation() {
+        for(var evidence:List.of(completeRuntimeFinance("000660",CUTOFF.minusSeconds(1)),completeRuntimeFinance("005930",CUTOFF.plusSeconds(1)))) {
+            var result=calculator.calculate(contract(),evidence,CUTOFF);
+            assertThat(result.operatingProfitWon()).isNull();assertThat(result.cashFlowWon()).isNull();assertThat(result.issues()).contains("FINANCIAL_EVIDENCE_UNKNOWN");
+        }
+    }
+
+    @Test void recurringPositiveHistoricalMarginKeepsGeneratedProxyWithinSupportedPrecision() {
+        // The half of an 18-place odd-ending ratio has 19 places; that generated precision
+        // must not turn a valid financial report into INVALID_ASSUMPTIONS.
+        var facts=new DartFinancialEvidenceService.FinancialFacts(2025,"11011","CFS","KRW","20260320000123",LocalDate.parse("2026-03-20"),"2025 ANNUAL",
+            new BigDecimal("300000000000"),new BigDecimal("100000000000"),null,null,null,null,null,null,null,null,
+            "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260320000123",List.of(),null,null,"TEST_REPEATING_RATIO");
+        var finance=new DartFinancialEvidenceService.StockEvidence("005930","fixture","PARTIAL",CUTOFF.minusSeconds(1),facts,List.of());
+        var result=calculator.calculate(contract(),finance,CUTOFF);
+        assertThat(result.status()).withFailMessage("Valid repeating proxy must not be rejected: %s",result.issues()).isEqualTo("PARTIAL");
+        assertRange(result.assumptions().operatingMargin(),"0.166666666666666666","0.333333333333333333");
+        assertThat(result.operatingProfitWon()).isNotNull();assertThat(result.operatingProfitWon().lower()).isPositive();
+        assertThat(result.issues()).doesNotContain("INVALID_ASSUMPTIONS");
+    }
+
+    private static DartFinancialEvidenceService.StockEvidence completeRuntimeFinance(String code,Instant capturedAt) {
+        var facts=new DartFinancialEvidenceService.FinancialFacts(2026,"11012","CFS","KRW","20260814000853",null,"2026 반기 3개월",
+            new BigDecimal("60533656657"),new BigDecimal("-1863539635"),null,null,null,null,null,null,null,null,
+            "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260814000853",List.of(),null,null,"REPRODUCED_PROVIDER_STATUS");
+        return new DartFinancialEvidenceService.StockEvidence(code,"fixture","COMPLETE",capturedAt,facts,List.of());
+    }
+
     static DartSupplyContractSource.Contract contract() {
         return new DartSupplyContractSource.Contract("005930", "공급회사", "실명 고객", "공시된 제품", new BigDecimal("100000000000"), null,
             new BigDecimal("200000000000"), LocalDate.parse("2026-01-01"), LocalDate.parse("2026-12-31"), LocalDate.parse("2026-10-14"),

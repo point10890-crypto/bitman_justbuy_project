@@ -29,7 +29,7 @@ This release measures evidence and future reference-price outcomes; it does not 
 
 Local verification passed before commit:
 
-- Backend: `gradlew test bootJar --no-daemon`, 123 test classes, **1,173 tests: 1,172 passed, zero failures/errors, one existing Windows symlink-privilege skip**. Event/controller tests account for 120 tests. The complete run finished in 1m58s after the runtime format correction.
+- Backend: `gradlew test bootJar --no-daemon`, 123 test classes, **1,177 tests: 1,176 passed, zero failures/errors, one existing Windows symlink-privilege skip**. Event/controller tests account for 124 tests. The complete run finished in 1m42s after all runtime adapter corrections.
 - Frontend: **24 files / 244 tests passed**, TypeScript and Vite build passed; JS `index-BbECemln.js`, CSS `index-YeJYe1Tn.css`.
 - Exact actual-format KIND regressions: 5 tests passed. Supply graph regression cycles reproduced changed-product/unknown-customer tombstones (16 tests / 2 failures), then late historical re-discovery (17 tests / 1 failure); the final full suite passed all 17.
 - Pipeline recovery: 15 tests passed; Store recovery/capacity: 14 tests passed. No live keys or member databases are fixtures.
@@ -40,3 +40,9 @@ Commit/push, MiniPC/Pages deployment and exact live DOM/runtime checks are the r
 ## Runtime format correction
 
 The first deployed collection correctly failed closed: all selected OpenDART originals were rejected. A same-MiniPC Java probe confirmed a valid key, successful listings and an actual ZIP with an XML filename containing UTF-8 HTML while declaring EUC-KR. A captured API ZIP was added unchanged; the regression first failed, then verified exact contract/customer/amount/dates after narrow root detection and strict decoding. Genuine XML failures never retry through HTML; DTD/XXE and archive bounds remain enforced. The complete backend suite above was rerun after this correction. Official raw HTML fixtures are marked binary in Git to preserve captured bytes and origin hashes.
+
+## Runtime financial adapter correction
+
+Actual DART financial rows use COMPLETE/PARTIAL. The contract calculator originally omitted COMPLETE, and an odd last decimal in the generated half-margin could exceed its strict 18-place input limit. Runtime regressions reproduced both valid negative and recurring positive margins; the adapter now accepts COMPLETE and rounds generated interval bounds outward to 18 places without loosening validation. Current policy is event-research-v2: previous cases remain immutable and v1 portfolios are excluded from v2 learning. Cash tests15 and the policy-isolation regression passed, followed by the full suite above.
+
+KIS expanded research calls remain disabled under the existing unset request/licensing flags. The user previously said information rights needed checking; a factual follow-up is pending. No licensing declaration was invented. Until confirmed and enabled, KIS research-price and future bar-dependent comparisons cannot be considered operationally active; actual DART, financial, Kiwoom mock-server market queries and KIND observations continue with explicit partial coverage.
