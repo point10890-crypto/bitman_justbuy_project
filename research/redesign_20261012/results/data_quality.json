@@ -1,0 +1,19 @@
+{
+  "source": "C:\\bitman_marketfloww\\data\\daily_prices.csv",
+  "first_date": "2024-01-02",
+  "last_date": "2026-07-31",
+  "sessions": 628,
+  "common_equities": 2685,
+  "avg_universe_per_day": 821.078025477707,
+  "corporate_action_jumps_excluded": 1263,
+  "discovery": [
+    "2024-01-02",
+    "2025-10-23",
+    439
+  ],
+  "confirm": [
+    "2025-10-24",
+    "2026-07-31",
+    189
+  ]
+}

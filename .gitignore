@@ -151,3 +151,6 @@ docs/TELEGRAM_TOKEN_ROTATION.md
 .vercel
 backend/start.bat
 .wrangler/
+
+# condition engine local data (bars, ledger)
+condition_engine/var/

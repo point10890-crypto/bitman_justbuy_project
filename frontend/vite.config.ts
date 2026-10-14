@@ -70,6 +70,14 @@ export default defineConfig({
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
+      // 조건검색 엔진. 운영은 Spring Boot /api/engine 이 인증 후 엔진으로 넘기고,
+      // dev 는 로컬 엔진(8090)으로 바로 보낸다.
+      '/api/engine': {
+        target: 'http://127.0.0.1:8090',
+        changeOrigin: true,
+        timeout: 120000,
+        rewrite: (path) => path.replace(/^\/api\/engine/, '/engine'),
+      },
     },
   },
 })

@@ -120,10 +120,14 @@ const keywordResponse = (query: string, name = '조건 검증 종목') => ({
     evidence: [{ condition: '현재가 50,000원 이하', observedValue: '49000', unit: '원', source: 'KIS', observedAt: null }] }],
 })
 const asJson = (data: unknown) => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })
+// 같은 질문은 AI 조건검색 엔진에도 간다. 실데이터 요청 횟수를 세는 테스트는 엔진 호출을 따로 응답해 분리한다.
+const engineMiss = { strategy: null, source: 'rules', conditions: [], assumptions: [], warnings: [], unsupported: [], unparsed: [], error: '조건 없음', fallback_reason: null }
+const withEngine = (dataFetch: (url: string, init?: RequestInit) => Promise<Response>) =>
+  vi.fn((url: string, init?: RequestInit) => String(url).includes('/api/engine/') ? Promise.resolve(asJson(engineMiss)) : dataFetch(url, init))
 
 it('hero searches the original condition through the data API without asking an AI to originate stocks', async () => {
   const fetchMock = vi.fn().mockResolvedValue(asJson(keywordResponse('가격 5만원 이하')))
-  vi.stubGlobal('fetch', fetchMock)
+  vi.stubGlobal('fetch', withEngine(fetchMock))
   render(tree())
   fireEvent.change(screen.getByRole('textbox', { name: '분석할 종목명 또는 조건' }), { target: { value: '  가격 5만원 이하  ' } })
   fireEvent.submit(screen.getByRole('search'))
@@ -138,12 +142,38 @@ it('hero searches the original condition through the data API without asking an 
   expect(within(panel).getByText('현재가 49,000원')).toBeTruthy()
 })
 
+it('the same question also runs through the AI condition engine with its evidence', async () => {
+  const strategy = { id: 'adhoc_1', title: '20일선 위', when: { f: 'gap_ma20', op: '>', v: 0 }, rank_by: { f: 'quality_score', desc: true }, top_n: 10, guard: { exclude_risk: ['chase', 'high_vol'] } }
+  const engine = vi.fn((url: string) => {
+    if (url.endsWith('/api/engine/translate')) return Promise.resolve(asJson({ ...engineMiss, strategy, error: null, conditions: ['20일선 이격 +0.0% 초과'] }))
+    return Promise.resolve(asJson({
+      strategy, conditions: ['20일선 이격 +0.0% 초과'], as_of: '2026-10-13', regime: { code: 'DOWN_TREND', label: '지수가 60일선 아래에서 20일 하락' },
+      regime_blocked: false, counts: { universe: 868, passing: 300, guard_excluded: 0, eligible: 300, published: 1 },
+      results: [{ code: '033780', name: '엔진 검색 종목', market: 'KOSPI', sector: null, stage: 'PUBLISHED', excluded_by: [], rank: 1, snapshot: {},
+        explanation: ['20일선 위 (+3.0%)'], risk: { flags: [], score: 0, grade: '낮음' } }],
+      excluded: [], below_top_n: [], data_version: 'v',
+    }))
+  })
+  const fetchMock = vi.fn((url: string, _init?: RequestInit) => String(url).includes('/api/engine/') ? engine(String(url)) : Promise.resolve(asJson(keywordResponse('20일선 위'))))
+  vi.stubGlobal('fetch', fetchMock)
+  render(tree())
+  fireEvent.change(screen.getByRole('textbox', { name: '분석할 종목명 또는 조건' }), { target: { value: '20일선 위' } })
+  fireEvent.submit(screen.getByRole('search'))
+  const section = await screen.findByRole('region', { name: 'AI 조건검색' })
+  expect(await within(section).findByText('엔진 검색 종목')).toBeTruthy()
+  expect(within(section).getByText('20일선 이격 +0.0% 초과', { selector: 'li' })).toBeTruthy()
+  const screenCall = engine.mock.calls.find(([u]) => u.endsWith('/api/engine/screen'))
+  expect(screenCall).toBeTruthy()
+  const body = JSON.parse(String(fetchMock.mock.calls.find(([u]) => String(u).endsWith('/api/engine/screen'))![1]!.body))
+  expect(body).toEqual({ strategy })                       // the validated DSL, never the raw sentence
+})
+
 it('closing a keyword search aborts its request and rejects a late response after a newer search', async () => {
   let completeOld!: (response: Response) => void
   const fetchMock = vi.fn()
     .mockReturnValueOnce(new Promise<Response>(resolve => { completeOld = resolve }))
     .mockResolvedValueOnce(asJson(keywordResponse('가격 3만원 이하', '최신 검색 종목')))
-  vi.stubGlobal('fetch', fetchMock)
+  vi.stubGlobal('fetch', withEngine(fetchMock))
   render(tree())
   const input = screen.getByRole('textbox', { name: '분석할 종목명 또는 조건' })
   fireEvent.change(input, { target: { value: '가격 5만원 이하' } })
@@ -161,7 +191,7 @@ it('closing a keyword search aborts its request and rejects a late response afte
 
 it('each repeated keyword search makes a new data request instead of reusing the analysis cache', async () => {
   const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(asJson(keywordResponse('가격 5만원 이하'))))
-  vi.stubGlobal('fetch', fetchMock)
+  vi.stubGlobal('fetch', withEngine(fetchMock))
   render(tree())
   fireEvent.change(screen.getByRole('textbox', { name: '분석할 종목명 또는 조건' }), { target: { value: '가격 5만원 이하' } })
   fireEvent.submit(screen.getByRole('search'))

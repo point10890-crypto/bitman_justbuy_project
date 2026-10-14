@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import type { KeywordSearchResponse } from '../../api/keywordSearchApi'
 
 interface KeywordSearchPanelProps {
@@ -7,6 +7,8 @@ interface KeywordSearchPanelProps {
   error: string | null
   result: KeywordSearchResponse | null
   onClose: () => void
+  /** 실데이터 결과 아래에 붙는 추가 결과 (AI 조건검색 엔진). */
+  children?: ReactNode
 }
 
 const outcomeLabel: Record<KeywordSearchResponse['outcome'], string> = {
@@ -88,8 +90,9 @@ function formatEvidenceObservation(value: string) {
   return `관측 ${formatKstTimestamp(value)}`
 }
 
-export function KeywordSearchPanel({ query, loading, error, result, onClose }: KeywordSearchPanelProps) {
+export function KeywordSearchPanel({ query, loading, error, result, onClose, children }: KeywordSearchPanelProps) {
   const closeRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     closeRef.current?.focus()
@@ -98,15 +101,23 @@ export function KeywordSearchPanel({ query, loading, error, result, onClose }: K
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
-      // Close is the dialog's only interactive element. Keep keyboard focus in the modal.
-      if (event.key === 'Tab') { event.preventDefault(); closeRef.current?.focus() }
+      // Keep keyboard focus inside the modal: Tab cycles through its own controls only.
+      if (event.key === 'Tab') {
+        const focusables = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])
+        if (!focusables.length) return
+        const i = focusables.indexOf(document.activeElement as HTMLElement)
+        const next = event.shiftKey ? (i <= 0 ? focusables.length - 1 : i - 1) : (i === -1 || i === focusables.length - 1 ? 0 : i + 1)
+        event.preventDefault()
+        focusables[next].focus()
+      }
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [onClose])
 
   return (
-    <div className="maker-analysis-panel keyword-search-panel" role="dialog" aria-modal="true" aria-label="실데이터 조건검색">
+    <div ref={dialogRef} className="maker-analysis-panel keyword-search-panel" role="dialog" aria-modal="true" aria-label="실데이터 조건검색">
       <div className="maker-analysis-sheet">
         <header>
           <div>
@@ -199,6 +210,7 @@ export function KeywordSearchPanel({ query, loading, error, result, onClose }: K
               <p className="keyword-search-note">조건에 맞는 조회 결과입니다. 조회 시각과 시세 관측 시각은 다를 수 있습니다.</p>
             </>
           )}
+          {children}
         </div>
       </div>
     </div>

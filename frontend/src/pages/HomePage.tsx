@@ -6,6 +6,7 @@ import { useMainConditions } from '../hooks/useMainConditions'
 import { fetchConditionSection, type ConditionSectionResponse } from '../api/conditionApi'
 import { AgentMascot } from '../components/app/AgentMascot'
 import { KeywordSearchPanel } from '../components/app/KeywordSearchPanel'
+import { EngineSearchSection } from '../components/app/ConditionEngineViews'
 import { searchKeywordStocks, type KeywordSearchResponse } from '../api/keywordSearchApi'
 import { formatConditionAsOf, latestAnalysisPresentation } from '../lib/conditionPresentation'
 import './HomePage.css'
@@ -598,7 +599,9 @@ export default function HomePage() {
         <ResultPanel query={activeQuery} loading={loading} error={error} result={result} onClose={closePanel} />
       )}
       {keywordPanelOpen && (
-        <KeywordSearchPanel query={keywordQuery} loading={keywordLoading} error={keywordError} result={keywordResult} onClose={closeKeywordPanel} />
+        <KeywordSearchPanel query={keywordQuery} loading={keywordLoading} error={keywordError} result={keywordResult} onClose={closeKeywordPanel}>
+          {keywordQuery && <EngineSearchSection key={keywordQuery} query={keywordQuery} />}
+        </KeywordSearchPanel>
       )}
     </main>
   )

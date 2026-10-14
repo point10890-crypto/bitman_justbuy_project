@@ -1,4 +1,4 @@
-import { StrictMode } from 'react'
+import { StrictMode, Suspense, lazy } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
@@ -19,6 +19,10 @@ import EventResearchPage from './pages/EventResearchPage'
 import SubscriptionGateWatcher from './components/guards/SubscriptionGateWatcher'
 import LandingPage from './pages/LandingPage'
 import './index.css'
+
+// 조건검색 랩은 로컬 엔진(127.0.0.1:8090)이 있어야 동작한다. 운영 빌드에는 엔진이 없으므로
+// dev 빌드에서만 연결하고, 운영 번들에서는 코드째 빠지도록 동적 import 를 DEV 분기 안에 둔다.
+const ConditionLabPage = import.meta.env.DEV ? lazy(() => import('./pages/ConditionLabPage')) : null
 
 // ─── 에러 캐시 자동 정리 ───
 try {
@@ -56,6 +60,9 @@ createRoot(document.getElementById('root')!).render(
 
           {/* 플랜 비교는 공개, 신청은 페이지에서 로그인 후 진행 */}
           <Route path="/subscribe" element={<SubscribePage />} />
+          {ConditionLabPage && (
+            <Route path="/lab" element={<Suspense fallback={null}><ConditionLabPage /></Suspense>} />
+          )}
 
           {/* 로그인 + 구독 필수 (AppLayout 포함) — ADMIN은 구독 없이 자동 통과 */}
           <Route element={<SubscribedRoute><AppLayout /></SubscribedRoute>}>
