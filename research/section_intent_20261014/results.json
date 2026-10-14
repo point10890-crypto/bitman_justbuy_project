@@ -1,0 +1,430 @@
+{
+  "exclusions": {
+    "no_final_bar": 1696,
+    "outside_regular_session": 3099,
+    "price_outside_daily_range": 204,
+    "corporate_action_context": 644,
+    "history_short": 202,
+    "corporate_action_outcome": 14,
+    "capture_date_mismatch": 242,
+    "right_censored": 195
+  },
+  "rules": "fixed original intent predicates; technical layer only; no PIT material/financial/flow data",
+  "sections": {
+    "BREAKOUT": {
+      "all": {
+        "baseline_n": 1159,
+        "selected_n": 529,
+        "baseline_days": 126,
+        "selected_days": 118,
+        "terminal": {
+          "baseline_same_days": -1.432,
+          "selected": -1.554,
+          "delta": -0.123
+        },
+        "peak": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        },
+        "gap": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        }
+      },
+      "development": {
+        "baseline_n": 640,
+        "selected_n": 239,
+        "baseline_days": 79,
+        "selected_days": 71,
+        "terminal": {
+          "baseline_same_days": -1.719,
+          "selected": -2.296,
+          "delta": -0.576
+        },
+        "peak": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        },
+        "gap": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        }
+      },
+      "validation": {
+        "baseline_n": 519,
+        "selected_n": 290,
+        "baseline_days": 47,
+        "selected_days": 47,
+        "terminal": {
+          "baseline_same_days": -0.997,
+          "selected": -0.434,
+          "delta": 0.563
+        },
+        "peak": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        },
+        "gap": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        }
+      }
+    },
+    "CATALYST_BURST": {
+      "all": {
+        "baseline_n": 1087,
+        "selected_n": 0,
+        "baseline_days": 126,
+        "selected_days": 0,
+        "terminal": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        },
+        "peak": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        },
+        "gap": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        }
+      },
+      "development": {
+        "baseline_n": 644,
+        "selected_n": 0,
+        "baseline_days": 79,
+        "selected_days": 0,
+        "terminal": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        },
+        "peak": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        },
+        "gap": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        }
+      },
+      "validation": {
+        "baseline_n": 443,
+        "selected_n": 0,
+        "baseline_days": 47,
+        "selected_days": 0,
+        "terminal": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        },
+        "peak": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        },
+        "gap": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        }
+      }
+    },
+    "FLOW_LEADER": {
+      "all": {
+        "baseline_n": 734,
+        "selected_n": 231,
+        "baseline_days": 106,
+        "selected_days": 67,
+        "terminal": {
+          "baseline_same_days": -5.287,
+          "selected": -2.089,
+          "delta": 3.197
+        },
+        "peak": {
+          "baseline_same_days": 23.208,
+          "selected": 24.961,
+          "delta": 1.753
+        },
+        "gap": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        }
+      },
+      "development": {
+        "baseline_n": 541,
+        "selected_n": 218,
+        "baseline_days": 79,
+        "selected_days": 59,
+        "terminal": {
+          "baseline_same_days": -5.974,
+          "selected": -2.44,
+          "delta": 3.535
+        },
+        "peak": {
+          "baseline_same_days": 24.529,
+          "selected": 26.886,
+          "delta": 2.357
+        },
+        "gap": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        }
+      },
+      "validation": {
+        "baseline_n": 193,
+        "selected_n": 13,
+        "baseline_days": 27,
+        "selected_days": 8,
+        "terminal": {
+          "baseline_same_days": -0.214,
+          "selected": 0.494,
+          "delta": 0.707
+        },
+        "peak": {
+          "baseline_same_days": 13.469,
+          "selected": 10.766,
+          "delta": -2.702
+        },
+        "gap": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        }
+      }
+    },
+    "REVERSAL_EDGE": {
+      "all": {
+        "baseline_n": 840,
+        "selected_n": 43,
+        "baseline_days": 121,
+        "selected_days": 32,
+        "terminal": {
+          "baseline_same_days": -0.347,
+          "selected": -2.199,
+          "delta": -1.852
+        },
+        "peak": {
+          "baseline_same_days": 9.83,
+          "selected": 9.351,
+          "delta": -0.479
+        },
+        "gap": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        }
+      },
+      "development": {
+        "baseline_n": 514,
+        "selected_n": 21,
+        "baseline_days": 79,
+        "selected_days": 16,
+        "terminal": {
+          "baseline_same_days": -1.879,
+          "selected": -3.652,
+          "delta": -1.773
+        },
+        "peak": {
+          "baseline_same_days": 10.971,
+          "selected": 12.023,
+          "delta": 1.052
+        },
+        "gap": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        }
+      },
+      "validation": {
+        "baseline_n": 326,
+        "selected_n": 22,
+        "baseline_days": 42,
+        "selected_days": 16,
+        "terminal": {
+          "baseline_same_days": 1.185,
+          "selected": -0.746,
+          "delta": -1.932
+        },
+        "peak": {
+          "baseline_same_days": 8.688,
+          "selected": 6.678,
+          "delta": -2.01
+        },
+        "gap": {
+          "baseline_same_days": null,
+          "selected": null,
+          "delta": null
+        }
+      }
+    }
+  },
+  "ablations": {
+    "REVERSAL_EDGE:dry_volume": {
+      "development": {
+        "baseline_n": 514,
+        "selected_n": 280,
+        "baseline_days": 79,
+        "selected_days": 76,
+        "peak": {
+          "baseline_same_days": 11.274949,
+          "selected": 11.307,
+          "delta": 0.032051
+        },
+        "terminal": {
+          "baseline_same_days": -2.865136,
+          "selected": -3.150444,
+          "delta": -0.285308
+        }
+      },
+      "validation": {
+        "baseline_n": 326,
+        "selected_n": 187,
+        "baseline_days": 42,
+        "selected_days": 40,
+        "peak": {
+          "baseline_same_days": 9.337723,
+          "selected": 9.347643,
+          "delta": 0.00992
+        },
+        "terminal": {
+          "baseline_same_days": 1.0315,
+          "selected": 1.24958,
+          "delta": 0.21808
+        }
+      }
+    },
+    "REVERSAL_EDGE:aligned_trend": {
+      "development": {
+        "baseline_n": 514,
+        "selected_n": 204,
+        "baseline_days": 79,
+        "selected_days": 61,
+        "peak": {
+          "baseline_same_days": 12.382832,
+          "selected": 14.324361,
+          "delta": 1.941529
+        },
+        "terminal": {
+          "baseline_same_days": -2.022832,
+          "selected": -1.192231,
+          "delta": 0.830602
+        }
+      },
+      "validation": {
+        "baseline_n": 326,
+        "selected_n": 103,
+        "baseline_days": 42,
+        "selected_days": 34,
+        "peak": {
+          "baseline_same_days": 9.146751,
+          "selected": 7.855251,
+          "delta": -1.2915
+        },
+        "terminal": {
+          "baseline_same_days": 0.986083,
+          "selected": -0.283995,
+          "delta": -1.270078
+        }
+      }
+    },
+    "FLOW_LEADER:near_52w_high": {
+      "development": {
+        "baseline_n": 541,
+        "selected_n": 227,
+        "baseline_days": 79,
+        "selected_days": 61,
+        "peak": {
+          "baseline_same_days": 23.91545,
+          "selected": 25.604061,
+          "delta": 1.688612
+        },
+        "terminal": {
+          "baseline_same_days": -6.612691,
+          "selected": -3.902277,
+          "delta": 2.710415
+        }
+      },
+      "validation": {
+        "baseline_n": 193,
+        "selected_n": 23,
+        "baseline_days": 27,
+        "selected_days": 12,
+        "peak": {
+          "baseline_same_days": 14.84533,
+          "selected": 9.039617,
+          "delta": -5.805713
+        },
+        "terminal": {
+          "baseline_same_days": 0.472955,
+          "selected": -1.468279,
+          "delta": -1.941234
+        }
+      }
+    },
+    "FLOW_LEADER:positive_intraday": {
+      "development": {
+        "baseline_n": 541,
+        "selected_n": 444,
+        "baseline_days": 79,
+        "selected_days": 78,
+        "peak": {
+          "baseline_same_days": 22.025324,
+          "selected": 22.655606,
+          "delta": 0.630282
+        },
+        "terminal": {
+          "baseline_same_days": -5.730802,
+          "selected": -5.059958,
+          "delta": 0.670845
+        }
+      },
+      "validation": {
+        "baseline_n": 193,
+        "selected_n": 181,
+        "baseline_days": 27,
+        "selected_days": 27,
+        "peak": {
+          "baseline_same_days": 17.039881,
+          "selected": 16.771045,
+          "delta": -0.268836
+        },
+        "terminal": {
+          "baseline_same_days": 0.523124,
+          "selected": 0.236798,
+          "delta": -0.286326
+        }
+      }
+    }
+  },
+  "input_sha256": {
+    "captures": "39dd388e1ccf8d50d00c94af3dc67edb03a7c5cff8375ce4eb9f79be39341432",
+    "bars": "6ad8a4e1eed635ae9ecbb85d6f95e6f207fff8572fc27f17deedb14f0f7593cb"
+  },
+  "publication_eligible": false,
+  "limitations": [
+    "Historical captured candidates only; not whole-market discovery or current-policy replay.",
+    "Record creation time is a proxy, not proven first market capture time.",
+    "No point-in-time actual turnover, material, financial or flow history in this comparison.",
+    "No intraday post-capture high: BREAKOUT and CATALYST_BURST peak is unknown.",
+    "Swing/leader peaks cover subsequent sessions, excluding the capture session.",
+    "Daily final low/high used only for retrospective data-quality exclusion.",
+    "Corporate action exclusion is a heuristic; no adjustment-factor reconciliation.",
+    "Daily equal weights on days with selected candidates; coverage must be read alongside returns.",
+    "Gross returns; overlapping observations; no statistical significance or predictive guarantee.",
+    "Chronological validation, not untouched prospective data; earlier research used 2026 data."
+  ]
+}
