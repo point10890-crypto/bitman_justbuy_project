@@ -131,6 +131,15 @@ export function useSearchUpgrade(
     const ctl = new AbortController()
     const t = translation.value
     const done = (next: SearchUpgrade) => { if (!ctl.signal.aborted) setState(next) }
+    // Historical performance is optional enrichment, never a prerequisite for search results.
+    let backtest: BacktestResult | null = null
+    if (t?.strategy && (engineShouldLead(result, error, t) || (result && result.outcome !== 'UNSUPPORTED'))) {
+      void engineApi.backtest({ strategy: t.strategy }, ctl.signal).then(value => {
+        if (ctl.signal.aborted) return
+        backtest = value
+        setState(current => current.status === 'done' ? { ...current, backtest: value } : current)
+      }).catch(() => { /* Keep the verified search results if historical analysis fails. */ })
+    }
 
     // Progress observes existing work only. Translation, screen and backtest stay fixed for this search.
     const track = async (
@@ -174,10 +183,7 @@ export function useSearchUpgrade(
       try {
         if (t && engineShouldLead(result, error, t)) {
           const strategy = t.strategy!
-          const [screen, backtest] = await Promise.all([
-            engineApi.screen({ strategy }, ctl.signal),
-            engineApi.backtest({ strategy }).catch(() => null),
-          ])
+          const screen = await engineApi.screen({ strategy }, ctl.signal)
           let realtime: Extract<SearchUpgrade, { mode: 'engine' }>['realtime'] = null
           let combined: CombinedMatch[] | null = null
           let combinedExcluded: KeywordSearchMatch[] = []
@@ -240,12 +246,7 @@ export function useSearchUpgrade(
 
         // 실데이터 검색이 이끈다 — 종목마다 일봉 위험·근거를 붙인다.
         const codes = (result?.matches ?? []).slice(0, 50).map(m => m.code)
-        const [riskRes, backtest] = await Promise.all([
-          codes.length ? engineApi.risk(codes).catch(() => null) : Promise.resolve(null),
-          t?.strategy && result && result.outcome !== 'UNSUPPORTED'
-            ? engineApi.backtest({ strategy: t.strategy }).catch(() => null)
-            : Promise.resolve(null),
-        ])
+        const riskRes = codes.length ? await engineApi.risk(codes).catch(() => null) : null
         let risk = Object.fromEntries((riskRes?.items ?? []).filter(i => i.found).map(i => [i.code, i]))
         let riskAsOf = riskRes?.as_of ?? null
         let updatedResult: KeywordSearchResponse | undefined

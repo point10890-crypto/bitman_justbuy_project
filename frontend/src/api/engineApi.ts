@@ -201,6 +201,6 @@ export const engineApi = {
     call<{ strategies: LibraryStrategy[]; evidence_basis: string }>('/strategies', { signal }),
   translate: (text: string, signal?: AbortSignal) => post<Translation>('/translate', { text }, signal),
   screen: (req: { strategy?: Strategy; strategy_id?: string }, signal?: AbortSignal) => post<ScreenResult>('/screen', req, signal),
-  backtest: (req: { strategy?: Strategy; strategy_id?: string }) => post<BacktestResult>('/backtest', req),
+  backtest: (req: { strategy?: Strategy; strategy_id?: string }, signal?: AbortSignal) => post<BacktestResult>('/backtest', req, signal),
   risk: (codes: string[], asOf?: string) => post<{ as_of: string; items: RiskCheckItem[] }>('/risk', { codes, as_of: asOf }),
 }

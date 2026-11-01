@@ -68,6 +68,34 @@ const requestPaths = (fetchMock: ReturnType<typeof routes>) => fetchMock.mock.ca
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(now) })
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
+it.each(['engine', 'keyword'] as const)('shows %s results while historical analysis is pending and enriches them later', async mode => {
+  const base = routes(complete(), () => complete())
+  let finish!: (value: Response) => void
+  let signal: AbortSignal | null | undefined
+  vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+    if (url.endsWith('/api/engine/backtest')) {
+      signal = init?.signal
+      return new Promise<Response>(resolve => { finish = resolve })
+    }
+    return base(url, init)
+  }))
+  const initial = mode === 'engine' ? refused : complete()
+  const { result, unmount } = renderHook(() => useSearchUpgrade('20일선 위', {
+    result: initial, loading: false, error: null,
+  }))
+  await tick()
+  expect(result.current.status).toBe('done')
+  if (result.current.status !== 'done') throw new Error('Expected completed search')
+  expect(result.current.mode).toBe(mode)
+  expect(result.current.backtest).toBeNull()
+  const historical = { data_version: 'historical-result' }
+  finish(json(historical))
+  await tick()
+  expect(result.current.status === 'done' && result.current.backtest).toEqual(historical)
+  unmount()
+  expect(signal?.aborted).toBe(true)
+})
+
 it('replaces a pending flow intersection with final ranked matches without rerunning engine stages', async () => {
   const fetchMock = routes(pending(), () => complete())
   vi.stubGlobal('fetch', fetchMock)
