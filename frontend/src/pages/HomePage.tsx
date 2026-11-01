@@ -450,7 +450,10 @@ export default function HomePage() {
           </form>
           <div className="keyword-search-examples" aria-label="조건검색 예시">
             {keywordExamples.map(example => (
-              <button key={example} type="button" onClick={() => setQuery(example)}>{example}</button>
+              <button key={example} type="button" onClick={() => {
+                setQuery(example)
+                void runKeywordSearch(example)
+              }}>{example}</button>
             ))}
           </div>
         </div>

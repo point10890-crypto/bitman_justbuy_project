@@ -225,6 +225,24 @@ const search = async (text: string) => {
   return screen.findByRole('dialog', { name: '실데이터 조건검색' })
 }
 
+it.each([
+  '20일선 위 눌림인데 거래량 1.5배 붙은 종목',
+  '60일선 위 저변동 대형주 10개',
+  '신고가 근처 코스닥 반도체',
+  '오늘 7% 이상 오른 거래량 급증 종목',
+])('runs the fixed example immediately when clicked: %s', async example => {
+  const fetchMock = routed({ translate: engineMiss, keyword: q => keywordResponse(q, '검색 결과 종목') })
+  vi.stubGlobal('fetch', fetchMock)
+  render(tree())
+  fireEvent.click(screen.getByRole('button', { name: example }))
+  const panel = await screen.findByRole('dialog', { name: '실데이터 조건검색' })
+  expect(await within(panel).findByText('검색 결과 종목')).toBeTruthy()
+  expect((screen.getByRole('textbox', { name: '분석할 종목명 또는 조건' }) as HTMLInputElement).value).toBe(example)
+  const calls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/api/analysis/keyword-search'))
+  expect(calls).toHaveLength(1)
+  expect(JSON.parse(String(calls[0][1]?.body)).query).toBe(example)
+})
+
 it('a query the live search understands keeps its live results and gains daily risk and past performance', async () => {
   const fetchMock = routed({ translate: translated(), keyword: q => keywordResponse(q, '실시간 종목'), risk: codes => codes.map(c => riskItem(c, '실시간 종목')) })
   vi.stubGlobal('fetch', fetchMock)
