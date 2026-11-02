@@ -21,7 +21,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
@@ -905,22 +904,17 @@ public class MultiAgentOrchestrator {
         }
     }
 
-    @org.springframework.beans.factory.annotation.Value("${bitman.flask.base-url:http://localhost:5001}")
-    private String flaskBaseUrl;
+    private com.bitman.justbuy.service.KrMarketGateService marketGateService;
 
-    /** Flask API에서 시장 레짐(Market Gate) 상태를 가져온다. 실패 시 YELLOW 기본값. */
+    /** 시장 국면은 JustBuy 가 직접 계산한다 — 별개 서비스인 MarketFlow 에 의존하지 않는다. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void configureMarketGate(com.bitman.justbuy.service.KrMarketGateService marketGateService) {
+        this.marketGateService = marketGateService;
+    }
+
+    /** 시장 레짐(Market Gate): GREEN / YELLOW / RED. 계산할 수 없으면 YELLOW. */
     private String fetchMarketGate() {
-        try {
-            String url = flaskBaseUrl + "/api/kr/market-gate";
-            ResponseEntity<String> resp = restTemplate.getForEntity(url, String.class);
-            if (resp.getStatusCode().is2xxSuccessful() && resp.getBody() != null) {
-                JsonNode root = objectMapper.readTree(resp.getBody());
-                return root.path("gate").asText("YELLOW");
-            }
-        } catch (Exception e) {
-            log.warn("[Orchestrator] Market gate fetch failed, defaulting to YELLOW: {}", e.getMessage());
-        }
-        return "YELLOW";
+        return marketGateService == null ? "YELLOW" : marketGateService.gate();
     }
 
     /** 구조화 분석 결과에서 종목코드를 추출하고 KIS 수급 데이터를 수집한다. (최대 10종목) */
