@@ -122,7 +122,7 @@ public class GeminiAgent implements AiAgent {
             return parseResponse(response.getBody(), model, start);
 
         } catch (Exception e) {
-            return AgentResult.error(name(), model, "Provider request failed", System.currentTimeMillis() - start);
+            return AgentResult.error(name(), model, ProviderEndpointPolicy.failureReason(e), System.currentTimeMillis() - start);
         } finally {
             lease.close();
         }

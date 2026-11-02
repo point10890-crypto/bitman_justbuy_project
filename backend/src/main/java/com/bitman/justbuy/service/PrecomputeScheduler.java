@@ -478,7 +478,8 @@ public class PrecomputeScheduler {
 
             // 에이전트 일부 실패는 지금까지 로그에만 남아 조용히 지나갔다.
             // 2개 중 1개만 성공해도 합의(consensus)가 비고 픽 품질이 떨어지므로 즉시 알린다.
-            if (trigger != ConditionRunTrigger.ADMIN_REFRESH) notifyAgentDegradation(mode, agentsUsed, agentsSucceeded, picks);
+            if (trigger != ConditionRunTrigger.ADMIN_REFRESH)
+                notifyAgentDegradation(mode, agentsUsed, agentsSucceeded, picks, result.round1());
 
             // 텔레그램 발송 조건 3가지 동시 충족 시에만 발송:
             // 1) picks > 0  — 빈 분석 결과 발송 방지
@@ -597,6 +598,10 @@ public class PrecomputeScheduler {
         return Map.copyOf(lastRunTimes);
     }
 
+    static final long DEGRADATION_ALERT_INTERVAL_MS = 3 * 60 * 60 * 1000L;
+    private final java.util.concurrent.ConcurrentHashMap<String, Long> lastDegradationAlert =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
     /**
      * 에이전트 부분 실패/픽 0건을 관리자에게 알린다.
      *
@@ -604,12 +609,28 @@ public class PrecomputeScheduler {
      * 성공하면 합의(consensus)가 비어 픽 품질이 떨어지는데, 로그에만 남으면 며칠씩 방치된다.
      * 알림 실패가 분석 자체를 막지 않도록 예외는 삼킨다.
      */
-    private void notifyAgentDegradation(String mode, int agentsUsed, int agentsSucceeded, int picks) {
+    void notifyAgentDegradation(String mode, int agentsUsed, int agentsSucceeded, int picks,
+                                List<com.bitman.justbuy.dto.AgentResult> round1) {
         if (telegramNotifier == null) return;
 
         boolean partialFailure = agentsUsed > 0 && agentsSucceeded < agentsUsed;
         boolean noPicks = picks == 0;
         if (!partialFailure && !noPicks) return;
+
+        List<String> failures = round1 == null ? List.of() : round1.stream()
+            .filter(r -> r != null && "error".equals(r.status()))
+            .map(r -> r.agent() + ": " + (r.error() == null ? "사유 미상" : r.error()))
+            .toList();
+        boolean operatorAction = failures.stream()
+            .anyMatch(com.bitman.justbuy.ai.agent.ProviderEndpointPolicy::needsOperatorAction);
+        // 결제·키 문제처럼 저절로 풀리지 않는 원인은 모든 모드·모든 실행에서 반복된다.
+        // 같은 원인은 3시간에 한 번만 알린다(원인이 바뀌면 바로 알린다).
+        String key = operatorAction ? String.join("|", failures)
+            : mode + "|" + String.join("|", failures) + "|" + picks;
+        long now = clock.millis();
+        Long last = lastDegradationAlert.get(key);
+        if (last != null && now - last < DEGRADATION_ALERT_INTERVAL_MS) return;
+        lastDegradationAlert.put(key, now);
 
         try {
             StringBuilder sb = new StringBuilder();
@@ -619,6 +640,13 @@ public class PrecomputeScheduler {
             sb.append("픽: ").append(picks).append("건\n\n");
             if (partialFailure) {
                 sb.append("- 에이전트 일부 실패 — 합의(consensus)가 비어 픽 품질이 낮아집니다.\n");
+            }
+            for (String failure : failures) sb.append("  · ").append(failure).append("\n");
+            if (failures.stream().anyMatch(f -> f.contains("credit_balance_exhausted") || f.contains("insufficient_quota"))) {
+                sb.append("- AI 제공사 크레딧이 소진됐습니다. 결제 페이지에서 충전해야 복구됩니다")
+                  .append(" (OpenAI: platform.openai.com/settings/organization/billing).\n");
+            } else if (operatorAction) {
+                sb.append("- API 키 또는 권한 문제입니다. 키 설정을 확인해야 복구됩니다.\n");
             }
             if (noPicks) {
                 sb.append("- 픽 0건 — 해당 모드 화면이 비어 보입니다.\n");

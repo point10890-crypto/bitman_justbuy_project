@@ -105,8 +105,41 @@ class ChatGptAgentTest {
             .thenThrow(new RuntimeException("connection refused"));
         AgentResult result = agent.analyze("system", "user");
         assertThat(result.status()).isEqualTo("error");
-        assertThat(result.error()).isEqualTo("Provider request failed");
+        assertThat(result.error()).startsWith("Provider request failed");
         assertThat(result.error()).doesNotContain("connection refused", "https://", "Authorization");
+    }
+
+    /** The exact OpenAI response of 2026-11-02 that the old message hid as "Provider request failed". */
+    @Test
+    void analyze_reportsStatusAndProviderCode_whenCreditsAreExhausted() {
+        String body = """
+            {
+              "error": {
+                "message": "You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.",
+                "type": "insufficient_quota",
+                "param": null,
+                "code": "credit_balance_exhausted"
+              }
+            }""";
+        when(restTemplate.exchange(anyString(), any(), any(), eq(String.class)))
+            .thenThrow(org.springframework.web.client.HttpClientErrorException.create(HttpStatus.TOO_MANY_REQUESTS,
+                "Too Many Requests", HttpHeaders.EMPTY, body.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                java.nio.charset.StandardCharsets.UTF_8));
+        AgentResult result = agent.analyze("system", "user");
+        assertThat(result.status()).isEqualTo("error");
+        assertThat(result.error()).isEqualTo("HTTP 429 credit_balance_exhausted");
+        assertThat(result.error()).doesNotContain("https://", "Add credits");      // codes only, never the free text
+        assertThat(ProviderEndpointPolicy.needsOperatorAction(result.error())).isTrue();
+    }
+
+    @Test
+    void transientRateLimitIsNotAnOperatorAction() {
+        var e = org.springframework.web.client.HttpClientErrorException.create(HttpStatus.TOO_MANY_REQUESTS,
+            "Too Many Requests", HttpHeaders.EMPTY,
+            "{\"error\":{\"type\":\"requests\",\"code\":\"rate_limit_exceeded\"}}".getBytes(), null);
+        String reason = ProviderEndpointPolicy.failureReason(e);
+        assertThat(reason).isEqualTo("HTTP 429 rate_limit_exceeded");
+        assertThat(ProviderEndpointPolicy.needsOperatorAction(reason)).isFalse();
     }
 
     // ── synthesize ───────────────────────────────────────────

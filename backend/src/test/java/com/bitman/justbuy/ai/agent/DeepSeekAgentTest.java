@@ -99,7 +99,7 @@ class DeepSeekAgentTest {
         AgentResult result = agent.analyze("system", "user");
 
         assertThat(result.status()).isEqualTo("error");
-        assertThat(result.error()).isEqualTo("Provider request failed");
+        assertThat(result.error()).startsWith("Provider request failed");
         assertThat(result.error()).doesNotContain("timeout", "https://", "Authorization");
     }
 

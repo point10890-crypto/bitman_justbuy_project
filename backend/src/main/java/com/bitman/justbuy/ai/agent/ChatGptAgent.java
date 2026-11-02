@@ -107,7 +107,7 @@ public class ChatGptAgent implements AiAgent {
                 root.path("usage").path("output_tokens").asInt(0), "success", null,
                 System.currentTimeMillis() - start);
         } catch (Exception e) {
-            return AgentResult.error(name(), ANALYSIS_MODEL, "Provider request failed", System.currentTimeMillis() - start);
+            return AgentResult.error(name(), ANALYSIS_MODEL, ProviderEndpointPolicy.failureReason(e), System.currentTimeMillis() - start);
         } finally {
             lease.close();
         }
@@ -171,7 +171,7 @@ public class ChatGptAgent implements AiAgent {
                 "success", null, System.currentTimeMillis() - start);
 
         } catch (Exception e) {
-            return AgentResult.error(name(), model, "Provider request failed", System.currentTimeMillis() - start);
+            return AgentResult.error(name(), model, ProviderEndpointPolicy.failureReason(e), System.currentTimeMillis() - start);
         } finally {
             lease.close();
         }

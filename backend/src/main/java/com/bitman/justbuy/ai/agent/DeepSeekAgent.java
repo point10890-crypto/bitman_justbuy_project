@@ -109,7 +109,7 @@ public class DeepSeekAgent implements AiAgent {
             return new AgentResult(name(), content, actualModel, inputTokens, outputTokens,
                 "success", null, System.currentTimeMillis() - start);
         } catch (Exception e) {
-            return AgentResult.error(name(), model, "Provider request failed", System.currentTimeMillis() - start);
+            return AgentResult.error(name(), model, ProviderEndpointPolicy.failureReason(e), System.currentTimeMillis() - start);
         } finally {
             lease.close();
         }

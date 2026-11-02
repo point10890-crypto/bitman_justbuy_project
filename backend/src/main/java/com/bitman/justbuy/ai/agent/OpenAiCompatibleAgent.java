@@ -64,7 +64,7 @@ public abstract class OpenAiCompatibleAgent implements AiAgent {
                 "success", null, System.currentTimeMillis() - start);
 
         } catch (Exception e) {
-            return AgentResult.error(name(), model(), "Provider request failed", System.currentTimeMillis() - start);
+            return AgentResult.error(name(), model(), ProviderEndpointPolicy.failureReason(e), System.currentTimeMillis() - start);
         }
     }
 }
