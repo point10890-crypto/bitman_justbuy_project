@@ -1,8 +1,10 @@
 /** BitMan Service Worker - freshness-first app shell */
 
-const CACHE_NAME = 'bitman-v20261101-search-examples-r21'
+const CACHE_NAME = 'bitman-v20261116-install-recovery-r23'
 const SHELL_ASSETS = [
   '/manifest.json',
+  '/install.html',
+  '/install.js',
 ]
 
 self.addEventListener('install', (event) => {
@@ -28,7 +30,12 @@ self.addEventListener('activate', (event) => {
 async function networkFirst(request, fallbackKey = request) {
   const cache = await caches.open(CACHE_NAME)
   try {
-    const response = await fetch(request, { cache: 'no-store' })
+    const fetched = await fetch(request, { cache: 'no-store', redirect: 'follow' })
+    // Pages redirects .html to extensionless URLs. Navigation responses must not
+    // carry redirected=true back to a request whose redirect mode is manual.
+    const response = fetched.redirected
+      ? new Response(fetched.body, { status: fetched.status, statusText: fetched.statusText, headers: fetched.headers })
+      : fetched
     if (response.ok) {
       try { await cache.put(fallbackKey, response.clone()) } catch { /* Full/unavailable cache must not block an online response. */ }
       return response
@@ -46,6 +53,12 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return
   if (url.origin !== self.location.origin) return
   if (url.pathname.startsWith('/api/')) return
+
+  // The independent installer must never replace the React app's offline shell.
+  if (url.pathname === '/install' || url.pathname === '/install.html' || url.pathname === '/install.js') {
+    event.respondWith(networkFirst(request, url.pathname === '/install' ? '/install.html' : url.pathname))
+    return
+  }
 
   if (request.destination === 'document' || request.mode === 'navigate') {
     event.respondWith(networkFirst(request, '/index.html'))

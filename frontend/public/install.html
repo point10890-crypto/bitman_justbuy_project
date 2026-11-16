@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0D1117">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/icons/icon-192.png">
+  <title>BitMan 앱 설치 · 실행 점검</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#0d1117;color:#edf2f7;font:16px/1.65 system-ui,sans-serif}main{max-width:560px;margin:auto;padding:32px 20px 60px}header{display:flex;gap:16px;align-items:center}header img{width:64px;height:64px;border-radius:16px}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 12px}p{color:#bdc7d5}section{margin-top:24px;padding:22px;border:1px solid #344154;border-radius:18px;background:#151c27}a{color:#ffd766}button,.action{display:block;width:100%;padding:13px 16px;margin-top:12px;border:1px solid #64748b;border-radius:12px;background:#202d40;color:#fff;font:inherit;text-align:center;text-decoration:none;cursor:pointer}.primary{background:#ffd766;color:#141a24;border-color:#ffd766;font-weight:700}[hidden]{display:none!important}li{margin:10px 0}ol{padding-left:22px}input{width:100%;padding:12px;background:#0d1117;color:#e4eaf2;border:1px solid #64748b;border-radius:8px;font:inherit}small{color:#bdc7d5}button:focus-visible,a:focus-visible{outline:3px solid #fff;outline-offset:3px}
+  </style>
+  <script src="/install.js" defer></script>
+</head>
+<body><main>
+  <header><img src="/icons/icon-192.png" alt=""><div><h1>BitMan 앱 설치</h1><small>오늘 뭐사? · 홈 화면에서 바로 실행</small></div></header>
+  <p>별도 APK 파일 없이 브라우저에서 설치하는 웹앱입니다. 이 설치 페이지는 로그인 없이 이용할 수 있습니다.</p>
+  <section aria-labelledby="install-title">
+    <h2 id="install-title">휴대폰에 설치하기</h2>
+    <p id="install-status" role="status">안드로이드는 Chrome에서 이 페이지를 열어 주세요.</p>
+    <button id="install-button" class="primary" hidden>앱 설치하기</button>
+    <a id="chrome-link" class="action" hidden>Chrome에서 설치 페이지 열기</a>
+    <ol>
+      <li>카카오톡·네이버 앱 안에서 보고 있다면 메뉴의 <strong>다른 브라우저로 열기</strong>를 선택합니다.</li>
+      <li>Chrome에서 <strong>앱 설치하기</strong>를 누릅니다. 버튼이 없으면 오른쪽 위 <strong>⋮ → 홈 화면에 추가 → 설치</strong>를 선택합니다.</li>
+      <li>설치 확인 후 홈 화면의 <strong>BitMan</strong> 아이콘으로 실행합니다.</li>
+    </ol>
+    <p>iPhone은 Safari의 공유 메뉴 → 홈 화면에 추가를 이용하세요.</p>
+    <label for="install-url">설치 페이지 주소</label>
+    <input id="install-url" readonly value="https://bitman-justbuy.pages.dev/install.html">
+    <button id="copy-link">설치 주소 복사</button>
+    <p id="copy-status" role="status"></p>
+  </section>
+  <section aria-labelledby="launch-title">
+    <h2 id="launch-title">실행이 안 될 때</h2>
+    <p>아래에서 웹으로 먼저 열어 보세요. 웹은 열리는데 설치된 앱만 멈춘다면 앱을 완전히 종료하고 Chrome을 업데이트한 뒤 다시 실행해 주세요.</p>
+    <a class="action primary" href="/">웹으로 앱 열기</a>
+    <p id="service-status" role="status">서버 연결을 확인하고 있습니다.</p>
+    <button id="check-service">서버 연결 다시 확인</button>
+    <p>화면이 비어 있으면 인터넷 연결을 확인하고 새로고침하세요. 설치 메뉴가 없으면 위 주소를 Chrome 주소창에 붙여 넣으세요.</p>
+  </section>
+  <noscript><p>자동 설치와 서버 점검에는 JavaScript가 필요합니다. 브라우저 메뉴에서 홈 화면에 추가를 선택할 수 있습니다.</p></noscript>
+</main></body>
+</html>

@@ -12,12 +12,18 @@ function worker() {
   const stores = new Map<string, Map<string, Response>>()
   let offline = false
   let documentBody = html
+  let redirected = false
   let navigations = 0
   const key = (value: string | { url: string }) => new URL(typeof value === 'string' ? value : value.url, origin).pathname
-  const network = async (input: string | { url: string }) => {
+  const network = async (input: string | { url: string }, options?: RequestInit) => {
     if (offline) throw new TypeError('Network unavailable')
     const path = key(input)
-    return new Response(path === '/assets/current.js' ? 'current app code' : path === '/assets/current.css' ? 'current styles' : path === '/manifest.json' ? '{"name":"BitMan"}' : documentBody)
+    const response = new Response(path === '/assets/current.js' ? 'current app code' : path === '/assets/current.css' ? 'current styles' : path === '/manifest.json' ? '{"name":"BitMan"}' : documentBody)
+    if (redirected) {
+      expect(options?.redirect).toBe('follow')
+      Object.defineProperty(response, 'redirected', { value: true })
+    }
+    return response
   }
   const caches = {
     keys: async () => [...stores.keys()],
@@ -44,6 +50,7 @@ function worker() {
     stores,
     setOffline: () => { offline = true },
     setHtml: (value: string) => { documentBody = value },
+    setRedirected: () => { redirected = true },
     navigationCount: () => navigations,
     lifecycle: async (name: 'install' | 'activate') => {
       let pending: Promise<unknown> | undefined
@@ -59,6 +66,25 @@ function worker() {
 }
 
 describe('service worker app-shell recovery', () => {
+  it('handles Pages HTML redirects without returning a redirected navigation response', async () => {
+    const app = worker()
+    await app.lifecycle('install')
+    app.setRedirected()
+    const response = await app.request('/install.html')
+    expect(response!.redirected).toBe(false)
+    expect(await response!.text()).toBe(html)
+  })
+  it('keeps installation navigation separate from the main offline app shell', async () => {
+    const app = worker()
+    await app.lifecycle('install')
+    app.setHtml('<main>Standalone installer</main>')
+    await app.request('/install.html')
+    await app.request('/install')
+    app.setOffline()
+    expect(await (await app.request('/'))!.text()).toBe(html)
+    expect(await (await app.request('/install.html'))!.text()).toBe('<main>Standalone installer</main>')
+    expect(await (await app.request('/install'))!.text()).toBe('<main>Standalone installer</main>')
+  })
   it('keeps the current installed shell and its script/styles usable without a network', async () => {
     const app = worker()
     await app.lifecycle('install')

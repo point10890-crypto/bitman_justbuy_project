@@ -12,5 +12,14 @@
 /manifest.json
   Cache-Control: public, max-age=3600
 
+/install.html
+  Cache-Control: no-cache, must-revalidate
+
+/install
+  Cache-Control: no-cache, must-revalidate
+
+/install.js
+  Cache-Control: no-cache, must-revalidate
+
 /assets/*
   Cache-Control: public, max-age=31536000, immutable

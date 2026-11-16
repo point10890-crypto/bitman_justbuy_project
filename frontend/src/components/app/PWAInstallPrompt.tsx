@@ -64,6 +64,8 @@ function InstallGuides({
             <div className="ios-guide-icon logo-gold"><span className="logo-gold-text">B</span></div>
             <h2 className="ios-guide-title" id="desktop-install-title">BitMan 앱 설치</h2>
             <p className="ios-guide-subtitle">Chrome/Edge/Android에서 앱처럼 홈 화면에 추가합니다.</p>
+            <p className="ios-guide-step-desc">카카오톡·네이버 앱 안에서는 Chrome으로 열어 설치해 주세요.</p>
+            <a className="ios-guide-step-desc" href="/install.html">앱 설치 · 실행 점검 페이지</a>
             <div className="ios-guide-steps">
               {hasNativePrompt ? (
                 <div className="ios-guide-step">
