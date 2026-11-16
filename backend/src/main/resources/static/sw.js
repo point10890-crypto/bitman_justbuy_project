@@ -1,6 +1,6 @@
 /** BitMan Service Worker - freshness-first app shell */
 
-const CACHE_NAME = 'bitman-v20261116-install-recovery-r23'
+const CACHE_NAME = 'bitman-v20261116-mobile-session-r24'
 const SHELL_ASSETS = [
   '/manifest.json',
   '/install.html',

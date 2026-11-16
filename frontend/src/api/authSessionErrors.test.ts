@@ -65,6 +65,22 @@ describe('typed auth API failures', () => {
     expect(unauthorized).not.toHaveBeenCalled()
   })
 
+  it('leaves startup loading after a stalled mobile session check without deleting the cached account', async () => {
+    vi.useFakeTimers()
+    try {
+      localStorage.setItem('bitman_token', fixtureToken)
+      localStorage.setItem('bitman_auth_user', JSON.stringify(userFixture))
+      fetchFixture.mockImplementation(() => new Promise<Response>(() => {}))
+      render(createElement(AuthProvider, null, createElement(AccountProbe)))
+      expect(auth.isLoading).toBe(true)
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+      expect(auth.isLoading).toBe(false)
+      expect(auth.user?.id).toBe(userFixture.id)
+      expect(localStorage.getItem('bitman_token')).toBe(fixtureToken)
+      expect(unauthorized).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
+  })
+
   it('does not invalidate a signed-in session for a tokenless public-catalog 401', async () => {
     fetchFixture.mockResolvedValueOnce(new Response('', { status: 401 }))
     await expect(fetchSubscriptionPlans()).rejects.toThrow()

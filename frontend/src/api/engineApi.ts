@@ -164,13 +164,17 @@ function detailText(body: unknown, status: number): string {
 
 const UNREACHABLE = '조건검색 엔진에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.'
 
+import { withRequestDeadline } from './requestDeadline'
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
+  return withRequestDeadline(async signal => {
   let response: Response
   try {
     const token = getStoredToken()
     response = await fetch(`${API_BASE}/api/engine${path}`, {
       cache: 'no-store',
       ...init,
+      signal,
       headers: {
         Accept: 'application/json',
         ...(init?.body ? { 'Content-Type': 'application/json; charset=utf-8' } : {}),
@@ -189,6 +193,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     throw new EngineError(detailText(body, response.status), response.status)
   }
   return body as T
+  }, 75_000, 'AI 조건검색 응답이 지연되고 있습니다. 인터넷 연결을 확인한 뒤 다시 검색해 주세요.', init?.signal)
 }
 
 const post = <T,>(path: string, payload: unknown, signal?: AbortSignal) =>

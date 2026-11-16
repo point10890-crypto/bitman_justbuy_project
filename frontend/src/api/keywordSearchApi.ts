@@ -1,4 +1,5 @@
 import { API_BASE } from './config'
+import { withRequestDeadline } from './requestDeadline'
 import { failWithApiError } from './subscriptionGate'
 
 export interface KeywordSearchEvidence {
@@ -107,13 +108,15 @@ export function getSearchProgress(result: KeywordSearchResponse | null | undefin
 
 /** Always query the data endpoint; neither AI output nor local analysis cache is a search source. */
 export async function searchKeywordStocks(query: string, token?: string, signal?: AbortSignal): Promise<KeywordSearchResponse> {
+  return withRequestDeadline(async requestSignal => {
   const headers: Record<string, string> = { 'Content-Type': 'application/json; charset=utf-8' }
   if (token) headers.Authorization = `Bearer ${token}`
   const res = await fetch(`${API_BASE}/api/analysis/keyword-search`, {
-    method: 'POST', headers, body: JSON.stringify({ query }), signal, cache: 'no-store',
+    method: 'POST', headers, body: JSON.stringify({ query }), signal: requestSignal, cache: 'no-store',
   })
   if (!res.ok) await failWithApiError(res)
   return res.json()
+  }, 75_000, '조건검색 응답이 지연되고 있습니다. 인터넷 연결을 확인한 뒤 다시 검색해 주세요.', signal)
 }
 
 /** Read progress for the same frozen candidate snapshot without submitting new source demand. */

@@ -78,10 +78,9 @@ export function usePWAInstall() {
     if (p) {
       try {
         await p.prompt()
-        const { outcome } = await p.userChoice
-        if (outcome === 'accepted') {
-          setIsInstalled(true)
-        }
+        // Accepting the prompt is not installation completion (Android may still
+        // be downloading the WebAPK). Only appinstalled confirms completion.
+        await p.userChoice
       } catch {
         // prompt already used
       }

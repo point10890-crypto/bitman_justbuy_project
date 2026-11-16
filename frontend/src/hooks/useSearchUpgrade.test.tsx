@@ -93,7 +93,9 @@ it.each(['engine', 'keyword'] as const)('shows %s results while historical analy
   await tick()
   expect(result.current.status === 'done' && result.current.backtest).toEqual(historical)
   unmount()
-  expect(signal?.aborted).toBe(true)
+  // Completed requests release their abort listener; in-flight cancellation is
+  // covered separately by the mobile request recovery tests.
+  expect(signal?.aborted).toBe(false)
 })
 
 it('replaces a pending flow intersection with final ranked matches without rerunning engine stages', async () => {

@@ -1,5 +1,6 @@
 /** Auth / Subscription / Admin API 클라이언트 */
 import { API_BASE } from './config'
+import { withRequestDeadline } from './requestDeadline'
 
 export type SubscriptionPlanId = 'MONTHLY' | 'SIX_MONTHS'
 
@@ -217,7 +218,9 @@ export async function registerUser(name: string, email: string, password: string
 }
 
 export async function loginUser(email: string, password: string, rememberMe?: boolean): Promise<AuthResponse> {
+  return withRequestDeadline(async signal => {
   const res = await apiFetch(`${API_BASE}/api/auth/login`, {
+    signal,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password, rememberMe: !!rememberMe }),
@@ -237,15 +240,19 @@ export async function loginUser(email: string, password: string, rememberMe?: bo
     await handleError(res)
   }
   return res.json()
+  }, 20_000, '로그인 응답이 늦어지고 있습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.')
 }
 
 export async function fetchCurrentUser(token: string): Promise<UserDto> {
+  return withRequestDeadline(async signal => {
   const res = await apiFetch(`${API_BASE}/api/auth/me`, {
+    signal,
     headers: authHeaders(token),
   })
   // Deleted members and invalid tokens must clear all cached authentication.
   if (!res.ok) await handleError(res)
   return res.json()
+  }, 20_000, '로그인 상태 확인이 지연되고 있습니다. 연결을 확인한 뒤 다시 시도해 주세요.')
 }
 
 // ─── Subscription ───

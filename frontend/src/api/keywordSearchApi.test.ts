@@ -20,7 +20,7 @@ describe('keyword data API contract', () => {
     expect(options.method).toBe('POST')
     expect(JSON.parse(options.body)).toEqual({ query: '거래대금 100억 이상' })
     expect(options.headers.Authorization).toBe('Bearer fixture-token')
-    expect(options.signal).toBe(controller.signal)
+    expect(options.signal.aborted).toBe(false)
     expect(options.cache).toBe('no-store')
     expect(result.fetchedAt).toBeNull()
     expect(result.matches).toEqual([])
