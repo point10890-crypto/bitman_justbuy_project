@@ -161,7 +161,12 @@ export default function SubscribePage() {
       setLoading(true)
       await applySubscription(depositorName.trim(), selectedId)
       if (activePro) navigate('/my', { replace: true })
-    } catch (err) { setError(err instanceof Error ? err.message : '구독 신청에 실패했습니다.') }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '구독 신청에 실패했습니다.')
+      // The server may have committed even if its response was lost. Read the
+      // current state; never automatically repeat the application POST.
+      void refreshUser()
+    }
     finally { submitting.current = false; setLoading(false) }
   }
 
@@ -232,7 +237,7 @@ export default function SubscribePage() {
         ) : (
           <>
             <BankAccountBox copied={copied} onCopy={copyAccount} />
-            {error && <div className="auth-error" role="alert">{error}</div>}
+            {error && <div className="auth-error" role="alert">{error} <button type="button" onClick={() => refreshUser()}>신청 상태 확인</button></div>}
             <form className="auth-form" onSubmit={handleSubmit}>
               <label><span>입금자명</span><input value={depositorName} onChange={event => setDepositorName(event.target.value)} autoComplete="name" placeholder="실제 입금자명" /></label>
               <button className="auth-submit" type="submit" disabled={loading || !catalogReady}>{loading ? '신청 중...' : upgrading ? '6개월 업그레이드 신청하기' : expired ? '재구독 신청하기' : '구독 신청하기'}</button>

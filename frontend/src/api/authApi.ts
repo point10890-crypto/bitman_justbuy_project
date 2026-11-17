@@ -261,13 +261,17 @@ export async function fetchCurrentUser(token: string): Promise<UserDto> {
 // ─── Subscription ───
 
 export async function fetchSubscriptionPlans(): Promise<SubscriptionPlanDto[]> {
-  const res = await apiFetch(`${API_BASE}/api/subscription/plans`)
+  return withRequestDeadline(async signal => {
+  const res = await apiFetch(`${API_BASE}/api/subscription/plans`, { signal })
   if (!res.ok) await handleError(res)
   return res.json()
+  }, 20_000, '이용권 정보 확인이 지연되고 있습니다. 다시 확인해 주세요.')
 }
 
 export async function applySubscription(token: string, depositorName: string, plan: SubscriptionPlanId = 'MONTHLY'): Promise<UserDto> {
+  return withRequestDeadline(async signal => {
   const res = await apiFetch(`${API_BASE}/api/subscription/apply`, {
+    signal,
     method: 'POST',
     headers: authHeaders(token),
     body: JSON.stringify({ depositorName, plan }),
@@ -275,6 +279,7 @@ export async function applySubscription(token: string, depositorName: string, pl
   if (!res.ok) await handleError(res)
   const data = await res.json()
   return data.user || data  // API는 { user: UserDto } 형태로 반환
+  }, 20_000, '신청 응답을 확인하지 못했습니다. 이미 접수됐을 수 있으니 신청 상태를 확인해 주세요. 다시 입금하지 마세요.')
 }
 
 // ─── Admin ───

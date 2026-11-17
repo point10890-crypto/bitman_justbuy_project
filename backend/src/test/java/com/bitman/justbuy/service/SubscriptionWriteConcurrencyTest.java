@@ -92,6 +92,30 @@ class SubscriptionWriteConcurrencyTest {
     }
 
     @Test
+    void registeredMemberCanLoginApplyAndRestorePendingFromCommittedDatabase() {
+        // Existing installation: an empty database bootstraps its first account as admin.
+        saveMember(SubscriptionStatus.FREE, null);
+        BCryptPasswordEncoder realEncoder = new BCryptPasswordEncoder(4);
+        when(encoder.encode(anyString())).thenAnswer(call -> realEncoder.encode(call.getArgument(0)));
+        when(encoder.matches(anyString(), anyString())).thenAnswer(call -> realEncoder.matches(call.getArgument(0), call.getArgument(1)));
+        String email = UUID.randomUUID() + "@example.invalid";
+        String password = "FixturePassword123!";
+        var registered = auth.register(new com.bitman.justbuy.dto.RegisterRequest("fixture", email.toUpperCase(), password));
+        var member = repository.findFirstByEmailIgnoreCaseOrderByCreatedAtAsc(email).orElseThrow();
+        assertThat(registered.user().email()).isEqualTo(email);
+        assertThat(realEncoder.matches(password, member.getPasswordHash())).isTrue();
+        assertThat(auth.login(new AuthRequest(email, password, true)).user().id()).isEqualTo(member.getId());
+        subscriptions.applyForSubscription(member.getId(), " fixture payer ", SubscriptionPlan.SIX_MONTHS);
+        var restored = auth.getCurrentUser(member.getId());
+        assertThat(restored.subscription()).isEqualTo("PENDING");
+        assertThat(restored.requestedSubscriptionPlan()).isEqualTo("SIX_MONTHS");
+        assertThat(restored.depositorName()).isEqualTo("fixture payer");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> subscriptions.applyForSubscription(member.getId(), "other", SubscriptionPlan.MONTHLY))
+            .isInstanceOf(IllegalStateException.class);
+        assertThat(auth.getCurrentUser(member.getId()).requestedSubscriptionPlan()).isEqualTo("SIX_MONTHS");
+    }
+
+    @Test
     void concurrentApplicationCannotReplaceTheFirstAcceptedPlanOrPayer() throws Exception {
         User member = saveMember(SubscriptionStatus.PRO, LocalDate.now(KST).plusDays(7));
         CountDownLatch firstApplied = new CountDownLatch(1);

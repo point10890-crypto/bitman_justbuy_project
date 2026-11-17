@@ -20,6 +20,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import jakarta.annotation.PreDestroy;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 @Transactional(readOnly = true)
@@ -31,6 +34,14 @@ public class SubscriptionService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final org.springframework.beans.factory.ObjectProvider<TelegramNotifier> telegramNotifierProvider;
+
+    private final java.util.concurrent.ThreadPoolExecutor applicationNotifications =
+        new java.util.concurrent.ThreadPoolExecutor(1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+            new java.util.concurrent.ArrayBlockingQueue<>(32), task -> {
+                Thread thread = new Thread(task, "subscription-notifications");
+                thread.setDaemon(true);
+                return thread;
+            }, new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
 
     public SubscriptionService(UserRepository userRepository,
                                PasswordEncoder passwordEncoder,
@@ -96,33 +107,59 @@ public class SubscriptionService {
 
         // 관리자 텔레그램 알림 (실패해도 신청 자체는 성공 처리)
         try {
-            TelegramNotifier notifier = telegramNotifierProvider.getIfAvailable();
-            if (notifier != null) {
-                long pendingCount = userRepository.findBySubscription(SubscriptionStatus.PENDING).size();
-                String msg = String.format(
-                    "🔔 <b>[JUST BUY] 신규 구독 승인 요청</b>%n%n"
-                    + "👤 이름: %s%n"
-                    + "📧 이메일: %s%n"
-                    + "💳 입금자명: %s%n"
-                    + "📦 신청 플랜: %s / %,d원%n"
-                    + "🆔 userId: <code>%s</code>%n%n"
-                    + "📋 대기 중: %d건%n"
-                    + "👉 관리자 페이지에서 승인/거절 처리하세요.",
-                    escape(user.getName()),
-                    escape(user.getEmail()),
-                    escape(normalizedDepositorName),
-                    requestedPlan.getLabel(),
-                    requestedPlan.getPrice(),
-                    user.getId(),
-                    pendingCount
-                );
-                notifier.sendToAdmin(msg);
-            }
+            long pendingCount = userRepository.findBySubscription(SubscriptionStatus.PENDING).size();
+            String msg = String.format(
+                "🔔 <b>[JUST BUY] 신규 구독 승인 요청</b>%n%n"
+                + "👤 이름: %s%n"
+                + "📧 이메일: %s%n"
+                + "💳 입금자명: %s%n"
+                + "📦 신청 플랜: %s / %,d원%n"
+                + "🆔 userId: <code>%s</code>%n%n"
+                + "📋 대기 중: %d건%n"
+                + "👉 관리자 페이지에서 승인/거절 처리하세요.",
+                escape(user.getName()),
+                escape(user.getEmail()),
+                escape(normalizedDepositorName),
+                requestedPlan.getLabel(),
+                requestedPlan.getPrice(),
+                user.getId(),
+                pendingCount
+            );
+            queueApplicationNotification(msg);
         } catch (Exception e) {
             log.warn("[Subscription] 관리자 텔레그램 알림 실패: {}", e.getMessage());
         }
 
         return UserDto.from(user);
+    }
+
+    private void queueApplicationNotification(String message) {
+        Runnable enqueue = () -> {
+            try {
+                applicationNotifications.execute(() -> {
+                    try {
+                        TelegramNotifier notifier = telegramNotifierProvider.getIfAvailable();
+                        if (notifier != null) notifier.sendToAdmin(message);
+                    } catch (Exception e) {
+                        log.warn("Application notification failed ({})", e.getClass().getSimpleName());
+                    }
+                });
+            } catch (java.util.concurrent.RejectedExecutionException e) {
+                log.warn("Application notification queue unavailable; subscription remains committed");
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { enqueue.run(); }
+            });
+        } else {
+            enqueue.run();
+        }
+    }
+
+    @PreDestroy
+    public void stopApplicationNotifications() {
+        applicationNotifications.shutdownNow();
     }
 
     private static String escape(String s) {

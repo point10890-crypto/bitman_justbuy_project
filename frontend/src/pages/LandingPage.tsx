@@ -52,7 +52,7 @@ export default function LandingPage() {
             showWhenDismissed
             label="앱 설치"
           />
-          <button type="button" onClick={() => navigate('/subscribe')}>구독 플랜 보기</button>
+          <button className="bm-plan-button" type="button" onClick={() => navigate('/subscribe')}>구독 플랜 보기</button>
         </div>
       </nav>
 

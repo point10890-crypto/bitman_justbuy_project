@@ -3586,8 +3586,7 @@
 }
 
 @media (max-width: 900px) {
-  .bm-landing-nav > div button:first-child,
-  .bm-landing-nav > div button:first-of-type {
+  .bm-landing-nav > div button.bm-plan-button {
     display: none;
   }
 
@@ -8071,8 +8070,7 @@ body,
     max-width: 46vw;
   }
 
-  .bm-landing-nav > div button:first-child,
-  .bm-landing-nav > div button:first-of-type {
+  .bm-landing-nav > div button.bm-plan-button {
     display: none;
   }
 
