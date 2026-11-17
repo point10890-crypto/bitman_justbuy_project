@@ -12,6 +12,7 @@ import com.bitman.justbuy.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,6 +20,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.UUID;
 
@@ -51,6 +54,13 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final org.springframework.beans.factory.ObjectProvider<TelegramNotifier> telegramNotifierProvider;
+    private final java.util.concurrent.ThreadPoolExecutor registrationNotifications =
+        new java.util.concurrent.ThreadPoolExecutor(1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+            new java.util.concurrent.ArrayBlockingQueue<>(32), task -> {
+                Thread thread = new Thread(task, "registration-notifications");
+                thread.setDaemon(true);
+                return thread;
+            }, new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -181,10 +191,8 @@ public class AuthService {
         user = userRepository.save(user);
         log.info("User registered: {}", user.getEmail());
 
-        // 관리자 텔레그램 알림 (실패해도 가입 자체는 성공 처리)
+        // Queue only after commit; external notification latency must not delay signup.
         try {
-            TelegramNotifier notifier = telegramNotifierProvider.getIfAvailable();
-            if (notifier != null) {
                 long totalUsers = userRepository.count();
                 String msg = String.format(
                     "🆕 <b>[JUST BUY] 신규 회원가입</b>%n%n"
@@ -199,8 +207,7 @@ public class AuthService {
                     user.getId(),
                     totalUsers
                 );
-                notifier.sendToAdmin(msg);
-            }
+                queueRegistrationNotification(msg);
         } catch (Exception e) {
             log.warn("[Auth] 관리자 텔레그램 알림 실패: {}", e.getMessage());
         }
@@ -209,6 +216,35 @@ public class AuthService {
             user.getId(), user.getEmail(), user.getRole().name());
 
         return new AuthResponse(token, UserDto.from(user));
+    }
+
+    private void queueRegistrationNotification(String message) {
+        Runnable enqueue = () -> {
+            try {
+                registrationNotifications.execute(() -> {
+                    try {
+                        TelegramNotifier notifier = telegramNotifierProvider.getIfAvailable();
+                        if (notifier != null) notifier.sendToAdmin(message);
+                    } catch (Exception e) {
+                        log.warn("Registration notification failed ({})", e.getClass().getSimpleName());
+                    }
+                });
+            } catch (java.util.concurrent.RejectedExecutionException e) {
+                log.warn("Registration notification queue unavailable; signup remains committed");
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { enqueue.run(); }
+            });
+        } else {
+            enqueue.run();
+        }
+    }
+
+    @PreDestroy
+    public void stopRegistrationNotifications() {
+        registrationNotifications.shutdownNow();
     }
 
     private static String escape(String s) {

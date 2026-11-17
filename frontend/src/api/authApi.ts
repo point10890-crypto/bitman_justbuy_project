@@ -208,13 +208,16 @@ async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
 // ─── Auth ───
 
 export async function registerUser(name: string, email: string, password: string): Promise<AuthResponse> {
+  return withRequestDeadline(async signal => {
   const res = await apiFetch(`${API_BASE}/api/auth/register`, {
+    signal,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, email, password }),
   })
   if (!res.ok) await handleError(res)
   return res.json()
+  }, 20_000, '가입 응답을 확인하지 못했습니다. 이미 가입됐을 수 있으니 입력한 이메일로 먼저 로그인해 주세요.')
 }
 
 export async function loginUser(email: string, password: string, rememberMe?: boolean): Promise<AuthResponse> {

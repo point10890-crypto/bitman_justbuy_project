@@ -90,8 +90,6 @@ export default function RegisterPage() {
           <p>{selectedPlan ? `가입은 무료입니다. 선택한 ${getSubscriptionPlan(selectedPlan).label} 이용권 (${formatWon(getSubscriptionPlan(selectedPlan).price)}) 신청으로 이어집니다.` : '가입은 무료입니다. 이용권을 신청하면 조건검색 TOP3 전체 결과를 볼 수 있습니다.'}</p>
         </div>
 
-        {error && <div className="auth-error">{error}</div>}
-
         <form onSubmit={handleSubmit} className="auth-form">
           <label>
             <span>이름 / 닉네임</span>
@@ -117,6 +115,7 @@ export default function RegisterPage() {
             <label><input type="checkbox" checked={agreeRisk} onChange={event => setAgreeRisk(event.target.checked)} /><span>[필수] 투자 판단 책임 안내 확인</span></label>
           </div>
 
+          {error && <div className="auth-error" role="alert">{error} <Link to={authPath('login', selectedPlan, renewal)}>로그인으로 가입 확인</Link></div>}
           <button className="auth-submit" type="submit" disabled={loading}>
             {loading ? '가입 처리 중...' : '회원가입 후 구독 신청'}
           </button>
