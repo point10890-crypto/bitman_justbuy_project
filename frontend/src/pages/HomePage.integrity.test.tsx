@@ -226,10 +226,10 @@ const search = async (text: string) => {
 }
 
 it.each([
-  '20일선 위 눌림인데 거래량 1.5배 붙은 종목',
-  '60일선 위 저변동 대형주 10개',
-  '신고가 근처 코스닥 반도체',
-  '오늘 7% 이상 오른 거래량 급증 종목',
+  '20일선 돌파, 거래량 1.5배 이상 5개',
+  '60일선 위, 거래량 2배 이하 10개',
+  '20일선 위, 외국인 순매수 5개',
+  '코스피 거래대금 100억원 이상',
 ])('runs the fixed example immediately when clicked: %s', async example => {
   const fetchMock = routed({ translate: engineMiss, keyword: q => keywordResponse(q, '검색 결과 종목') })
   vi.stubGlobal('fetch', fetchMock)
@@ -252,21 +252,61 @@ it('a query the live search understands keeps its live results and gains daily r
   expect(within(matches).getByText('실시간 종목')).toBeTruthy()
   expect(within(matches).getByText('현재가 49,000원')).toBeTruthy()                     // live quote kept
   expect(await within(matches).findByText(/위험 낮음 · 5거래일 변동 보통 ±2.5%/)).toBeTruthy()  // daily evidence added
-  expect(within(panel).getByRole('region', { name: '조건 과거 성과' }).textContent).toContain('양의 성과(통계적 확정 전)')
+  const performance = within(panel).getByRole('region', { name: '조건 과거 성과' })
+  expect(within(performance).getByText('일봉 조건의 과거 성과')).toBeTruthy()
+  expect(within(performance).getByText('위 일봉 조건식의 검증 결과입니다. 실시간 검색 조건과 조회 범위는 달라질 수 있습니다.')).toBeTruthy()
+  expect(performance.textContent).toContain('양의 성과(통계적 확정 전)')
   expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith('/api/engine/screen'))).toBe(false)  // live search led
   expect(within(screen.getByRole('search')).getAllByRole('button').map(b => b.textContent)).toEqual(['AI 조건검색'])  // one box, one button
 })
 
 it('a daily-bar query the live search refuses is answered by the engine in the same dialog', async () => {
   const unsupported = (q: string) => ({ ...keywordResponse(q), outcome: 'UNSUPPORTED', appliedConditions: [], unsupportedTerms: ['해석할 수 없는 조건: 20일선 위 눌림'], matches: [] })
-  vi.stubGlobal('fetch', routed({ translate: translated(), screen: screenResponse([engineRow('033780', '엔진 일봉 종목')]), keyword: unsupported }))
+  const row = { ...engineRow('033780', '엔진 일봉 종목'), condition_checks: [{ label: '20일선 이격 +0.0% 초과', detail: '관측 +3.0%' }] }
+  vi.stubGlobal('fetch', routed({ translate: translated(), screen: screenResponse([row]), keyword: unsupported }))
   render(tree())
   const panel = await search('20일선 위 눌림')
   const matches = await within(panel).findByRole('region', { name: '조건 일치 종목' })
   expect(within(matches).getByText('엔진 일봉 종목')).toBeTruthy()
+  expect(within(matches).getByText('추정 거래대금 49,923,178,496원')).toBeTruthy()
+  const checks = within(matches).getByRole('list', { name: '일봉 조건 확인' })
+  expect(within(checks).getByText('관측 +3.0%')).toBeTruthy()
   expect(within(panel).getByText('검색 완료 · AI 조건 해석')).toBeTruthy()
   expect(within(within(panel).getByRole('region', { name: '검색 조건과 범위' })).getByText('20일선 이격 +0.0% 초과', { selector: 'li' })).toBeTruthy()
   expect(within(panel).queryByText(/지원하지 않는 조건이 있습니다/)).toBeNull()             // the refusal is replaced, not stacked
+})
+
+it('does not execute a partially translated condition when the live parser refuses it', async () => {
+  const fetchMock = routed({
+    translate: translated({ source: 'rules', unsupported: ['배당수익률은 일봉으로 확인할 수 없습니다'], unparsed: ['배당수익률 3% 이상'] }),
+    screen: screenResponse([engineRow('033780', '미검증 후보')]),
+    keyword: q => ({ ...keywordResponse(q), outcome: 'UNSUPPORTED', unsupportedTerms: ['20일선 조건 미지원'], matches: [] }),
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  render(tree())
+  const panel = within(await search('20일선 위이며 배당수익률 3% 이상'))
+  expect(await panel.findByText('일봉 조건 해석이 필요합니다')).toBeTruthy()
+  expect(panel.getByText('배당수익률은 일봉으로 확인할 수 없습니다')).toBeTruthy()
+  expect(panel.getByText('배당수익률 3% 이상')).toBeTruthy()
+  expect(panel.queryByRole('region', { name: '조건 일치 종목' })).toBeNull()
+  expect(fetchMock.mock.calls.some(([url]) => /\/api\/engine\/(screen|backtest)$/.test(url))).toBe(false)
+  fireEvent.click(panel.getByRole('button', { name: '검색 조건 수정' }))
+  const input = screen.getByRole('textbox', { name: '분석할 종목명 또는 조건' })
+  await waitFor(() => expect(document.activeElement).toBe(input))
+  expect((input as HTMLInputElement).value).toBe('20일선 위이며 배당수익률 3% 이상')
+})
+
+it('retains independently verified live matches and skips a partial daily backtest', async () => {
+  const fetchMock = routed({
+    translate: translated({ unsupported: ['일봉에서 배당수익률 확인 불가'] }),
+    keyword: q => keywordResponse(q, '실데이터 검증 종목'),
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  render(tree())
+  const panel = within(await search('배당수익률 3% 이상'))
+  expect(await panel.findByText('실데이터 검증 종목')).toBeTruthy()
+  expect(await panel.findByText('일봉에서 배당수익률 확인 불가')).toBeTruthy()
+  expect(fetchMock.mock.calls.some(([url]) => /\/api\/engine\/(screen|backtest)$/.test(url))).toBe(false)
 })
 
 it('a mixed flow + daily query keeps only stocks that pass both the live flow and the daily conditions', async () => {

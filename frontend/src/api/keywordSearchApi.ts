@@ -121,11 +121,13 @@ export async function searchKeywordStocks(query: string, token?: string, signal?
 
 /** Read progress for the same frozen candidate snapshot without submitting new source demand. */
 export async function searchKeywordProgress(progressId: string, token?: string, signal?: AbortSignal): Promise<KeywordSearchResponse> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json; charset=utf-8' }
-  if (token) headers.Authorization = `Bearer ${token}`
-  const res = await fetch(`${API_BASE}/api/analysis/keyword-search/progress`, {
-    method: 'POST', headers, body: JSON.stringify({ progressId }), signal, cache: 'no-store',
-  })
-  if (!res.ok) await failWithApiError(res)
-  return res.json()
+  return withRequestDeadline(async requestSignal => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json; charset=utf-8' }
+    if (token) headers.Authorization = `Bearer ${token}`
+    const res = await fetch(`${API_BASE}/api/analysis/keyword-search/progress`, {
+      method: 'POST', headers, body: JSON.stringify({ progressId }), signal: requestSignal, cache: 'no-store',
+    })
+    if (!res.ok) await failWithApiError(res)
+    return res.json()
+  }, 45_000, '수급 진행 상태를 제시간에 확인하지 못했습니다.', signal)
 }

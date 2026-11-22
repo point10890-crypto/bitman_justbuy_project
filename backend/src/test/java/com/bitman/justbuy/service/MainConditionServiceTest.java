@@ -2,6 +2,7 @@ package com.bitman.justbuy.service;
 
 import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.StockPick;
+import com.bitman.justbuy.dto.condition.ConditionCheck;
 import com.bitman.justbuy.dto.condition.ConditionSignalDto;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -68,7 +69,7 @@ class MainConditionServiceTest {
             List.of("단타 변동성 확대"),
             "거래량 순위 이탈",
             "2026-05-18T09:10:00+09:00"
-        );
+        ).withChecks(ConditionCheck.withDailyChange("BREAKOUT", 7.5, "KIS OpenAPI", "2026-05-18T09:10:00+09:00"));
         when(shortTermRealtimeScanner.latestFresh())
             .thenReturn(Optional.of(new ShortTermRealtimeScanner.ScanSnapshot(
                 "2026-05-18T09:10:00+09:00",
@@ -84,6 +85,19 @@ class MainConditionServiceTest {
 
         assertThat(section.sourceStatus()).isEqualTo("REALTIME_SCAN");
         assertThat(section.signals()).containsExactly(liveSignal);
+        assertThat(service.getMain().sections().alerts().signals()).singleElement()
+            .satisfies(alert -> assertThat(alert.summary()).contains("KIS OpenAPI 당일 등락률 +7.50%"));
+    }
+
+    @Test
+    void alertsDoNotPresentTargetDistanceAsAnObservedReturn() {
+        when(conditionSearchPipeline.getPrecomputed("BREAKOUT"))
+            .thenReturn(response("BREAKOUT", stock("삼성전자", "005930", "78,100", "82,000", "주목")));
+
+        MainConditionService service = new MainConditionService(conditionSearchPipeline);
+
+        assertThat(service.getMain().sections().alerts().signals()).singleElement()
+            .satisfies(alert -> assertThat(alert.summary()).doesNotContain("기대/포착 수익률"));
     }
 
     @Test

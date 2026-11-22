@@ -6,6 +6,8 @@ import java.util.List;
 /** A measured check is distinct from AI commentary or the name of a screening rule. */
 public record ConditionCheck(String id, String category, String criterion, String status,
                              String observedValue, String source, String observedAt) {
+    public static final String BREAKOUT_DAILY_CHANGE_CHECK = "technical.2";
+
     public static List<ConditionCheck> withDailyChangeText(String mode, String change, String source, String at) {
         Double value = null;
         try { value = Double.valueOf(change.trim().replace("%", "").replace(",", "")); }
@@ -18,7 +20,7 @@ public record ConditionCheck(String id, String category, String criterion, Strin
         if (!("BREAKOUT".equals(mode) || "JONGGA_V2".equals(mode)) || change == null || !Double.isFinite(change)
             || at == null || at.isBlank() || source == null || source.isBlank()) return checks;
         try { java.time.OffsetDateTime.parse(at); } catch (RuntimeException ignored) { return checks; }
-        String id = "BREAKOUT".equals(mode) ? "technical.2" : "technical.3";
+        String id = "BREAKOUT".equals(mode) ? BREAKOUT_DAILY_CHANGE_CHECK : "technical.3";
         double minimum = "BREAKOUT".equals(mode) ? 3 : 5;
         checks.replaceAll(c -> c.id().equals(id) ? new ConditionCheck(c.id(), c.category(), c.criterion(),
             change >= minimum && change <= 15 ? "PASS" : "FAIL",

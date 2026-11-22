@@ -20,15 +20,24 @@ def leaves(strategy):
     ("20일선 위", {"f": "gap_ma20", "op": ">", "v": 0}),
     ("60일선 아래", {"f": "gap_ma60", "op": "<", "v": 0}),
     ("거래량 1.5배", {"f": "volr", "op": ">=", "v": 1.5}),
+    ("거래량 20일 평균 대비 1.5배 미만", {"f": "volr", "op": "<", "v": 1.5}),
     ("거래량 급증", {"f": "volr", "op": ">=", "v": 2.0}),
     ("거래대금 500억 이상", {"f": "val_today", "op": ">=", "v": 5e10}),
+    ("거래대금 1.05억원 이하", {"f": "val_today", "op": "<=", "v": 105_000_000}),
     ("거래대금이 붙은", {"f": "val_today", "op": ">=", "v": 1e10}),
     ("3% 이상 상승", {"f": "r1", "op": ">=", "v": 0.03}),
+    ("3% 미만 상승", {"f": "r1", "op": "<", "v": 0.03}),
     ("5% 이상 하락", {"f": "r1", "op": "<=", "v": -0.05}),
+    ("5% 미만 하락", {"f": "r1", "op": ">", "v": -0.05}),
     ("눌림", {"between": ["dd20", -0.10, -0.03]}),
     ("저변동", {"f": "atr14_pct", "op": "<=", "v": 0.035}),
     ("신고가 근처", {"f": "dd120", "op": ">=", "v": -0.05}),
     ("5000원 이상", {"f": "close", "op": ">=", "v": 5000.0}),
+    ("종가 5만원 이하", {"f": "close", "op": "<=", "v": 50_000}),
+    ("5일선 위", {"f": "gap_ma5", "op": ">", "v": 0}),
+    ("20일선 돌파", {"f": "cross_up_ma20", "op": "==", "v": 1}),
+    ("60일 이평선 이탈", {"f": "cross_down_ma60", "op": "==", "v": 1}),
+    ("이평선 정배열", {"f": "ma_aligned", "op": "==", "v": 1}),
     ("코스닥", {"market_in": ["KOSDAQ"]}),
     ("반도체", {"sector_any": ["반도체"]}),
 ])
@@ -49,20 +58,30 @@ def test_rule_translator_full_sentence():
     assert t.strategy["guard"]["exclude_risk"] == ["chase", "high_vol"]
 
 
+def test_rule_translator_keeps_both_bounds():
+    t = RuleTranslator().translate("거래대금 100억 초과, 거래대금 200억 이하")
+    assert leaves(t.strategy) == [
+        {"f": "val_today", "op": ">", "v": 10_000_000_000},
+        {"f": "val_today", "op": "<=", "v": 20_000_000_000},
+    ]
+    assert not t.unparsed
+
+
 def test_rule_translator_warns_and_relaxes_guard_for_explicit_chasing():
-    t = RuleTranslator().translate("오늘 7% 이상 오른 거래량 급증 종목")
+    t = RuleTranslator().translate("7% 이상 오른 거래량 급증 종목")
     assert "chase" not in t.strategy["guard"]["exclude_risk"]
     assert any("-4.02%" in w for w in t.warnings)
 
 
 def test_flow_conditions_are_handed_to_the_live_search_not_refused():
-    t = RuleTranslator().translate("외국인 순매수 이어지는 20일선 위 종목")
+    t = RuleTranslator().translate("외국인 순매수 20일선 위 종목")
     assert t.realtime_query == "외국인 순매수"
     assert not any("수급" in u for u in t.unsupported)
     assert {"f": "gap_ma20", "op": ">", "v": 0} in leaves(t.strategy)
     assert all("foreign" not in json.dumps(l) for l in leaves(t.strategy))
     assert RuleTranslator().translate("쌍끌이 매수 종목").realtime_query == "쌍끌이"
     assert RuleTranslator().translate("외국인과 기관 순매수 60일선 위").realtime_query == "외국인과 기관 순매수"
+    assert RuleTranslator().translate("외국인과 기관 동반 순매수 60일선 위").realtime_query == "외국인과 기관 순매수"
 
 
 def test_vague_flow_wording_without_a_live_condition_is_still_refused():
@@ -91,12 +110,12 @@ def test_daily_query_without_flow_does_not_gain_a_live_handoff():
     assert RuleTranslator().translate("오늘 20일선 위").realtime_query is None
 
 
-def test_llm_path_takes_the_flow_query_from_the_member_text_not_the_model():
+def test_mixed_flow_query_uses_member_text_without_the_model():
     reply = json.dumps({"strategy": {"title": "x", "when": {"f": "gap_ma20", "op": ">", "v": 0},
                                      "rank_by": {"f": "quality_score", "desc": True}, "top_n": 5},
                         "unsupported": ["외국인 수급 데이터 없음"]})
     t = LlmTranslator(FakeProvider(reply)).translate("기관 순매수 20일선 위")
-    assert t.source == "fake" and t.realtime_query == "기관 순매수" and t.unsupported == []
+    assert t.source == "rules" and t.realtime_query == "기관 순매수" and t.unsupported == []
 
 
 def test_rule_translator_with_nothing_to_parse():
@@ -119,13 +138,94 @@ class FakeProvider:
         return self.reply
 
 
+@pytest.mark.parametrize("text", [
+    "20일선 위 또는 60일선 아래",
+    "20일선 위이거나 기관 순매수",
+    "20일선 위 아닌 종목",
+    "20일선 위, 외국인 순매수 5만주 이상",
+    "20일선 위, 외국인 순매수 5만원 이상",
+    "20일선 위, 가격 5만원 이하, 외국인 순매수",
+    "20일선 위, 최근 3개월 외국인 순매수",
+    "20일선 위, 최근 3거래일 외국인 순매수 이어지는 종목",
+    "20일선 위, 외국인 동반 순매수",
+    "오늘 20일선 위, 외국인 순매수",
+    "오늘 거래량 2배",
+    "20일선 위, 기관·외국인 순매수 중 기관만 확인",
+    "20일선 위, PER 10배 미만",
+    "10일선 돌파, 거래량 2배",
+    "20일선 지지",
+])
+def test_risky_partial_translation_is_not_executed_or_delegated(text):
+    class UnusedProvider(FakeProvider):
+        def complete_json(self, system, user):
+            pytest.fail("must block ambiguous semantics before requesting AI translation")
+
+    for translator in (RuleTranslator(), LlmTranslator(UnusedProvider())):
+        t = translator.translate(text)
+        assert t.strategy is None and t.realtime_query is None
+        assert t.error and t.unsupported
+
+
+def test_flow_and_explicit_daily_close_keep_both_conditions():
+    t = RuleTranslator().translate("20일선 위, 종가 5만원 이하, 외국인 순매수")
+    assert {"f": "close", "op": "<=", "v": 50000} in leaves(t.strategy)
+    assert t.realtime_query == "외국인 순매수"
+    assert not t.unparsed
+
+
+def test_valid_ai_output_cannot_reverse_an_explicit_operator():
+    reply = json.dumps({"strategy": {"title": "x", "when": {"f": "val_today", "op": ">=", "v": 1e10},
+                                     "rank_by": {"f": "quality_score", "desc": True}, "top_n": 10}})
+    t = LlmTranslator(FakeProvider(reply)).translate("거래대금 100억 이하 탄력이 단단한")
+    assert t.source == "rules" and "검증" in t.fallback_reason
+    assert leaves(t.strategy) == [{"f": "val_today", "op": "<=", "v": 1e10}]
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("코스닥 저변동", {"market_in": ["KOSDAQ"]}),
+    ("반도체", {"sector_any": ["반도체"]}),
+    ("7% 이하 오른", {"f": "r1", "op": "<=", "v": 0.07}),
+    ("20일선 위, 외국인 순매수", {"f": "gap_ma20", "op": ">", "v": 0}),
+])
+def test_complete_rule_results_do_not_call_the_provider(text, expected):
+    class UnusedProvider(FakeProvider):
+        def complete_json(self, system, user):
+            pytest.fail("complete rule translation must not call AI")
+
+    t = LlmTranslator(UnusedProvider()).translate(text)
+    assert t.source == "rules" and not t.unparsed
+    assert expected in leaves(t.strategy)
+
+
+def test_partial_ai_translation_preserves_unresolved_words():
+    reply = json.dumps({"strategy": {"title": "x", "when": {"f": "gap_ma20", "op": ">", "v": 0.0},
+                                     "rank_by": {"f": "quality_score", "desc": True}, "top_n": 10}})
+    t = LlmTranslator(FakeProvider(reply)).translate("20일선 위 탄력이 단단한")
+    assert t.source == "fake"
+    assert t.unparsed == ["탄력이", "단단한"]
+
+
+def test_partial_ai_translation_cannot_change_scope_guard_or_rank():
+    baseline = RuleTranslator().translate("코스닥 저변동, 탄력이 단단한")
+    strategy = baseline.strategy
+    for altered in (
+        {**strategy, "when": {"market_in": ["KOSPI"]}},
+        {**strategy, "guard": {"exclude_risk": []}},
+        {**strategy, "rank_by": {"f": "vol20", "desc": True}},
+    ):
+        reply = json.dumps({"strategy": altered})
+        t = LlmTranslator(FakeProvider(reply)).translate("코스닥 저변동, 탄력이 단단한")
+        assert t.source == "rules" and "검증" in t.fallback_reason
+        assert t.strategy == baseline.strategy and t.unparsed == baseline.unparsed
+
+
 def test_llm_translation_that_validates_is_used(tmp_path):
     reply = json.dumps({"strategy": {"title": "x", "when": {"f": "gap_ma60", "op": ">", "v": 0},
                                      "rank_by": {"f": "quality_score", "desc": True}, "top_n": 7,
                                      "guard": {"exclude_risk": ["chase"]}},
                         "assumptions": ["추세 = 60일선 위"], "unsupported": []})
     led = Ledger(tmp_path / "l.db")
-    t = LlmTranslator(FakeProvider(reply), ledger=led).translate("추세 좋은 종목 7개")
+    t = LlmTranslator(FakeProvider(reply), ledger=led).translate("완만하게 오르는 종목 7개")
     assert t.source == "fake" and t.strategy["top_n"] == 7 and t.fallback_reason is None
     assert led.llm_usage()[0]["calls"] == 1
 
@@ -133,13 +233,13 @@ def test_llm_translation_that_validates_is_used(tmp_path):
 def test_llm_inventing_a_feature_falls_back_to_rules():
     reply = json.dumps({"strategy": {"title": "x", "when": {"f": "foreign_net_buy", "op": ">", "v": 0},
                                      "rank_by": {"f": "r1"}, "top_n": 5}})
-    t = LlmTranslator(FakeProvider(reply)).translate("20일선 위")
+    t = LlmTranslator(FakeProvider(reply)).translate("20일선 위 탄력이 단단한")
     assert t.source == "rules" and "검증" in t.fallback_reason
     assert {"f": "gap_ma20", "op": ">", "v": 0} in leaves(t.strategy)
 
 
 def test_llm_outage_falls_back_to_rules():
-    t = LlmTranslator(FakeProvider(exc=TimeoutError("slow"))).translate("저변동")
+    t = LlmTranslator(FakeProvider(exc=TimeoutError("slow"))).translate("저변동 탄력이 단단한")
     assert t.source == "rules" and "호출" in t.fallback_reason
 
 
@@ -150,7 +250,7 @@ def test_failing_provider_hands_over_to_the_next_before_rules(tmp_path):
     second.name = "fake2"
     led = Ledger(tmp_path / "l.db")
     tr = LlmTranslator([FakeProvider(exc=PermissionError("403")), second], ledger=led)
-    t = tr.translate("추세 좋은 종목 7개")
+    t = tr.translate("완만하게 오르는 종목 7개")
     assert t.source == "fake2" and t.fallback_reason is None
     assert tr.chain == "fake→fake2→rules"
     assert sum(r["calls"] for r in led.llm_usage()) == 2

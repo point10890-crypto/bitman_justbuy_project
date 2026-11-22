@@ -14,7 +14,7 @@ public final class EvidenceClaimGuard {
     private static final int MAX_FACTS = 256;
     private static final int MAX_CLAIMS = 16;
     private static final Set<String> USABLE = Set.of("AVAILABLE", "PARTIAL", "PARTIAL_COVERAGE", "DETERMINISTIC");
-    private static final Set<String> CONTEXT = Set.of("source", "environment", "observedDate", "period", "coverageStart",
+    private static final Set<String> CONTEXT = Set.of("source", "environment", "observedDate", "fetchedAt", "period", "coverageStart",
         "coverageEnd", "unit", "priceUnit", "volumeUnit", "quantityUnit", "netBuyUnit", "status", "observationTimeBasis");
     private static final Set<String> STRING_NUMBERS = Set.of("currentPrice", "changeRate", "maxReturnPct");
     private static final Pattern NUMBER = Pattern.compile("[+-]?(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)(?:\\.[0-9]+)?");
@@ -152,7 +152,7 @@ public final class EvidenceClaimGuard {
             case "breakout20" -> "직전 20일 고가 돌파";
             case "contraction" -> "가격·거래량 수축";
             case "maxReturnPct" -> "입력 수익률 지표";
-            case "source", "environment", "period", "observedDate", "coverageStart", "coverageEnd", "unit", "status" -> contextLabel(key);
+            case "source", "environment", "period", "observedDate", "fetchedAt", "coverageStart", "coverageEnd", "unit", "status" -> contextLabel(key);
             default -> "입력 지표";
         };
     }
@@ -162,6 +162,7 @@ public final class EvidenceClaimGuard {
             case "environment" -> "환경";
             case "observedDate" -> "관측일";
             case "asOf" -> "입력 기준 시각";
+            case "fetchedAt" -> "조회 시각";
             case "period" -> "관측기간";
             case "coverageStart" -> "자료 시작일";
             case "coverageEnd" -> "자료 종료일";

@@ -1,5 +1,6 @@
 package com.bitman.justbuy.service;
 
+import com.bitman.justbuy.dto.condition.ConditionCheck;
 import com.bitman.justbuy.dto.condition.ConditionSection;
 import com.bitman.justbuy.dto.condition.ConditionSignalDto;
 import com.bitman.justbuy.dto.condition.EvidencePacket;
@@ -43,6 +44,7 @@ public class ShortTermRealtimeScanner {
     private static final LocalTime SESSION_END = LocalTime.of(15, 20);
     private static final int RAW_SCAN_LIMIT = 80;
     private static final int FOREIGN_SCAN_LIMIT = 40;
+    private static final String KIS_SOURCE = "KIS OpenAPI";
 
     private final KisApiService kisApiService;
     private final TrackRecordService trackRecordService;
@@ -130,17 +132,19 @@ public class ShortTermRealtimeScanner {
         List<KisApiService.RankedStock> gainers = kisApiService.fetchRealtimeGainersRankingStocks(RAW_SCAN_LIMIT);
         List<KisApiService.RankedStock> foreignNetBuy =
             kisApiService.fetchForeignNetBuyRankingStocks(FOREIGN_SCAN_LIMIT);
+        List<KisApiService.RankedStock> turnover = kisApiService.fetchRealtimeTurnoverRankingStocks(30);
+        ZonedDateTime checkedAt = ZonedDateTime.now(KST);
         var independent=queryCandidateEvidence(volume,gainers,foreignNetBuy);
-        List<ConditionSignalDto> signals = buildCandidates(volume, gainers, foreignNetBuy, now, 6, false, kisApiService.fetchRealtimeTurnoverRankingStocks(30));
-        signals = publishVerified(signals, now, independent);
+        List<ConditionSignalDto> signals = buildCandidates(volume, gainers, foreignNetBuy, checkedAt, 6, false, turnover);
+        signals = publishVerified(signals, checkedAt, independent);
         latest = new ScanSnapshot(
-            nowKst(now),
-            now.toInstant(),
+            nowKst(checkedAt),
+            checkedAt.toInstant(),
             signals.isEmpty() ? "REALTIME_EMPTY" : "REALTIME_SCAN",
             true,
             signals
         );
-        recordTrackableSignals(signals, now);
+        recordTrackableSignals(signals, checkedAt);
         log.info("[ShortTermRealtime] scan completed: picks={}, volumeRank={}, gainerRank={}, foreignRank={}",
             signals.size(), volume.size(), gainers.size(), foreignNetBuy.size());
         return latest;
@@ -200,10 +204,11 @@ public class ShortTermRealtimeScanner {
             .filter(candidate -> candidate.score >= 58 || (candidate.turnoverRank > 0 && candidate.changeRate >= 3 && candidate.changeRate <= 15)).toList();
         List<ConditionSignalDto> signals = new ArrayList<>();
         int signalRank = 1;
+        String checkedAt = nowKst(now);
         for (Candidate candidate : sorted) {
             Capture capture = firstSeenByCode.getOrDefault(candidate.code,
-                new Capture(nowKst(now), formatPrice(candidate.currentPrice)));
-            signals.add(candidate.toSignal(signalRank++, capture));
+                new Capture(checkedAt, formatPrice(candidate.currentPrice)));
+            signals.add(candidate.toSignal(signalRank++, capture, checkedAt));
         }
         List<ConditionSignalDto> accepted = liquidity == null ? signals.stream().limit(limit).toList() : liquidity.filterSignals("BREAKOUT", signals, limit);
         if (remember) for (ConditionSignalDto signal : accepted) {
@@ -308,8 +313,17 @@ public class ShortTermRealtimeScanner {
             for (ConditionSignalDto signal : signals) {
                 Map<String, Object> metrics = new LinkedHashMap<>();
                 metrics.put("rank", signal.rank());
-                metrics.put("maxReturnPct", signal.maxReturnPct());
-                metrics.put("currentPrice", signal.currentPrice());
+                signal.conditionChecks().stream()
+                    .filter(check -> ConditionCheck.BREAKOUT_DAILY_CHANGE_CHECK.equals(check.id())
+                        && KIS_SOURCE.equals(check.source()) && check.observedAt() != null && check.observedValue() != null
+                        && ("PASS".equals(check.status()) || "FAIL".equals(check.status())))
+                    .findFirst()
+                    .ifPresent(check -> metrics.put("dailyChange", Map.of(
+                        "changeRate", check.observedValue(),
+                        "source", check.source(),
+                        "fetchedAt", check.observedAt(),
+                        "unit", "%"
+                    )));
                 if(!independent.forCode(signal.stockCode()).isEmpty()) {
                     metrics.put("kiwoomEvidence",independent.forCode(signal.stockCode()));
                     metrics.put("kiwoomCoverage",independent.coverage());
@@ -321,7 +335,7 @@ public class ShortTermRealtimeScanner {
                     signal.stockCode(),
                     signal.stockName(),
                     signal.currentPrice(),
-                    signal.maxReturnPct(),
+                    null,
                     signal.ruleScore(),
                     signal.evidence(),
                     metrics
@@ -555,7 +569,7 @@ public class ShortTermRealtimeScanner {
             score = scoreBreakdown.finalScore();
         }
 
-        ConditionSignalDto toSignal(int rank, Capture capture) {
+        ConditionSignalDto toSignal(int rank, Capture capture, String checkedAt) {
             String price = formatPrice(currentPrice);
             String pct = changeRateText == null || changeRateText.isBlank()
                 ? formatPercent(changeRate)
@@ -611,8 +625,7 @@ public class ShortTermRealtimeScanner {
                 List.copyOf(riskFlags),
                 "상승률 둔화, 거래량 순위 이탈, 고점 대비 급락",
                 capture.capturedAt(),
-                com.bitman.justbuy.dto.condition.ConditionCheck.withDailyChangeText("BREAKOUT", changeRateText,
-                    "KIS 당일 등락률", java.time.Instant.now().toString())
+                ConditionCheck.withDailyChangeText("BREAKOUT", changeRateText, KIS_SOURCE, checkedAt)
             );
         }
 
