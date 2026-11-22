@@ -79,7 +79,12 @@ const sections: Section[] = [
   },
 ]
 
-const keywordExamples = ['20일선 위 눌림인데 거래량 1.5배 붙은 종목', '60일선 위 저변동 대형주 10개', '신고가 근처 코스닥 반도체', '오늘 7% 이상 오른 거래량 급증 종목']
+const keywordExamples = [
+  '20일선 돌파, 거래량 1.5배 이상 5개',
+  '60일선 위, 거래량 2배 이하 10개',
+  '20일선 위, 외국인 순매수 5개',
+  '코스피 거래대금 100억원 이상',
+]
 
 function CategoryIcon({ type }: { type: Section['icon'] }) {
   return <span className={`category-icon category-icon-${type}`} aria-hidden="true" />
@@ -247,14 +252,15 @@ export default function HomePage() {
   const [activeQuery, setActiveQuery] = useState('')
   const [panelOpen, setPanelOpen] = useState(false)
   const [keywordPanelOpen, setKeywordPanelOpen] = useState(false)
-  const [keywordQuery, setKeywordQuery] = useState('')
+  const [keywordRequest, setKeywordRequest] = useState({ query: '', id: 0 })
   const [keywordResult, setKeywordResult] = useState<KeywordSearchResponse | null>(null)
   const [keywordLoading, setKeywordLoading] = useState(false)
   const [keywordError, setKeywordError] = useState<string | null>(null)
   // 검색 업그레이드: 같은 검색어를 AI 조건검색 엔진에도 보내 결과를 보강하거나 이어받는다.
-  const searchUpgrade = useSearchUpgrade(keywordPanelOpen ? keywordQuery : '', { result: keywordResult, loading: keywordLoading, error: keywordError })
+  const searchUpgrade = useSearchUpgrade(keywordPanelOpen ? keywordRequest.query : '', { result: keywordResult, loading: keywordLoading, error: keywordError }, keywordRequest.id)
   const keywordGeneration = useRef(0)
   const keywordController = useRef<AbortController | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [endpointSections, setEndpointSections] = useState<Record<string, { data: ConditionSectionResponse; feed: typeof mainConditions }>>({})
   const [endpointStatus, setEndpointStatus] = useState<Record<string, string>>({})
   const [endpointLoading, setEndpointLoading] = useState<string | null>(null)
@@ -287,7 +293,7 @@ export default function HomePage() {
     keywordController.current?.abort()
     const controller = new AbortController()
     keywordController.current = controller
-    setKeywordQuery(searchQuery)
+    setKeywordRequest({ query: searchQuery, id: request })
     setKeywordPanelOpen(true)
     setKeywordLoading(true)
     setKeywordResult(null)
@@ -316,6 +322,11 @@ export default function HomePage() {
     setKeywordLoading(false)
     setKeywordResult(null)
     setKeywordError(null)
+  }
+
+  const editKeywordSearch = () => {
+    closeKeywordPanel()
+    requestAnimationFrame(() => searchInputRef.current?.focus())
   }
 
   const closePanel = () => {
@@ -441,6 +452,7 @@ export default function HomePage() {
           <form className="maker-search-box" onSubmit={handleSearch} role="search">
             <span className="agent-search-icon" aria-hidden="true" />
             <input
+              ref={searchInputRef}
               aria-label="분석할 종목명 또는 조건"
               value={query}
               onChange={event => setQuery(event.target.value)}
@@ -643,7 +655,7 @@ export default function HomePage() {
         <ResultPanel query={activeQuery} loading={loading} error={error} result={result} onClose={closePanel} />
       )}
       {keywordPanelOpen && (
-        <KeywordSearchPanel query={keywordQuery} loading={keywordLoading} error={keywordError} result={keywordResult} onClose={closeKeywordPanel} upgrade={searchUpgrade} />
+        <KeywordSearchPanel query={keywordRequest.query} loading={keywordLoading} error={keywordError} result={keywordResult} onClose={closeKeywordPanel} onEdit={editKeywordSearch} upgrade={searchUpgrade} />
       )}
     </main>
   )

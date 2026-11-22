@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  engineApi,
+  engineApi, isCompleteTranslation,
   type BacktestResult, type EngineHealth, type LibraryStrategy, type RegimeNow,
   type RiskCheckItem, type ScreenResult, type Strategy, type Translation,
 } from '../api/engineApi'
@@ -11,10 +11,10 @@ type Tab = 'ask' | 'library' | 'risk'
 type Source = { kind: 'adhoc'; strategy: Strategy } | { kind: 'library'; id: string; title: string; retired: boolean }
 
 const EXAMPLES = [
-  '20일선 위 눌림인데 거래량 1.5배 붙은 종목',
-  '60일선 위 저변동 대형주 10개',
-  '신고가 근처 코스닥 반도체',
-  '오늘 7% 이상 오른 거래량 급증 종목',
+  '20일선 돌파, 거래량 1.5배 이상 5개',
+  '60일선 위, 거래량 2배 이하 10개',
+  '5일선 위, 코스닥 10개',
+  '이평선 정배열, 거래량 1.5배 이상',
 ]
 
 const REGIME_TONE: Record<string, string> = { UP_TREND: 'up', PULLBACK: 'flat', REBOUND: 'flat', DOWN_TREND: 'down' }
@@ -78,18 +78,18 @@ export default function ConditionLabPage() {
     setText(q)
     setBusy('translate')
     setError(null)
+    setTranslation(null)
+    setSource(null)
     setScreen(null)
     setBacktest(null)
     try {
       const t = await engineApi.translate(q)
       setTranslation(t)
-      if (t.strategy) {
+      if (isCompleteTranslation(t) && !t.realtime_query) {
         const src: Source = { kind: 'adhoc', strategy: t.strategy }
         setSource(src)
         setBusy(null)
         await run(src, 'screen')
-      } else {
-        setSource(null)
       }
     } catch (e) {
       setError(errorText(e))
@@ -137,7 +137,7 @@ export default function ConditionLabPage() {
             <form className="lab-ask" onSubmit={(e) => { e.preventDefault(); translate() }}>
               <label htmlFor="lab-query">찾고 싶은 종목을 말로 적어 주세요</label>
               <div className="lab-ask-row">
-                <input id="lab-query" value={text} maxLength={300} placeholder="예: 20일선 위 눌림인데 거래량 1.5배 붙은 반도체 5개"
+                <input id="lab-query" value={text} maxLength={300} placeholder="예: 20일선 돌파, 거래량 1.5배 이상 5개"
                   onChange={(e) => setText(e.target.value)} disabled={!ready || busy !== null} />
                 <button type="submit" className="lab-primary" disabled={!ready || busy !== null || !text.trim()}>
                   {busy === 'translate' ? '번역 중…' : busy === 'screen' ? '검색 중…' : '검색'}
@@ -150,6 +150,7 @@ export default function ConditionLabPage() {
               </div>
             </form>
             {translation && <TranslationCard t={translation} />}
+            {translation?.realtime_query && <p className="lab-muted">수급 조건이 포함되어 있습니다. 홈의 AI 조건검색에서 확인해 주세요.</p>}
           </section>
 
           {source && (

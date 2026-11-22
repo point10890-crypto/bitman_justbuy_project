@@ -11,7 +11,7 @@ import pandas as pd
 from . import config, dsl
 from .evaluation import (benchmark_forward, excess_vs_universe, forward_returns, split_windows,
                          verdict, window_stats)
-from .explain import explain_row
+from .explain import condition_checks, explain_row
 from .features import REGISTRY, add_quality_score, compute_features, universe_mask
 from .panel import Panel, build_panel
 from .risk import FLAG_INFO, REGIME_INFO, describe_row, regime_series, risk_flags
@@ -42,23 +42,25 @@ class Engine:
         return cls(build_panel(store.final_bars(), store.load_listing(), store.load_names()))
 
     # ------------------------------------------------------------ selection
-    def _stages(self, strategy: Mapping) -> dict[str, pd.DataFrame]:
-        passing = dsl.evaluate(strategy["when"], self.ctx) & self.universe
+    def _stages(self, strategy: Mapping, ctx: dsl.Context | None = None) -> dict[str, pd.DataFrame]:
+        ctx = ctx if ctx is not None else self.ctx
+        period = slice(ctx.index[0], ctx.index[-1]) if ctx is not self.ctx else slice(None)
+        passing = dsl.evaluate(strategy["when"], ctx) & self.universe.loc[period]
         guard = strategy.get("guard", {})
         excluded = pd.DataFrame(False, index=passing.index, columns=passing.columns)
         reasons = {}
         for flag in guard.get("exclude_risk", []):
-            hit = passing & self.flags[flag].fillna(False)
+            hit = passing & self.flags[flag].loc[period].fillna(False)
             reasons[flag] = hit
             excluded |= hit
         regime_ok = pd.Series(True, index=passing.index)
         if guard.get("regime_in"):
-            regime_ok = self.regime.isin(guard["regime_in"])
+            regime_ok = self.regime.loc[period].isin(guard["regime_in"])
         eligible = passing & ~excluded & pd.DataFrame(
             np.repeat(regime_ok.to_numpy()[:, None], passing.shape[1], axis=1),
             index=passing.index, columns=passing.columns)
-        key = self.feats[strategy["rank_by"]["f"]].where(eligible)
-        rank = key.rank(axis=1, ascending=not strategy["rank_by"].get("desc", True), method="first")
+        key = ctx.feats[strategy["rank_by"]["f"]].where(eligible)
+        rank = key.where(np.isfinite(key)).rank(axis=1, ascending=not strategy["rank_by"].get("desc", True), method="first")
         published = rank.le(int(strategy["top_n"])) & eligible
         return {"passing": passing, "excluded": excluded, "reasons": reasons, "regime_ok": regime_ok,
                 "eligible": eligible, "rank": rank, "published": published}
@@ -67,7 +69,8 @@ class Engine:
     def screen(self, strategy: Mapping, as_of: str | None = None) -> dict:
         strategy = dsl.validate_strategy(strategy, self.features)
         t = self._resolve_date(as_of)
-        st = self._stages(strategy)
+        ctx = dsl.Context({name: values.loc[t:t] for name, values in self.feats.items()}, self.panel.meta)
+        st = self._stages(strategy, ctx)
         regime = self.regime.get(t)
         row_rank = st["rank"].loc[t]
 
@@ -80,18 +83,23 @@ class Engine:
                 "sector": _s(meta.get("sector")), "industry": _s(meta.get("industry")),
                 "stage": stage, "excluded_by": reason or [],
                 "rank": _num(row_rank.get(code)), "snapshot": snap,
+                "condition_checks": checks[code],
                 "explanation": explain_row(snap),
                 "risk": describe_row(flags_today, snap.get("atr14_pct"), snap.get("close")),
             }
 
         published_codes = row_rank[st["published"].loc[t]].sort_values().index.tolist()
-        below_codes = row_rank[st["eligible"].loc[t] & ~st["published"].loc[t]].sort_values().index.tolist()
+        below_codes = row_rank[row_rank.notna() & ~st["published"].loc[t]].sort_values().index.tolist()
+        unranked = st["eligible"].loc[t] & row_rank.isna()
         excluded_today = st["excluded"].loc[t]
         excluded_codes = excluded_today[excluded_today].index.tolist()
         # Show excluded names in the order they would have ranked, so a member sees what the guard removed.
         key = self.feats[strategy["rank_by"]["f"]].loc[t]
         desc = strategy["rank_by"].get("desc", True)
         excluded_codes.sort(key=lambda c: (pd.isna(key.get(c)), -key.get(c) if desc else key.get(c)))
+
+        excluded_preview = excluded_codes[:EXCLUDED_PREVIEW]
+        checks = condition_checks(strategy["when"], ctx, published_codes + excluded_preview)
 
         reasons_today = {code: [f for f, m in st["reasons"].items() if bool(m.at[t, code])] for code in excluded_codes}
         regime_blocked = not bool(st["regime_ok"].get(t, True))
@@ -106,10 +114,11 @@ class Engine:
                 "passing": int(st["passing"].loc[t].sum()),
                 "guard_excluded": len(excluded_codes),
                 "eligible": int(st["eligible"].loc[t].sum()),
+                "unranked": int(unranked.sum()),
                 "published": len(published_codes),
             },
             "results": [row(c, "PUBLISHED") for c in published_codes],
-            "excluded": [row(c, "GUARD_EXCLUDED", reasons_today[c]) for c in excluded_codes[:EXCLUDED_PREVIEW]],
+            "excluded": [row(c, "GUARD_EXCLUDED", reasons_today[c]) for c in excluded_preview],
             "below_top_n": below_codes,
             "excluded_codes": {c: reasons_today[c] for c in excluded_codes},
             "data_version": self.data_version,

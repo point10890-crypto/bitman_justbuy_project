@@ -110,6 +110,10 @@
 .agent-home .keyword-search-scope li { padding: 5px 8px; border-radius: 5px; background: #272b27; color: #dfd6b7; font-size: 12px; }
 .agent-home .keyword-search-scope p { margin: 5px 0 0; color: #b5bdc8; font-size: 12px; line-height: 1.5; }
 .agent-home .keyword-search-scope .keyword-search-caution { color: #e8c57c; }
+.agent-home .keyword-translation-limits { border-color: #705938; }
+.agent-home .keyword-translation-limits h3 { color: #eed681; }
+.agent-home .keyword-edit-button { margin-top: 12px; padding: 8px 12px; border: 1px solid #705938; border-radius: 6px; background: #2e271d; color: #f2df9e; font-size: 12px; cursor: pointer; }
+.agent-home .keyword-edit-button:is(:hover, :focus-visible) { border-color: #eed681; }
 .agent-home .keyword-search-warnings { padding: 12px 15px; border: 1px solid #594c32; border-radius: 8px; background: #262218; color: #e0c895; }
 .agent-home .keyword-search-warnings p { margin: 4px 0; font-size: 12px; line-height: 1.6; }
 .agent-home .keyword-search-empty { margin: 0; color: #cdd6e1; font-size: 13px; line-height: 1.7; }

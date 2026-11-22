@@ -68,6 +68,19 @@ const requestPaths = (fetchMock: ReturnType<typeof routes>) => fetchMock.mock.ca
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(now) })
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
+it('does not reinterpret an exact stock-name lookup as an unrelated daily strategy', async () => {
+  const keyword = response(['005930'], {
+    query: '삼성전자', outcome: 'COMPLETE', appliedConditions: ['종목명에 삼성전자 포함', '결과 최대 10종목'],
+  })
+  const fetchMock = routes(complete(), () => complete())
+  vi.stubGlobal('fetch', fetchMock)
+  const { result } = renderHook(() => useSearchUpgrade('삼성전자', { result: keyword, loading: false, error: null }))
+  await tick()
+  expect(result.current).toMatchObject({ status: 'done', mode: 'keyword', backtest: null })
+  expect(requestPaths(fetchMock)).not.toContain('/api/engine/screen')
+  expect(requestPaths(fetchMock)).not.toContain('/api/engine/backtest')
+})
+
 it.each(['engine', 'keyword'] as const)('shows %s results while historical analysis is pending and enriches them later', async mode => {
   const base = routes(complete(), () => complete())
   let finish!: (value: Response) => void
@@ -433,4 +446,36 @@ it('clears the pending progress timer when the search closes before it fires', a
   rerender({ query: '' })
   await tick(120_000)
   expect(requestPaths(fetchMock).filter(url => url.endsWith('/keyword-search/progress'))).toHaveLength(0)
+})
+
+it('bounds a stalled progress request and keeps confirmed matches', async () => {
+  const fetchMock = routes(pending(), () => new Promise<Response>(() => {}))
+  vi.stubGlobal('fetch', fetchMock)
+  const { result } = renderHook(() => useSearchUpgrade('외국인 순매수 20일선 위', { result: refused, loading: false, error: null }))
+  await tick()
+  await tick(10_000)
+  const progressCall = fetchMock.mock.calls.find(([url]) => url.endsWith('/keyword-search/progress'))
+  expect(progressCall?.[1]?.signal?.aborted).toBe(false)
+  await tick(45_000)
+  expect(progressCall?.[1]?.signal?.aborted).toBe(true)
+  expect(engineState(result.current).combined?.map(row => row.code)).toEqual(['000003'])
+  expect(engineState(result.current).realtime?.trackingError).toBe('수급 진행 상태를 제시간에 확인하지 못했습니다.')
+})
+
+it('shows a verified search while optional risk loads and cancels its request when repeating the same question', async () => {
+  const normalRoutes = routes(complete(), () => complete())
+  const fetchMock = vi.fn((url: string, init?: RequestInit) => url.endsWith('/api/engine/risk')
+    ? new Promise<Response>(() => {})
+    : normalRoutes(url, init))
+  vi.stubGlobal('fetch', fetchMock)
+  const keyword = { result: complete(), loading: false, error: null }
+  const { result, rerender } = renderHook(({ id }) => useSearchUpgrade('외국인 순매수', keyword, id), { initialProps: { id: 1 } })
+  await tick()
+  expect(result.current.status === 'done' && result.current.mode).toBe('keyword')
+  const firstRisk = fetchMock.mock.calls.find(([url]) => url.endsWith('/api/engine/risk'))
+  expect(firstRisk?.[1]?.signal?.aborted).toBe(false)
+  rerender({ id: 2 })
+  expect(firstRisk?.[1]?.signal?.aborted).toBe(true)
+  await tick()
+  expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/api/engine/translate'))).toHaveLength(2)
 })

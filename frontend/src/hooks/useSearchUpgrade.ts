@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
-  engineApi,
-  type BacktestResult, type RiskCheckItem, type ScreenResult, type Translation,
+  engineApi, isCompleteTranslation,
+  type BacktestResult, type DailyConditionCheck, type RiskCheckItem, type ScreenResult, type Strategy, type Translation,
 } from '../api/engineApi'
 import {
   getFlowCoverage, getSearchProgress, searchKeywordProgress, searchKeywordStocks,
@@ -24,16 +24,24 @@ export interface CombinedMatch {
   code: string
   live: KeywordSearchMatch | null
   daily: RiskCheckItem | null
+  conditionChecks?: DailyConditionCheck[]
+}
+
+export interface TranslationIssue {
+  message: string
+  translation: Translation | null
 }
 
 export type SearchUpgrade =
   | { status: 'idle' }
   | { status: 'working' }
   | { status: 'failed'; message: string }
+  | { status: 'blocked'; issue: TranslationIssue }
   | {
       status: 'done'
       mode: 'keyword'
       translation: Translation | null
+      translationIssue?: TranslationIssue | null
       risk: Record<string, RiskCheckItem>
       riskAsOf: string | null
       backtest: BacktestResult | null
@@ -78,15 +86,31 @@ export function fellBackToNameSearch(result: KeywordSearchResponse | null) {
   return !!result && result.appliedConditions.some(c => c.startsWith('종목명에'))
 }
 
-export function engineShouldLead(result: KeywordSearchResponse | null, error: string | null, translation: Translation | null) {
-  if (!translation?.strategy) return false
-  if (!result) return !!error
-  return result.outcome === 'UNSUPPORTED' || result.outcome === 'UNAVAILABLE' || fellBackToNameSearch(result)
+function isExactNameLookup(result: KeywordSearchResponse | null, query: string) {
+  if (!result || result.unsupportedTerms.length) return false
+  const normalize = (input: string) => input.trim().replace(/\s+/g, ' ').toLowerCase()
+  const conditions = result.appliedConditions.filter(condition => !/^결과 최대 \d+종목$/.test(condition))
+  return conditions.length === 1 && normalize(conditions[0]) === `종목명에 ${normalize(query)} 포함`
+}
+
+export function canVerifyKeywordConditions(result: KeywordSearchResponse | null) {
+  return !!result && (result.outcome === 'COMPLETE' || result.outcome === 'PARTIAL' || result.outcome === 'EMPTY')
+    && result.unsupportedTerms.length === 0 && !fellBackToNameSearch(result)
+}
+
+function getTranslationIssue(value: Translation | null, error: string | null): TranslationIssue | null {
+  if (!error && isCompleteTranslation(value)) return null
+  if (error) return { message: error, translation: null }
+  if (!value) return { message: '일봉 조건 해석을 받지 못했습니다.', translation: null }
+  if (value.unsupported.length || value.unparsed.length) {
+    return { message: '확인할 수 있는 지표와 기간으로 조건을 다시 입력해 주세요.', translation: value }
+  }
+  return { message: value.error || '일봉 조건으로 해석할 수 있는 표현을 입력해 주세요.', translation: value }
 }
 
 /** An explicit result count is deterministic; only the remaining conditions need AI translation. */
 function applyRequestedCount(query: string, value: Translation): Translation {
-  if (!value.strategy) return value
+  if (!value?.strategy) return value
   const counts = [...new Set([...query.matchAll(/(?<![\d.,+\-])(\d+)\s*(?:개(?!\s*(?:거래일|영업일))|종목)(?![가-힣])/g)].map(match => Number(match[1])))]
   if (counts.length !== 1 || !Number.isSafeInteger(counts[0])) return value
   const requested = counts[0]
@@ -106,38 +130,47 @@ function applyRequestedCount(query: string, value: Translation): Translation {
 export function useSearchUpgrade(
   query: string,
   keyword: { result: KeywordSearchResponse | null; loading: boolean; error: string | null },
+  requestId = 0,
 ): SearchUpgrade {
-  const [translation, setTranslation] = useState<{ query: string; value: Translation | null; error: string | null } | null>(null)
-  const [state, setState] = useState<SearchUpgrade>({ status: 'idle' })
+  const requestKey = `${requestId}:${query}`
+  const [translation, setTranslation] = useState<{ requestKey: string; value: Translation | null; error: string | null } | null>(null)
+  const [state, setState] = useState<{ requestKey: string; result: SearchUpgrade } | null>(null)
 
   // 1) 검색어가 정해지는 즉시 번역을 시작한다 — 실데이터 검색과 병렬.
   useEffect(() => {
-    setTranslation(null)
-    setState(query ? { status: 'working' } : { status: 'idle' })
     if (!query) return
     const ctl = new AbortController()
     engineApi.translate(query, ctl.signal).then(
-      value => { if (!ctl.signal.aborted) setTranslation({ query, value: applyRequestedCount(query, value), error: null }) },
-      e => { if (!ctl.signal.aborted) setTranslation({ query, value: null, error: message(e) }) },
+      value => { if (!ctl.signal.aborted) setTranslation({ requestKey, value: applyRequestedCount(query, value), error: null }) },
+      e => { if (!ctl.signal.aborted) setTranslation({ requestKey, value: null, error: message(e) }) },
     )
     return () => ctl.abort()
-  }, [query])
+  }, [query, requestKey])
 
   // 2) 실데이터 결과와 번역이 모두 오면 어느 쪽이 이끌지 정하고 보강한다.
   const { result, loading, error } = keyword
   useEffect(() => {
-    if (!query || loading || !translation || translation.query !== query) return
+    if (!query || loading || !translation || translation.requestKey !== requestKey) return
     if (!result && !error) return
     const ctl = new AbortController()
-    const t = translation.value
-    const done = (next: SearchUpgrade) => { if (!ctl.signal.aborted) setState(next) }
+    const plainNameLookup = isExactNameLookup(result, query)
+    const t = plainNameLookup ? null : translation.value
+    const done = (next: SearchUpgrade) => { if (!ctl.signal.aborted) setState({ requestKey, result: next }) }
+    const keywordVerified = canVerifyKeywordConditions(result)
+    const translationIssue = plainNameLookup ? null : getTranslationIssue(t, translation.error)
+    if (!keywordVerified && translationIssue) {
+      done({ status: 'blocked', issue: translationIssue })
+      return
+    }
     // Historical performance is optional enrichment, never a prerequisite for search results.
     let backtest: BacktestResult | null = null
-    if (t?.strategy && (engineShouldLead(result, error, t) || (result && result.outcome !== 'UNSUPPORTED'))) {
-      void engineApi.backtest({ strategy: t.strategy }, ctl.signal).then(value => {
+    const startBacktest = (strategy: Strategy) => {
+      void engineApi.backtest({ strategy }, ctl.signal).then(value => {
         if (ctl.signal.aborted) return
         backtest = value
-        setState(current => current.status === 'done' ? { ...current, backtest: value } : current)
+        setState(current => current?.requestKey === requestKey && current.result.status === 'done'
+          ? { requestKey, result: { ...current.result, backtest: value } }
+          : current)
       }).catch(() => { /* Keep the verified search results if historical analysis fails. */ })
     }
 
@@ -165,7 +198,8 @@ export function useSearchUpgrade(
           if (ctl.signal.aborted) return
           const nextCoverage = getFlowCoverage(next)
           const flowFinished = nextCoverage !== null && nextCoverage.pendingCount === 0
-          if ((next.outcome === 'UNAVAILABLE' && !flowFinished) || next.outcome === 'UNSUPPORTED' || fellBackToNameSearch(next)) {
+          const terminalUnavailable = next.outcome === 'UNAVAILABLE' && flowFinished && next.unsupportedTerms.length === 0 && !fellBackToNameSearch(next)
+          if (!canVerifyKeywordConditions(next) && !terminalUnavailable) {
             fail('추가 수급 조회에서 요청한 조건의 근거를 확인하지 못했습니다.')
             return
           }
@@ -181,8 +215,8 @@ export function useSearchUpgrade(
 
     ;(async () => {
       try {
-        if (t && engineShouldLead(result, error, t)) {
-          const strategy = t.strategy!
+        if (!keywordVerified && t?.strategy) {
+          const strategy = t.strategy
           const screen = await engineApi.screen({ strategy }, ctl.signal)
           let realtime: Extract<SearchUpgrade, { mode: 'engine' }>['realtime'] = null
           let combined: CombinedMatch[] | null = null
@@ -190,6 +224,7 @@ export function useSearchUpgrade(
           let riskError: string | null = null
           const passing = [...new Set([...screen.results.map(r => r.code), ...screen.below_top_n])]
           const excluded = new Set(Object.keys(screen.excluded_codes ?? {}))
+          const screenRows = new Map(screen.results.map(row => [row.code, row]))
           const topN = Math.max(1, Math.min(50, screen.strategy.top_n))
           let dailyByCode: Record<string, RiskCheckItem> = {}
           const publish = () => done({ status: 'done', mode: 'engine', translation: t, screen, backtest, realtime, combined, combinedExcluded, riskError })
@@ -197,15 +232,17 @@ export function useSearchUpgrade(
             const liveByCode = new Map(live.matches.map(m => [m.code, m]))
             const both = passing.filter(code => liveByCode.has(code)).slice(0, topN).map(code => liveByCode.get(code)!)
             combinedExcluded = live.matches.filter(m => excluded.has(m.code))
-            combined = both.map(m => ({ code: m.code, live: m, daily: dailyByCode[m.code] ?? null }))
+            const matched = () => both.map(m => ({ code: m.code, live: m, daily: dailyByCode[m.code] ?? null, conditionChecks: screenRows.get(m.code)?.condition_checks }))
+            combined = matched()
             riskError = null
+            publish()
             const missing = both.map(m => m.code).filter(code => !dailyByCode[code])
             if (missing.length) {
               try {
-                const daily = (await engineApi.risk(missing, screen.as_of)).items
+                const daily = (await engineApi.risk(missing, screen.as_of, ctl.signal)).items
                 if (ctl.signal.aborted) return
                 dailyByCode = { ...dailyByCode, ...Object.fromEntries(daily.map(d => [d.code, d])) }
-                combined = both.map(m => ({ code: m.code, live: m, daily: dailyByCode[m.code] ?? null }))
+                combined = matched()
               } catch {
                 riskError = '일봉 위험 정보 보강을 확인하지 못했습니다. 확인된 수급·일봉 조건 일치 결과는 유지합니다.'
               }
@@ -215,18 +252,17 @@ export function useSearchUpgrade(
             try {
               const live = await searchKeywordStocks(t.realtime_query, getStoredToken() || undefined, ctl.signal)
               realtime = { query: t.realtime_query, result: live, error: null }
-              if (live.outcome === 'UNAVAILABLE' || live.outcome === 'UNSUPPORTED' || fellBackToNameSearch(live)) {
-                realtime.error = live.outcome === 'UNSUPPORTED' || fellBackToNameSearch(live)
-                  ? '요청한 수급 조건을 확인하지 못했습니다.'
-                  : '실시간 수급을 조회하지 못했습니다.'
+              if (!canVerifyKeywordConditions(live)) {
+                realtime.error = live.outcome === 'UNAVAILABLE' ? '실시간 수급을 조회하지 못했습니다.' : '요청한 수급 조건을 확인하지 못했습니다.'
               } else {
+                startBacktest(screen.strategy)
                 await combine(live)
               }
             } catch (e) {
               if (ctl.signal.aborted) return
               realtime = { query: t.realtime_query, result: null, error: message(e) }
             }
-          }
+          } else startBacktest(screen.strategy)
           publish()
           if (realtime?.result && !realtime.error) {
             await track(realtime.result, async next => {
@@ -246,19 +282,26 @@ export function useSearchUpgrade(
 
         // 실데이터 검색이 이끈다 — 종목마다 일봉 위험·근거를 붙인다.
         const codes = (result?.matches ?? []).slice(0, 50).map(m => m.code)
-        const riskRes = codes.length ? await engineApi.risk(codes).catch(() => null) : null
-        let risk = Object.fromEntries((riskRes?.items ?? []).filter(i => i.found).map(i => [i.code, i]))
-        let riskAsOf = riskRes?.as_of ?? null
+        let risk: Record<string, RiskCheckItem> = {}
+        let riskAsOf: string | null = null
         let updatedResult: KeywordSearchResponse | undefined
         let trackingError: string | null = null
         let trackingExhausted = false
-        const publish = () => done({ status: 'done', mode: 'keyword', translation: t, risk, riskAsOf, backtest, updatedResult, trackingError, trackingExhausted })
+        const publish = () => done({ status: 'done', mode: 'keyword', translation: t, translationIssue, risk, riskAsOf, backtest, updatedResult, trackingError, trackingExhausted })
+        if (isCompleteTranslation(t)) startBacktest(t.strategy)
         publish()
-        if (result) {
+        if (codes.length) {
+          const riskRes = await engineApi.risk(codes, undefined, ctl.signal).catch(() => null)
+          if (ctl.signal.aborted) return
+          risk = Object.fromEntries((riskRes?.items ?? []).filter(i => i.found).map(i => [i.code, i]))
+          riskAsOf = riskRes?.as_of ?? null
+          publish()
+        }
+        if (result && keywordVerified) {
           await track(result, async next => {
             const missing = next.matches.slice(0, 50).map(m => m.code).filter(code => !risk[code])
             if (missing.length) {
-              const extraRisk = await engineApi.risk(missing, riskAsOf ?? undefined).catch(() => null)
+              const extraRisk = await engineApi.risk(missing, riskAsOf ?? undefined, ctl.signal).catch(() => null)
               if (ctl.signal.aborted) return
               risk = { ...risk, ...Object.fromEntries((extraRisk?.items ?? []).filter(i => i.found).map(i => [i.code, i])) }
               riskAsOf = riskAsOf ?? extraRisk?.as_of ?? null
@@ -272,11 +315,8 @@ export function useSearchUpgrade(
       }
     })()
     return () => ctl.abort()
-  }, [query, result, loading, error, translation])
+  }, [query, requestKey, result, loading, error, translation])
 
-  // 번역 자체가 실패하면 실데이터 결과만 보여준다(엔진 장애가 검색을 막지 않는다).
-  if (translation && translation.query === query && translation.error && state.status === 'working' && !loading) {
-    return { status: 'failed', message: translation.error }
-  }
-  return state
+  if (!query) return { status: 'idle' }
+  return state?.requestKey === requestKey ? state.result : { status: 'working' }
 }

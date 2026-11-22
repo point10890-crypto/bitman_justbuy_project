@@ -31,6 +31,7 @@ class FeatureDef:
 
 
 REGISTRY: dict[str, FeatureDef] = {}
+MA_WINDOWS = (5, 20, 60, 120)
 
 
 def _reg(d: FeatureDef) -> None:
@@ -52,11 +53,19 @@ for d in [
     FeatureDef("r60", "60일 수익률", "ratio", 61, "60거래일 전 대비 수익률"),
     FeatureDef("mom_120_5", "중기 모멘텀", "ratio", 121, "최근 1주를 뺀 6개월 수익률 (5일 전 / 120일 전)",
                "재현되지 않음 — 단독 조건으로 쓰지 않는다"),
+    FeatureDef("gap_ma5", "5일선 이격", "ratio", 5, "종가 / 5일 이동평균 - 1"),
     FeatureDef("gap_ma20", "20일선 이격", "ratio", 20, "종가 / 20일 이동평균 - 1 (양수 = 20일선 위)",
                example='{"f":"gap_ma20","op":">","v":0}'),
     FeatureDef("gap_ma60", "60일선 이격", "ratio", 60, "종가 / 60일 이동평균 - 1",
                example='{"f":"gap_ma60","op":">","v":0}'),
     FeatureDef("gap_ma120", "120일선 이격", "ratio", 120, "종가 / 120일 이동평균 - 1"),
+    *[FeatureDef(f"cross_{direction}_ma{window}", f"{window}일선 {action}", "flag", window + 1,
+                 f"전일 종가가 {window}일선 {previous}에 있고 당일 종가가 {side}에 있으면 1")
+      for window in MA_WINDOWS
+      for direction, action, previous, side in (("up", "상향 돌파", "이하", "위"),
+                                                ("down", "하향 이탈", "이상", "아래"))],
+    FeatureDef("ma_aligned", "이평선 정배열 (5일 > 20일 > 60일)", "flag", 60,
+               "5일 이동평균 > 20일 이동평균 > 60일 이동평균이면 1"),
     FeatureDef("dd20", "20일 고가 대비", "ratio", 20, "종가 / 20일 최고가 - 1 (0 = 고가, -0.05 = 고가 대비 5% 아래)",
                "견고한 양의 신호: 고가에 가까울수록 이후 수익이 높았다 (5일 IC +0.053 / +0.083)",
                '{"between":["dd20",-0.08,-0.02]}'),
@@ -111,14 +120,23 @@ def compute_features(panel: Panel) -> dict[str, pd.DataFrame]:
     f["r20"] = g(c / c.shift(20) - 1, 21)
     f["r60"] = g(c / c.shift(60) - 1, 61)
     f["mom_120_5"] = g(c.shift(5) / c.shift(120) - 1, 121)
-    for w in (20, 60, 120):
-        f[f"gap_ma{w}"] = g(c / c.rolling(w, min_periods=w).mean() - 1, w)
+    for w in MA_WINDOWS:
+        gap = g(c / c.rolling(w, min_periods=w).mean() - 1, w)
+        f[f"gap_ma{w}"] = gap
+        previous = gap.shift(1)
+        known = gap.notna() & previous.notna()
+        f[f"cross_up_ma{w}"] = (previous.le(0) & gap.gt(0)).where(known)
+        f[f"cross_down_ma{w}"] = (previous.ge(0) & gap.lt(0)).where(known)
+    gap5, gap20, gap60 = (f[f"gap_ma{w}"] for w in (5, 20, 60))
+    # With the same positive close, a smaller gap means a higher moving average.
+    f["ma_aligned"] = (gap5.lt(gap20) & gap20.lt(gap60)).where(gap5.notna() & gap20.notna() & gap60.notna())
     f["dd20"] = g(c / h.rolling(20, min_periods=20).max() - 1, 20)
     f["dd120"] = g(c / h.rolling(120, min_periods=120).max() - 1, 120)
     prior_hi = c.shift(1).rolling(119, min_periods=119).max()
     f["new_high120"] = g((c >= prior_hi).astype(float).where(prior_hi.notna() & c.notna()), 120)
 
-    f["volr"] = v / v.shift(1).rolling(20, min_periods=15).mean()
+    prior_volume = v.shift(1).rolling(20, min_periods=20).mean()
+    f["volr"] = g(v / prior_volume.where(prior_volume.gt(0)), 21)
     f["val_today"] = val
     f["val_avg20"] = val.rolling(20, min_periods=15).mean()
 

@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { getFlowCoverage, getSearchProgress, type KeywordSearchMatch, type KeywordSearchResponse } from '../../api/keywordSearchApi'
-import type { RiskCheckItem } from '../../api/engineApi'
-import { fellBackToNameSearch, type SearchUpgrade } from '../../hooks/useSearchUpgrade'
-import { DailyEvidence, EngineMatchCard, PastPerformance } from './SearchUpgradeViews'
+import type { DailyConditionCheck, RiskCheckItem } from '../../api/engineApi'
+import { canVerifyKeywordConditions, fellBackToNameSearch, type SearchUpgrade, type TranslationIssue } from '../../hooks/useSearchUpgrade'
+import { DailyConditionEvidence, DailyEvidence, EngineMatchCard, PastPerformance } from './SearchUpgradeViews'
 
 interface KeywordSearchPanelProps {
   query: string
@@ -10,6 +10,7 @@ interface KeywordSearchPanelProps {
   error: string | null
   result: KeywordSearchResponse | null
   onClose: () => void
+  onEdit?: () => void
   /** AI 조건검색 엔진 보강. 없으면 실데이터 결과만 보여준다. */
   upgrade?: SearchUpgrade
 }
@@ -120,7 +121,9 @@ function formatEvidenceObservation(value: string) {
   return `관측 ${formatKstTimestamp(value)}`
 }
 
-function LiveMatchCard({ match, daily, dailyAsOf }: { match: KeywordSearchMatch; daily?: RiskCheckItem | null; dailyAsOf?: string | null }) {
+function LiveMatchCard({ match, daily, dailyAsOf, conditionChecks }: {
+  match: KeywordSearchMatch; daily?: RiskCheckItem | null; dailyAsOf?: string | null; conditionChecks?: DailyConditionCheck[]
+}) {
   return (
     <article className="keyword-match">
       <div className="keyword-match-heading"><strong>{match.name}</strong><span>{match.code} · {match.market || '시장 미확인'}</span></div>
@@ -153,8 +156,34 @@ function LiveMatchCard({ match, daily, dailyAsOf }: { match: KeywordSearchMatch;
           </li>
         ))}
       </ul>
+      <DailyConditionEvidence checks={conditionChecks} />
       {daily && <DailyEvidence item={daily} asOf={dailyAsOf ?? null} />}
     </article>
+  )
+}
+
+function TranslationLimits({ issue, blocked = false, onEdit }: { issue: TranslationIssue; blocked?: boolean; onEdit?: () => void }) {
+  const t = issue.translation
+  const unresolved = [...new Set([...(t?.unsupported ?? []), ...(t?.unparsed ?? [])])]
+  return (
+    <section className="keyword-search-scope keyword-translation-limits" aria-label="일봉 조건 해석 상태" aria-live="polite">
+      <h3>{blocked ? '일봉 조건 해석이 필요합니다' : '일봉 조건 보강 미완료'}</h3>
+      <p>{blocked ? issue.message : '실데이터로 확인된 검색 결과를 표시합니다.'}</p>
+      {!blocked && unresolved.length === 0 && <p>{issue.message}</p>}
+      {unresolved.length > 0 && (
+        <>
+          <p>일봉으로 확인하지 못한 조건</p>
+          <ul>{unresolved.map(term => <li key={term}>{term}</li>)}</ul>
+        </>
+      )}
+      {blocked && t && t.conditions.length > 0 && (
+        <>
+          <p>해석된 조건식</p>
+          <ul>{t.conditions.map((condition, index) => <li key={`${condition}-${index}`}>{condition}</li>)}</ul>
+        </>
+      )}
+      {onEdit && <button className="keyword-edit-button" type="button" onClick={onEdit}>검색 조건 수정</button>}
+    </section>
   )
 }
 
@@ -164,9 +193,13 @@ function KeywordBody({ result: initialResult, upgrade }: { result: KeywordSearch
   const coverage = getFlowCoverage(result)
   const flowUnconfirmed = coverage !== null && (coverage.pendingCount > 0 || coverage.unavailableCount > 0)
   const canUseFlowLabel = result.outcome !== 'UNSUPPORTED' && (flowUnconfirmed || result.outcome === 'EMPTY' || result.outcome === 'COMPLETE')
-  const label = canUseFlowLabel
+  const isNameLookup = fellBackToNameSearch(result)
+  const isPartialMatch = result.outcome === 'PARTIAL' && result.unsupportedTerms.length > 0
+  const matchTitle = isNameLookup ? '종목명 검색 결과' : isPartialMatch ? '확인한 조건의 후보' : '조건 일치 종목'
+  const label = isNameLookup ? '종목명으로 검색' : isPartialMatch ? '일부 조건만 확인' : canUseFlowLabel
     ? flowReadinessLabel(result, result.matches.length, enriched?.trackingError, enriched?.trackingExhausted) ?? outcomeLabel[result.outcome]
     : outcomeLabel[result.outcome]
+  const showMatches = result.matches.length > 0 && (isNameLookup || isPartialMatch || canVerifyKeywordConditions(result))
   return (
     <>
       <div className="keyword-search-status" role="status">
@@ -198,7 +231,7 @@ function KeywordBody({ result: initialResult, upgrade }: { result: KeywordSearch
           ? <ul>{result.appliedConditions.map((condition, index) => <li key={index}>{condition}</li>)}</ul>
           : <p>적용한 조건이 없습니다.</p>}
         <p>검색 범위: {result.scope.label}</p>
-        <p>시세 확인 {result.scope.examinedCount.toLocaleString('ko-KR')}개 · 시세 조건 통과 {result.scope.eligibleCount.toLocaleString('ko-KR')}개 · 조건 일치 {result.scope.matchedCount.toLocaleString('ko-KR')}개</p>
+        <p>시세 확인 {result.scope.examinedCount.toLocaleString('ko-KR')}개 · 시세 조건 통과 {result.scope.eligibleCount.toLocaleString('ko-KR')}개 · {isPartialMatch ? '확인한 조건에 일치' : '조건 일치'} {result.scope.matchedCount.toLocaleString('ko-KR')}개</p>
         {result.scope.truncated && <p className="keyword-search-caution">검색 범위 제한</p>}
       </section>
       {(result.unsupportedTerms.length > 0 || result.warnings.length > 0) && (
@@ -207,18 +240,19 @@ function KeywordBody({ result: initialResult, upgrade }: { result: KeywordSearch
           {result.warnings.map((warning, index) => <p key={index}>{warning}</p>)}
         </section>
       )}
-      {enriched?.backtest && enriched.translation && (
-        <PastPerformance backtest={enriched.backtest} conditions={enriched.translation.conditions} dailyOnly={!!enriched.translation.realtime_query} />
-      )}
-      {result.matches.length > 0 && (
-        <section className="keyword-search-matches" aria-label="조건 일치 종목">
-          <h3>조건 일치 종목</h3>
+      {showMatches && (
+        <section className="keyword-search-matches" aria-label={matchTitle}>
+          <h3>{matchTitle}</h3>
           {result.matches.map(match => (
             <LiveMatchCard key={match.code} match={match} daily={enriched?.risk[match.code]} dailyAsOf={enriched?.riskAsOf} />
           ))}
         </section>
       )}
-      <p className="keyword-search-note">조건에 맞는 조회 결과입니다. 조회 시각과 시세 관측 시각은 다를 수 있습니다.</p>
+      {enriched?.backtest && enriched.translation && (
+        <PastPerformance backtest={enriched.backtest} conditions={enriched.translation.conditions} basis={enriched.translation.realtime_query ? 'mixed' : 'live'} />
+      )}
+      {enriched?.translationIssue && <TranslationLimits issue={enriched.translationIssue} />}
+      <p className="keyword-search-note">조회 시각과 시세 관측 시각은 다를 수 있습니다.</p>
     </>
   )
 }
@@ -232,7 +266,8 @@ function EngineBody({ up }: { up: Extract<SearchUpgrade, { mode: 'engine' }> }) 
   const label = realtime?.error ? '수급 조건 조회 실패'
     : s.regime_blocked ? '현재 시장 국면에서 쓰지 않는 조건'
     : flowLabel ? flowLabel
-    : mixed && live?.outcome === 'PARTIAL' && shown === 0 ? '확인된 결과에서 조건 일치 0건 · 일부 자료 미확인'
+    : mixed && live?.outcome === 'PARTIAL' ? `일부 자료 미확인 · 확인 범위에서 ${shown}종목 일치`
+    : mixed && live?.scope.truncated ? `수급 조회 범위에서 ${shown}종목 일치`
     : shown > 0 ? (combined ? '검색 완료 · 수급과 일봉 조건 결합' : '검색 완료 · AI 조건 해석') : '조건 일치 0건'
   const notes = [
     ...(t.fallback_reason ? [t.fallback_reason] : []),
@@ -245,8 +280,9 @@ function EngineBody({ up }: { up: Extract<SearchUpgrade, { mode: 'engine' }> }) 
       : []),
     ...(combinedExcluded.length ? [`수급 조건은 맞지만 위험 신호로 제외: ${combinedExcluded.map(m => m.name).join(', ')}`] : []),
     ...(realtime?.error ? [`수급 조건(${realtime.query})을 실데이터로 조회하지 못했습니다: ${realtime.error}`] : []),
-    ...(live?.outcome === 'UNSUPPORTED' ? live.unsupportedTerms.map(term => `수급 조건 미확인: ${term}`) : []),
+    ...(live?.unsupportedTerms ?? []).map(term => `수급 조건 미확인: ${term}`),
     ...(up.riskError ? [up.riskError] : []),
+    ...(s.counts.unranked ? [`정렬 기준의 관측값이 없는 ${s.counts.unranked}종목은 순위에서 제외했습니다.`] : []),
     ...(live?.scope.truncated ? ['수급 검색 범위 제한: 조회한 범위의 확인된 종목만 결합했습니다.'] : []),
     ...(live?.warnings ?? []),
   ]
@@ -273,24 +309,21 @@ function EngineBody({ up }: { up: Extract<SearchUpgrade, { mode: 'engine' }> }) 
           {notes.map(n => <p key={n}>{n}</p>)}
         </section>
       )}
-      {up.backtest && <PastPerformance backtest={up.backtest} conditions={t.conditions} dailyOnly={mixed} />}
       {shown > 0 && (
         <section className="keyword-search-matches" aria-label="조건 일치 종목">
           <h3>조건 일치 종목</h3>
           {combined
-            ? combined.map(c => c.live && <LiveMatchCard key={c.code} match={c.live} daily={c.daily} dailyAsOf={s.as_of} />)
+            ? combined.map(c => c.live && <LiveMatchCard key={c.code} match={c.live} daily={c.daily} dailyAsOf={s.as_of} conditionChecks={c.conditionChecks} />)
             : s.results.map(r => <EngineMatchCard key={r.code} r={r} asOf={s.as_of} />)}
         </section>
       )}
+      {up.backtest && (!mixed || !realtime?.error) && <PastPerformance backtest={up.backtest} conditions={s.conditions} basis={mixed ? 'mixed' : 'daily'} />}
       <p className="keyword-search-note">일봉 조건은 최근 확정 종가 기준입니다. 위험 등급과 변동 범위는 과거 통계이며 목표가가 아닙니다.</p>
     </>
   )
 }
 
-const mayHandOver = (result: KeywordSearchResponse) =>
-  result.outcome === 'UNSUPPORTED' || result.outcome === 'UNAVAILABLE' || fellBackToNameSearch(result)
-
-export function KeywordSearchPanel({ query, loading, error, result, onClose, upgrade }: KeywordSearchPanelProps) {
+export function KeywordSearchPanel({ query, loading, error, result, onClose, onEdit, upgrade }: KeywordSearchPanelProps) {
   const closeRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -332,13 +365,15 @@ export function KeywordSearchPanel({ query, loading, error, result, onClose, upg
         <div className="maker-analysis-body keyword-search-body">
           {loading && <div className="analysis-loading" role="status">실데이터를 조회하고 조건을 확인하고 있습니다.</div>}
           {upgrading && (
-            <div className="analysis-loading" role="status">AI가 조건을 해석해 일봉 근거와 과거 성과를 붙이고 있습니다.</div>
+            <div className="analysis-loading" role="status">일봉으로 확인할 수 있는 조건을 해석하고 있습니다.</div>
           )}
           {engineLed ? <EngineBody up={engineLed} /> : (
             <>
               {/* 엔진이 이어받을 수 있는 결과(미지원·조회 실패·종목명 대체)는 판단이 끝날 때까지 보류한다 */}
               {error && !upgrading && <div className="auth-error" role="alert">{error}</div>}
-              {result && !loading && !(upgrading && mayHandOver(result)) && <KeywordBody result={result} upgrade={upgrade} />}
+              {upgrade?.status === 'blocked' && <TranslationLimits issue={upgrade.issue} blocked onEdit={onEdit} />}
+              {upgrade?.status === 'failed' && <div className="auth-error" role="alert">{upgrade.message}</div>}
+              {result && !loading && (!upgrading || canVerifyKeywordConditions(result)) && <KeywordBody result={result} upgrade={upgrade} />}
             </>
           )}
         </div>

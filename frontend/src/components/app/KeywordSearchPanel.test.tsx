@@ -126,10 +126,11 @@ describe('keyword search evidence presentation', () => {
 
   it('exposes partial-data warnings and unsupported terms alongside the applied conditions', () => {
     show({ ...result, outcome: 'PARTIAL', unsupportedTerms: ['신고가'], warnings: ['일부 종목의 시세를 확인하지 못했습니다.'] })
-    expect(screen.getByText('일부 데이터로 검색')).toBeTruthy()
+    expect(screen.getByText('일부 조건만 확인')).toBeTruthy()
     expect(screen.getByText('적용하지 못한 조건: 신고가')).toBeTruthy()
     expect(screen.getByText('일부 종목의 시세를 확인하지 못했습니다.')).toBeTruthy()
-    expect(screen.getByText('검증 종목')).toBeTruthy()
+    expect(within(screen.getByRole('region', { name: '확인한 조건의 후보' })).getByText('검증 종목')).toBeTruthy()
+    expect(screen.queryByRole('region', { name: '조건 일치 종목' })).toBeNull()
   })
 
   it('retains the actual trading-day observation interval separately from a point-in-time quote', () => {

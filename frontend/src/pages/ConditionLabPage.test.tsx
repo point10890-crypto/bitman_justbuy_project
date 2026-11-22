@@ -24,7 +24,7 @@ const strategy = {
 }
 const translation = {
   strategy, source: 'rules', conditions: ['20일선 이격 +0.0% 초과'], assumptions: ['눌림 = 20일 고가 대비 -3~-10%'],
-  warnings: [], unsupported: ['투자자별 수급 데이터는 아직 엔진에 없습니다'], unparsed: [], error: null,
+  warnings: [], unsupported: [], unparsed: [], error: null,
   fallback_reason: 'AI 번역 호출에 실패해 규칙 번역을 사용했습니다',
 }
 const row = (code: string, name: string, flags: Array<{ id: string; label: string }> = []) => ({
@@ -85,19 +85,19 @@ describe('condition lab', () => {
     expect(status.textContent).toContain('182종목')
   })
 
-  it('translates, screens and explains what it assumed and refused', async () => {
+  it('screens a complete translation and shows its assumptions', async () => {
     render(<ConditionLabPage />)
     await screen.findByText('지수가 60일선 아래에서 20일 하락')
-    fireEvent.change(screen.getByLabelText('찾고 싶은 종목을 말로 적어 주세요'), { target: { value: '외국인 순매수 20일선 위 눌림' } })
+    fireEvent.change(screen.getByLabelText('찾고 싶은 종목을 말로 적어 주세요'), { target: { value: '20일선 위 눌림' } })
     fireEvent.click(screen.getByRole('button', { name: '검색' }))
 
     expect(await screen.findByText('KT&G')).toBeTruthy()
-    expect(bodyOf('/translate')).toEqual({ text: '외국인 순매수 20일선 위 눌림' })
+    expect(bodyOf('/translate')).toEqual({ text: '20일선 위 눌림' })
     expect(bodyOf('/screen')).toEqual({ strategy })                     // the validated DSL, not the raw text
     const card = screen.getByLabelText('조건 번역 결과')
     expect(card.textContent).toContain('규칙 번역')
     expect(card.textContent).toContain('AI 번역 호출에 실패')
-    expect(card.textContent).toContain('수급 데이터는 아직 엔진에 없습니다')
+    expect(card.textContent).toContain('눌림 = 20일 고가 대비 -3~-10%')
     expect(screen.getByLabelText('단계별 종목 수').textContent).toContain('868')
     expect(screen.getByText('보통 ±2.5%')).toBeTruthy()
 
@@ -105,10 +105,25 @@ describe('condition lab', () => {
     expect(screen.getByText('급등주')).toBeTruthy()
   })
 
+  it.each([
+    { unsupported: ['미지원 조건: 또는'] },
+    { realtime_query: '외국인 순매수' },
+  ])('withholds screening when an input clause needs another path (%j)', async (incomplete) => {
+    vi.mocked(fetch).mockImplementation((url, init) => Promise.resolve(
+      url === '/api/engine/translate' ? json({ ...translation, ...incomplete }) : route(String(url), init),
+    ))
+    render(<ConditionLabPage />)
+    await screen.findByText('지수가 60일선 아래에서 20일 하락')
+    fireEvent.click(screen.getByRole('button', { name: '20일선 돌파, 거래량 1.5배 이상 5개' }))
+    await screen.findByLabelText('조건 번역 결과')
+    expect(bodyOf('/screen')).toBeUndefined()
+    expect(screen.queryByRole('button', { name: '과거 성과 검증' })).toBeNull()
+  })
+
   it('runs a backtest and shows both windows and the verdict', async () => {
     render(<ConditionLabPage />)
     await screen.findByText('지수가 60일선 아래에서 20일 하락')
-    fireEvent.click(screen.getByRole('button', { name: '20일선 위 눌림인데 거래량 1.5배 붙은 종목' }))
+    fireEvent.click(screen.getByRole('button', { name: '20일선 돌파, 거래량 1.5배 이상 5개' }))
     await screen.findByText('KT&G')
     fireEvent.click(screen.getByRole('button', { name: '과거 성과 검증' }))
     const panel = await screen.findByLabelText('과거 성과 검증')

@@ -5,6 +5,7 @@ import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.StockPick;
 import com.bitman.justbuy.dto.condition.ConditionCaptureTimeDto;
 import com.bitman.justbuy.dto.condition.ConditionCaptureTimesResponse;
+import com.bitman.justbuy.dto.condition.ConditionCheck;
 import com.bitman.justbuy.dto.condition.ConditionSection;
 import com.bitman.justbuy.dto.condition.ConditionSectionResponse;
 import com.bitman.justbuy.dto.condition.ConditionSignalDto;
@@ -490,8 +491,16 @@ public class MainConditionService {
         if (signal.currentPrice() != null && !signal.currentPrice().isBlank() && !"-".equals(signal.currentPrice())) {
             summary += " 현재가 " + signal.currentPrice();
         }
-        if (signal.maxReturnPct() != null && !signal.maxReturnPct().isBlank() && !"-".equals(signal.maxReturnPct())) {
-            summary += ", 기대/포착 수익률 " + signal.maxReturnPct();
+        if ("BREAKOUT".equals(signal.mode())) {
+            Optional<ConditionCheck> dailyChange = signal.conditionChecks().stream()
+                .filter(check -> ConditionCheck.BREAKOUT_DAILY_CHANGE_CHECK.equals(check.id())
+                    && check.observedAt() != null && check.observedValue() != null && check.source() != null
+                    && ("PASS".equals(check.status()) || "FAIL".equals(check.status())))
+                .findFirst();
+            if (dailyChange.isPresent()) {
+                ConditionCheck observation = dailyChange.get();
+                summary += ", " + observation.source() + " 당일 등락률 " + observation.observedValue();
+            }
         }
         if (signal.summary() != null && !signal.summary().isBlank()) {
             summary += ". " + signal.summary();

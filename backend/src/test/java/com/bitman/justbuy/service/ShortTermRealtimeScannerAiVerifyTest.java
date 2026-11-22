@@ -13,12 +13,61 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ShortTermRealtimeScannerAiVerifyTest {
 
     private static final ZonedDateTime NOW =
         ZonedDateTime.of(2026, 5, 18, 9, 30, 0, 0, ZoneId.of("Asia/Seoul"));
+
+    @Test
+    void submitsTheCurrentKisDayChangeWithItsOwnScanTimeAndSource() {
+        DeepSeekConditionVerifier verifier = mock(DeepSeekConditionVerifier.class);
+        when(verifier.isAvailable()).thenReturn(true);
+        ShortTermRealtimeScanner scanner = new ShortTermRealtimeScanner(null, (TrackRecordService) null, verifier);
+        scanner.buildSignals(volumeList(), gainerList(), NOW);
+        ZonedDateTime later = NOW.plusMinutes(3);
+        List<KisApiService.RankedStock> refreshed = List.of(
+            stock("로보티즈", "108490", "31500", "8.00", "2900000")
+        );
+        ConditionSignalDto signal = scanner.buildSignals(refreshed, refreshed, later).getFirst();
+        assertThat(signal.capturedAt()).isEqualTo("2026-05-18T09:30:00+09:00");
+        assertThat(signal.conditionChecks()).anySatisfy(check -> {
+            assertThat(check.observedValue()).isEqualTo("+8.00%");
+            assertThat(check.observedAt()).isEqualTo("2026-05-18T09:33:00+09:00");
+        });
+
+        scanner.verifyAndEnrich(List.of(signal), later);
+
+        var packets = org.mockito.ArgumentCaptor.<List<EvidencePacket>>captor();
+        verify(verifier).verify(packets.capture());
+        EvidencePacket packet = packets.getValue().getFirst();
+        assertThat(packet.metrics()).doesNotContainKey("maxReturnPct");
+        var facts = new EvidenceClaimGuard().catalog(packet);
+        assertThat(facts).filteredOn(fact -> fact.field().endsWith("/changeRate")).singleElement().satisfies(fact -> {
+            assertThat(fact.value()).isEqualTo(new java.math.BigDecimal("8"));
+            assertThat(fact.context()).containsEntry("source", "KIS OpenAPI")
+                .containsEntry("fetchedAt", "2026-05-18T09:33:00+09:00")
+                .containsEntry("unit", "%");
+        });
+    }
+
+    @Test
+    void doesNotPresentTheLegacyReturnColumnAsDayChangeWithoutAnObservation() {
+        DeepSeekConditionVerifier verifier = mock(DeepSeekConditionVerifier.class);
+        when(verifier.isAvailable()).thenReturn(true);
+        ShortTermRealtimeScanner scanner = new ShortTermRealtimeScanner(null, (TrackRecordService) null, verifier);
+        ConditionSignalDto signal = scanner.buildSignals(volumeList(), gainerList(), NOW).getFirst().withChecks(List.of());
+        assertThat(signal.maxReturnPct()).isEqualTo("+7.50%");
+
+        scanner.verifyAndEnrich(List.of(signal), NOW);
+
+        var packets = org.mockito.ArgumentCaptor.<List<EvidencePacket>>captor();
+        verify(verifier).verify(packets.capture());
+        assertThat(new EvidenceClaimGuard().catalog(packets.getValue().getFirst()))
+            .noneMatch(fact -> fact.field().endsWith("/changeRate") || fact.field().endsWith("/maxReturnPct"));
+    }
 
     @Test
     void verifyAndEnrichBlendsScoreAndStatusFromVerdict() {

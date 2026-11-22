@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from . import config, dsl
-from .features import REGISTRY
+from .features import MA_WINDOWS, REGISTRY
 
 log = logging.getLogger(__name__)
 
@@ -43,35 +43,72 @@ UNSUPPORTED = [
     (re.compile(r"외국인|기관|수급|순매수|매집 주체|개인 매도"), "투자자별 수급 데이터는 아직 엔진에 없습니다"),
     (re.compile(r"공시|자사주|무상증자|유상증자|수주"), "공시 이벤트 데이터는 아직 엔진에 없습니다"),
     (re.compile(r"뉴스|재료|테마|이슈|호재|악재"), "뉴스·테마 해석은 아직 조건으로 만들 수 없습니다"),
-    (re.compile(r"PER|PBR|ROE|배당|실적|영업이익|매출"), "재무·밸류에이션 데이터는 아직 엔진에 없습니다"),
+    (re.compile(r"\b(?:PER|PBR|ROE)\b|배당|실적|영업이익|매출", re.IGNORECASE), "재무·밸류에이션 데이터는 아직 엔진에 없습니다"),
     (re.compile(r"목표가|추천|사야|매수할|오를 종목"), "엔진은 매수 추천이나 목표가를 만들지 않습니다 — 조건과 그 과거 성적을 보여줍니다"),
 ]
 
 # Investor-flow phrases. The engine has no flow data, but the live data search does, so these
 # are handed back as `realtime_query` and applied there instead of being refused.
-REALTIME = re.compile(r"쌍끌이|(?:외국인|기관)(?:\s*(?:과|와|및|,)?\s*(?:외국인|기관))?\s*(?:동반\s*)?순매수")
+REALTIME = re.compile(r"쌍끌이(?:\s+매수)?|(?:외국인|기관)(?:\s*(?:과|와|및|,|·)\s*(?:외국인|기관)|[이가은는])?"
+                      r"\s*(?:동반\s*)?순매수(?:하는|한|중인|중)?")
 FLOW_WORDS = re.compile(r"수급|외국인|기관|순매수|쌍끌이")
-FLOW_WINDOW = re.compile(r"오늘|최근\s*[0-9]+\s*거래일(?:간)?")
+FLOW_WINDOW = re.compile(r"오늘|당일|최근\s*[0-9]+\s*거래일(?:간)?")
+BOOLEAN = re.compile(r"또는|혹은|아니면|거나|제외|아닌|아님|아니다|아니고|말고|빼고|않[은는고다음]|안\s+하|순매도|"
+                     r"\b(?:OR|NOT)\b|!=|[|¬]",
+                     re.IGNORECASE)
+CURRENT_QUOTE = re.compile(r"현재가|실시간|장중|(?:가격|주가)[이가은는]?(?=\s*[+-]?\d)")
+COMPARATORS = {"이상": ">=", "초과": ">", "이하": "<=", "미만": "<", "같음": "=="}
+REVERSED_COMPARATORS = {">=": "<=", ">": "<", "<=": ">=", "<": ">", "==": "=="}
+COMPARATOR = r"이상|초과|이하|미만|같음"
+NUMBER = r"(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?"
+MA = re.compile(r"(\d+)\s*일\s*(?:이평선|이동평균선|이평|선)\s*(위|아래|상향\s*돌파|하향\s*(?:이탈|돌파)|돌파|이탈|지지)"
+                r"(?=$|\W|(?:에|에서|인|이고|이며|이면서|인데|한|하는|하고)(?:$|\W))")
+MA_ALIGNMENT = re.compile(r"(?:(?:이평선|이동평균선)\s*)?정배열")
+PRICE = re.compile(rf"(?:종가\s*)?(?<![\d.,+-])({NUMBER})\s*(만원|천원|원)\s*({COMPARATOR})")
+VALUE = re.compile(rf"거래대금\s*({NUMBER})\s*(조원?|억원?|만원?|원)\s*({COMPARATOR})?")
+VOLUME_RATIO = re.compile(rf"거래량\s*(?:20\s*(?:거래일|일)\s*평균\s*(?:대비(?:의)?|의)?\s*)?({NUMBER})\s*배\s*({COMPARATOR})?")
+CHANGE = re.compile(rf"(?:등락률|상승률)\s*([+-]?{NUMBER})\s*%\s*({COMPARATOR})")
+UNPARSED_CONSTRAINT = re.compile(r"[0-9%<>≠≥≤=]|이상|이하|미만|초과|같음|공시|미발표|매도|오름|하락|돌파|이탈|거래대금|거래량|상위|하위|^순$")
+COUNT = re.compile(r"(?<![\d.,+-])(?:(?:상위|최대)\s*(\d+)(?:\s*(?:개(?!\s*(?:거래일|영업일))|종목))?"
+                   r"|(\d+)\s*(?:개(?!\s*(?:거래일|영업일))|종목))(?![\d가-힣])")
+KRW_MULTIPLIER = {"조": 1_000_000_000_000, "억": 100_000_000, "만": 10_000, "천": 1_000, "": 1}
 
 
-def realtime_query(text: str) -> str | None:
-    found: list[str] = []
-    for m in REALTIME.finditer(text or ""):
-        phrase = re.sub(r"\s+", " ", m.group()).strip()
-        if phrase not in found:
-            found.append(phrase)
-    if not found:
-        return None
+def _flow_parts(text: str) -> tuple[str | None, list[tuple[int, int]]]:
+    phrases = list(REALTIME.finditer(text))
+    if not phrases:
+        return None, []
     # Keep explicit periods, including invalid/conflicting ones, for the live parser to validate.
-    # Dropping them would silently switch a 'today' query to its three-session default.
-    windows = [re.sub(r"\s+", " ", m.group()).strip() for m in FLOW_WINDOW.finditer(text or "")]
-    return " ".join(windows + found)
+    # A time expression beside a daily clause is left for the daily parser to resolve.
+    windows = []
+    for window in FLOW_WINDOW.finditer(text):
+        for phrase in phrases:
+            first, second = sorted((window, phrase), key=lambda match: match.start())
+            between = FLOW_WINDOW.sub(" ", text[first.end():second.start()])
+            if not between.strip(" ,·"):
+                windows.append(window)
+                break
+    parts = []
+    for match in windows + phrases:
+        part = match.group()
+        if part == "당일":
+            part = "오늘"
+        elif part.startswith("쌍끌이"):
+            part = "쌍끌이"
+        elif "외국인" in part and "기관" in part:
+            part = re.sub(r"동반\s*(?=순매수)", "", part)
+        parts.append(part)
+    return " ".join(dict.fromkeys(parts)), [m.span() for m in windows + phrases]
 
 
 def _drop_flow_refusals(unsupported, rq: str | None) -> list[str]:
     if not rq:
         return sorted(set(unsupported))
     return sorted({u for u in unsupported if not FLOW_WORDS.search(u)})
+
+
+def _amount(number: str, unit: str) -> float:
+    return float(number.replace(",", "")) * KRW_MULTIPLIER[unit.removesuffix("원")]
 
 
 @dataclass
@@ -99,29 +136,38 @@ class RuleTranslator:
         leaves: list[dict] = []
         assumptions: list[str] = []
         warnings: list[str] = []
-        rq = realtime_query(t)
+        rq, consumed = _flow_parts(t)
         unsupported = _drop_flow_refusals({msg for pat, msg in UNSUPPORTED if pat.search(t)}, rq)
         rank_by = None
         top_n = 10
         guard = {"exclude_risk": list(dsl.DEFAULT_GUARD["exclude_risk"])}
-        consumed: list[tuple[int, int]] = []
+
+        if BOOLEAN.search(t):
+            unsupported.append("또는·제외·부정이 포함된 조건은 자연어 검색에서 아직 실행할 수 없습니다")
+        if CURRENT_QUOTE.search(t):
+            unsupported.append("현재가와 장중 조건은 일봉 검색에 적용할 수 없습니다")
+        if re.search(r"역\s*정?배열", t):
+            unsupported.append("이평선 역배열은 자연어 검색에서 아직 실행할 수 없습니다")
 
         def take(m):
             consumed.append(m.span())
 
-        for m in re.finditer(r"(\d+)\s*일\s*(?:이평선|이동평균선|이평|선)\s*(위|아래|돌파|이탈|지지)", t):
+        for m in MA.finditer(t):
             n, side = int(m.group(1)), m.group(2)
             take(m)
-            if n not in (20, 60, 120):
-                near = min((20, 60, 120), key=lambda x: abs(x - n))
-                assumptions.append(f"{n}일선은 지원하지 않아 {near}일선으로 바꿨습니다")
-                n = near
-            op = "<" if side in ("아래", "이탈") else ">"
-            leaves.append({"f": f"gap_ma{n}", "op": op, "v": 0})
-        if (m := re.search(r"정배열", t)):
+            if n not in MA_WINDOWS:
+                unsupported.append(f"{n}일 이동평균은 지원하지 않습니다. 지원 기간은 5·20·60·120일입니다")
+            elif side in ("위", "아래"):
+                leaves.append({"f": f"gap_ma{n}", "op": ">" if side == "위" else "<", "v": 0})
+            elif side == "지지":
+                unsupported.append(f"{n}일선 지지는 판정 범위가 모호합니다. 위·아래·돌파·이탈 중 하나를 지정해 주세요")
+            else:
+                direction = "down" if side == "이탈" or side.startswith("하향") else "up"
+                leaves.append({"f": f"cross_{direction}_ma{n}", "op": "==", "v": 1})
+        if (m := MA_ALIGNMENT.search(t)):
             take(m)
-            leaves += [{"f": f"gap_ma{n}", "op": ">", "v": 0} for n in (20, 60, 120)]
-            assumptions.append("정배열 = 20·60·120일선 위")
+            leaves.append({"f": "ma_aligned", "op": "==", "v": 1})
+            assumptions.append("정배열은 5일 이동평균 > 20일 이동평균 > 60일 이동평균으로 판정합니다")
         if (m := re.search(r"(얕은 )?눌림", t)):
             take(m)
             shallow = bool(m.group(1))
@@ -135,33 +181,53 @@ class RuleTranslator:
             take(m)
             leaves.append({"f": "new_high120", "op": "==", "v": 1})
             warnings.append("거래량을 동반한 120일 신고가 돌파는 과거 5일 성과가 음수였습니다(-1.60% / -2.47%)")
-        if (m := re.search(r"거래량\s*(\d+(?:\.\d+)?)\s*배", t)):
+        volume_ratios = list(VOLUME_RATIO.finditer(t))
+        for m in volume_ratios:
             take(m)
-            leaves.append({"f": "volr", "op": ">=", "v": float(m.group(1))})
-        elif (m := re.search(r"거래량\s*(?:이\s*)?(급증|폭발|터진|붙은|증가|늘어난|많은)", t)):
+            leaves.append({"f": "volr", "op": COMPARATORS.get(m.group(2), ">="),
+                           "v": float(m.group(1).replace(",", ""))})
+        if not volume_ratios and (m := re.search(r"거래량\s*(?:이\s*)?(급증|폭발|터진|붙은|증가|늘어난|많은)(?!\s*순)", t)):
             take(m)
             strong = m.group(1) in ("급증", "폭발", "터진")
             leaves.append({"f": "volr", "op": ">=", "v": 2.0 if strong else 1.5})
             assumptions.append(f"거래량 {m.group(1)} = 직전 20일 평균의 {2.0 if strong else 1.5}배 이상")
-        if (m := re.search(r"거래대금\s*(\d+(?:,\d{3})*(?:\.\d+)?)\s*(억|조)", t)):
+        value_bounds = list(VALUE.finditer(t))
+        for m in value_bounds:
             take(m)
-            n = float(m.group(1).replace(",", ""))
-            leaves.append({"f": "val_today", "op": ">=", "v": n * (1e12 if m.group(2) == "조" else 1e8)})
-        elif (m := re.search(r"거래대금\s*(?:이\s*)?(붙은|많은|큰|터진)", t)):
+            leaves.append({"f": "val_today", "op": COMPARATORS.get(m.group(3), ">="),
+                           "v": _amount(m.group(1), m.group(2))})
+        if not value_bounds and (m := re.search(r"거래대금\s*(?:이\s*)?(붙은|많은|큰|터진)(?!\s*순)", t)):
             take(m)
             leaves.append({"f": "val_today", "op": ">=", "v": 1e10})
             assumptions.append("거래대금이 붙은 = 당일 거래대금 100억원 이상")
-        if (m := re.search(r"(\d+(?:\.\d+)?)\s*%?\s*[~\-]\s*(\d+(?:\.\d+)?)\s*%\s*(?:상승|오른|올랐)", t)):
+        ranges = list(re.finditer(rf"({NUMBER})\s*%?\s*[~\-]\s*({NUMBER})\s*%\s*(상승|오른|올랐|하락|빠진|떨어진)", t))
+        for m in ranges:
             take(m)
-            lo, hi = sorted((float(m.group(1)) / 100, float(m.group(2)) / 100))
+            sign = -1 if m.group(3) in ("하락", "빠진", "떨어진") else 1
+            lo, hi = sorted(sign * float(m.group(i).replace(",", "")) / 100 for i in (1, 2))
             leaves.append({"between": ["r1", lo, hi]})
-        elif (m := re.search(r"(?:상승률\s*)?(\d+(?:\.\d+)?)\s*%\s*(?:이상\s*)?(?:상승|오른|올랐|급등)", t)):
+
+        # Read the direction before converting a magnitude into a signed return.
+        for m in re.finditer(rf"(?:등락률\s*|상승률\s*)?(?<![\d.,+-])({NUMBER})\s*%\s*({COMPARATOR})?\s*"
+                             r"(상승(?!률)|오른|올랐|급등|하락(?!률)|빠진|떨어진)", t):
+            if any(m.start() < end and start < m.end() for start, end in consumed):
+                continue
             take(m)
-            leaves.append({"f": "r1", "op": ">=", "v": float(m.group(1)) / 100})
-        if (m := re.search(r"(\d+(?:\.\d+)?)\s*%\s*(?:이상\s*)?(?:하락|빠진|떨어진)", t)):
+            op = COMPARATORS.get(m.group(2), ">=")
+            v = float(m.group(1).replace(",", "")) / 100
+            if m.group(3) in ("하락", "빠진", "떨어진"):
+                op, v = REVERSED_COMPARATORS[op], -v
+                if op in (">=", ">"):
+                    leaves.append({"f": "r1", "op": "<", "v": 0})
+            elif op in ("<=", "<"):
+                leaves.append({"f": "r1", "op": ">", "v": 0})
+            leaves.append({"f": "r1", "op": op, "v": v})
+        for m in CHANGE.finditer(t):
+            if any(m.start() < end and start < m.end() for start, end in consumed):
+                continue
             take(m)
-            leaves.append({"f": "r1", "op": "<=", "v": -float(m.group(1)) / 100})
-        if (m := re.search(r"저변동|변동성\s*(?:이\s*)?(?:낮은|작은)|차분한|안정적인?", t)):
+            leaves.append({"f": "r1", "op": COMPARATORS[m.group(2)], "v": float(m.group(1).replace(",", "")) / 100})
+        if (m := re.search(r"저변동|변동성\s*(?:이\s*)?(?:낮은|작은)(?!\s*순)|차분한|안정적인?", t)):
             take(m)
             leaves.append({"f": "atr14_pct", "op": "<=", "v": 0.035})
             rank_by = rank_by or {"f": "vol20", "desc": False}
@@ -179,9 +245,13 @@ class RuleTranslator:
             take(m)
             leaves.append({"f": "r5", "op": "<=", "v": -0.10})
             warnings.append("단기 과매도 반등은 두 구간 모두 음수였습니다(-0.55% / -0.38%), 하락장에서는 -2.06%")
-        if (m := re.search(r"(\d+(?:,\d{3})*)\s*원\s*(이상|이하)", t)):
+        for m in PRICE.finditer(t):
+            if any(m.start() < end and start < m.end() for start, end in consumed):
+                continue
             take(m)
-            leaves.append({"f": "close", "op": ">=" if m.group(2) == "이상" else "<=", "v": float(m.group(1).replace(",", ""))})
+            if rq and not m.group().startswith("종가"):
+                unsupported.append("수급과 가격을 함께 검색할 때는 가격 기준을 종가로 명시해 주세요")
+            leaves.append({"f": "close", "op": COMPARATORS[m.group(3)], "v": _amount(m.group(1), m.group(2))})
         if (m := re.search(r"대형주|우량주", t)):
             take(m)
             leaves.append({"f": "val_avg20", "op": ">=", "v": 3e10})
@@ -191,25 +261,47 @@ class RuleTranslator:
             leaves.append({"f": "val_avg20", "op": "<=", "v": 1e10})
             assumptions.append("중소형 = 20일 평균 거래대금 100억원 이하")
 
-        markets = [mk for mk, word in (("KOSPI", "코스피"), ("KOSDAQ", "코스닥")) if word in t]
+        markets = []
+        for market, aliases in (("KOSPI", r"코스피|\bKOSPI\b"), ("KOSDAQ", r"코스닥|\bKOSDAQ\b")):
+            hits = list(re.finditer(aliases, t, re.IGNORECASE))
+            if hits:
+                markets.append(market)
+                for m in hits:
+                    take(m)
         if markets:
             leaves.append({"market_in": markets})
         sector_words = []
         for word, keys in SECTORS.items():
-            if word in t:
+            hits = list(re.finditer(re.escape(word), t))
+            if hits:
+                for m in hits:
+                    take(m)
                 sector_words += [k for k in keys if k not in sector_words]
         if sector_words:
             leaves.append({"sector_any": sector_words})
 
-        if (m := re.search(r"(?:상위\s*)?(\d+)\s*(?:개|종목)", t)):
-            top_n = max(1, min(int(m.group(1)), dsl.MAX_TOP_N))
+        counts = set()
+        for m in COUNT.finditer(t):
+            counts.add(int(m.group(1) or m.group(2)))
             take(m)
-        if re.search(r"거래대금\s*(?:많은|큰)?\s*순", t):
+        if len(counts) > 1:
+            unsupported.append("서로 다른 결과 개수를 한 번에 요청했습니다")
+        elif counts:
+            requested = counts.pop()
+            top_n = max(1, min(requested, dsl.MAX_TOP_N))
+            if top_n != requested:
+                assumptions.append(f"결과 개수는 1~{dsl.MAX_TOP_N}개 중 {top_n}개를 적용합니다")
+        if (m := re.search(r"거래대금\s*(?:이\s*)?(?:많은|큰)?\s*순", t)):
+            take(m)
             rank_by = {"f": "val_today", "desc": True}
-        elif re.search(r"(?:업종\s*대비\s*)?강한\s*순|상대\s*강도\s*순", t):
+        elif (m := re.search(r"(?:업종\s*대비\s*)?강한\s*순|상대\s*강도\s*순", t)):
+            take(m)
             rank_by = {"f": "rs_sector20", "desc": True}
-        elif re.search(r"변동성\s*낮은\s*순", t):
+        elif (m := re.search(r"변동성\s*낮은\s*순", t)):
+            take(m)
             rank_by = {"f": "vol20", "desc": False}
+        if any(leaf.get("f") == "val_today" for leaf in leaves) or (rank_by and rank_by["f"] == "val_today"):
+            assumptions.append("일봉 거래대금은 확정 종가 × 거래량으로 계산한 추정값을 사용합니다")
 
         if any(l.get("f") == "r1" and l.get("op") == ">=" and l.get("v", 0) >= 0.05 for l in leaves) or \
                 any("between" in l and l["between"][0] == "r1" and l["between"][2] >= 0.05 for l in leaves):
@@ -217,13 +309,23 @@ class RuleTranslator:
             warnings.append("당일 +5% 이상 상승 조건은 급등 추격과 겹칩니다. 같은 방식은 과거 5일 -2.58% / -4.02%였습니다. "
                             "요청대로 추격 제외를 껐습니다")
 
-        for m in REALTIME.finditer(t):
-            consumed.append(m.span())
-        if rq:
-            consumed.extend(m.span() for m in FLOW_WINDOW.finditer(t))
+        unparsed = _leftover(t, consumed)
+        if any(re.search(r"오늘|당일", word) for word in unparsed):
+            unsupported.append("오늘만 지정한 조건은 실시간 검색에서 확인해 주세요. 일봉 검색은 최근 확정 종가를 사용합니다")
+        if rq and unparsed:
+            unsupported.append("수급과 일봉 조건을 함께 적용하려면 모든 조건이 명확해야 합니다. 확인 필요: " + ", ".join(unparsed))
+        elif rq and "동반" in rq:
+            unsupported.append("동반 순매수는 외국인과 기관 두 주체를 함께 입력해 주세요")
+        elif rq and re.search(r"순매수(?:하는|한|중인|중)?\s+(?:거래대금|거래량)", t):
+            unsupported.append("순매수 금액·수량 조건은 지원하지 않습니다. 독립된 시세 조건은 쉼표로 구분해 주세요")
+        elif any(UNPARSED_CONSTRAINT.search(word) for word in unparsed):
+            unsupported.append("그대로 적용할 수 없는 조건이 있습니다: " + ", ".join(unparsed))
+        if unsupported:
+            return Translation(None, "rules", unsupported=unsupported, unparsed=unparsed,
+                               error="요청하신 조건을 모두 적용할 수 없습니다")
 
         if not leaves:
-            return Translation(None, "rules", unsupported=unsupported, realtime_query=rq,
+            return Translation(None, "rules", unparsed=unparsed, realtime_query=rq,
                                error="조건으로 바꿀 수 있는 표현을 찾지 못했습니다. 예: '20일선 위 눌림, 거래량 1.5배, 반도체 10개'")
 
         strategy = {
@@ -235,10 +337,12 @@ class RuleTranslator:
         }
         if rank_by is None:
             assumptions.append("정렬 기준을 말하지 않아 엔진 기본 점수(고가 근접 + 낮은 ATR) 순으로 정렬합니다")
-        strategy = dsl.validate_strategy(strategy)
+        try:
+            strategy = dsl.validate_strategy(strategy)
+        except dsl.DslError as exc:
+            return Translation(None, "rules", error=str(exc), unsupported=[str(exc)], unparsed=unparsed)
         return Translation(strategy, "rules", conditions=dsl.describe(strategy["when"]),
-                           assumptions=assumptions, warnings=warnings, unsupported=unsupported,
-                           unparsed=_leftover(t, consumed), realtime_query=rq)
+                           assumptions=assumptions, warnings=warnings, unparsed=unparsed, realtime_query=rq)
 
 
 def _leftover(text: str, spans: list[tuple[int, int]]) -> list[str]:
@@ -247,11 +351,34 @@ def _leftover(text: str, spans: list[tuple[int, int]]) -> list[str]:
         for i in range(a, b):
             chars[i] = " "
     rest = "".join(chars)
-    stop = r"(종목|찾아줘|찾아|보여줘|알려줘|중에|중|에서|이고|이면서|하고|그리고|있는|인|은|는|이|가|을|를|과|와|및|,|\.|!|\?)"
-    rest = re.sub(stop, " ", rest)
-    words = [w for w in rest.split() if len(w) >= 2 and not re.fullmatch(r"\d+", w)]
-    known = set(SECTORS) | {"코스피", "코스닥", "상위", "순"}
-    return [w for w in words if w not in known][:8]
+    filler = re.compile(r"종목(?:을|만|들|들을|들만)?|찾아(?:줘|주세요)?|보여(?:줘|주세요)?|알려(?:줘|주세요)?|"
+                        r"중(?:에|에서|인)?|에|에서|이고|이면서|이며|인데|하고|그리고|있는|인|은|는|이|가|을|를|"
+                        r"과|와|및|붙은|한|하는|내")
+    words = re.split(r"[\s,;:.·()!?]+", rest)
+    return [w for w in words if w and not filler.fullmatch(w)]
+
+
+def _conjuncts(condition: dict) -> list[dict]:
+    if "all" in condition:
+        return [clause for child in condition["all"] for clause in _conjuncts(child)]
+    return [condition]
+
+
+def _validate_model_intent(text: str, baseline: Translation, strategy: dict) -> None:
+    if (expected := baseline.strategy):
+        expected_clauses = _conjuncts(expected["when"])
+        actual_clauses = _conjuncts(strategy["when"])
+        if any(clause not in actual_clauses for clause in expected_clauses):
+            raise dsl.DslError("AI 번역이 사용자가 명시한 조건을 그대로 적용하지 않았습니다")
+        if strategy["guard"] != expected["guard"]:
+            raise dsl.DslError("AI 번역의 위험 제외 기준이 원래 조건과 다릅니다")
+        rank, expected_rank = strategy["rank_by"], expected["rank_by"]
+        if (rank["f"], rank.get("desc", True)) != (expected_rank["f"], expected_rank["desc"]):
+            raise dsl.DslError("AI 번역의 정렬 기준이 원래 조건과 다릅니다")
+    if (count := COUNT.search(text)):
+        requested = max(1, min(int(count.group(1) or count.group(2)), dsl.MAX_TOP_N))
+        if requested != strategy["top_n"]:
+            raise dsl.DslError("AI 번역에서 요청한 결과 개수가 달라졌습니다")
 
 
 # -------------------------------------------------------------------- LLM translator
@@ -325,16 +452,19 @@ def system_prompt() -> str:
 규칙:
 - 외국인·기관 순매수(수급)는 실시간 검색이 따로 적용한다 → 조건에 넣지 않고 unsupported 에도 적지 않는다.
 - 공시, 뉴스, 테마, 재무, 밸류에이션은 데이터가 없다 → unsupported 에 적고 조건에 넣지 않는다.
+- 이상(>=), 초과(>), 이하(<=), 미만(<)과 입력 수치·기간을 그대로 보존한다.
+- 이동평균선 위·아래는 gap_ma 피처, 종가 돌파·이탈은 cross_up_ma/cross_down_ma 피처를 사용한다.
+- 정배열은 ma_aligned(5일 > 20일 > 60일) 조건을 사용한다.
 - 정렬을 말하지 않으면 rank_by 는 {{"f":"quality_score","desc":true}}.
 - guard 는 기본 ["chase","high_vol"]. 회원이 급등주나 고변동을 명시적으로 원할 때만 해당 항목을 뺀다.
 - 개수를 말하지 않으면 top_n 은 10."""
 
 
 class LlmTranslator:
-    """Tries each provider in order; the first answer that passes the DSL validator wins.
+    """Executes complete rule translations and asks providers for unresolved requests.
 
-    Every attempt is logged. If no provider yields a valid strategy, the rule translator
-    answers, so translation never depends on an outside service being up.
+    Provider attempts are logged. A valid suggestion preserves known clauses and any
+    unresolved words so the member can review it before proceeding.
     """
 
     def __init__(self, providers, fallback: RuleTranslator | None = None, ledger=None):
@@ -350,6 +480,9 @@ class LlmTranslator:
         return "→".join([p.name for p in self.providers] + ["rules"])
 
     def translate(self, text: str) -> Translation:
+        baseline = self.fallback.translate(text)
+        if baseline.unsupported or baseline.realtime_query or (baseline.strategy and not baseline.unparsed):
+            return baseline
         invalid = False
         for provider in self.providers:
             started = time.perf_counter()
@@ -358,14 +491,14 @@ class LlmTranslator:
                 raw = provider.complete_json(system_prompt(), text)
                 payload = json.loads(raw)
                 strategy = dsl.validate_strategy(payload["strategy"])
+                _validate_model_intent(text, baseline, strategy)
+                if payload.get("unsupported"):
+                    raise dsl.DslError("AI 번역에 실행할 수 없는 요청이 남아 있습니다")
                 ok = True
-                rq = realtime_query(text)        # from the member's own words, never from the model
                 return Translation(strategy, provider.name, conditions=dsl.describe(strategy["when"]),
-                                   assumptions=[str(a) for a in payload.get("assumptions", [])][:8],
-                                   unsupported=_drop_flow_refusals(
-                                       {str(u) for u in payload.get("unsupported", [])}
-                                       | {m for p, m in UNSUPPORTED if p.search(text)}, rq),
-                                   realtime_query=rq)
+                                   assumptions=list(dict.fromkeys(baseline.assumptions +
+                                                                  [str(a) for a in payload.get("assumptions", [])][:8])),
+                                   warnings=baseline.warnings, unparsed=baseline.unparsed)
             except Exception as exc:
                 note = f"{type(exc).__name__}: {str(exc)[:150]}"
                 invalid = invalid or isinstance(exc, (dsl.DslError, KeyError, TypeError, json.JSONDecodeError))
@@ -373,10 +506,9 @@ class LlmTranslator:
                 if self.ledger is not None:
                     self.ledger.log_llm("translate", provider.name, provider.model, ok,
                                         int((time.perf_counter() - started) * 1000), note)
-        result = self.fallback.translate(text)
-        result.fallback_reason = ("AI 번역이 검증을 통과하지 못해 규칙 번역을 사용했습니다" if invalid
-                                  else "AI 번역 호출에 실패해 규칙 번역을 사용했습니다")
-        return result
+        baseline.fallback_reason = ("AI 번역이 검증을 통과하지 못해 규칙 번역을 사용했습니다" if invalid
+                                    else "AI 번역 호출에 실패해 규칙 번역을 사용했습니다")
+        return baseline
 
 
 def build_translator(mode: str | None = None, ledger=None):

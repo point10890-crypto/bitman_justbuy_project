@@ -43,6 +43,10 @@ export interface Translation {
   realtime_query?: string | null
 }
 
+export function isCompleteTranslation(translation: Translation | null): translation is Translation & { strategy: Strategy } {
+  return !!translation?.strategy && !translation.error && translation.unsupported.length === 0 && translation.unparsed.length === 0
+}
+
 export interface RiskBand {
   atr_pct: number | null
   typical_pct: number | null
@@ -58,6 +62,11 @@ export interface RiskView {
   band?: RiskBand
 }
 
+export interface DailyConditionCheck {
+  label: string
+  detail: string
+}
+
 export interface ScreenRow {
   code: string
   name: string | null
@@ -68,6 +77,7 @@ export interface ScreenRow {
   rank: number | null
   snapshot: Record<string, number | null>
   explanation: string[]
+  condition_checks?: DailyConditionCheck[]
   risk: RiskView
 }
 
@@ -77,7 +87,7 @@ export interface ScreenResult {
   as_of: string
   regime: { code: string; label: string }
   regime_blocked: boolean
-  counts: { universe: number; passing: number; guard_excluded: number; eligible: number; published: number }
+  counts: { universe: number; passing: number; guard_excluded: number; eligible: number; published: number; unranked?: number }
   results: ScreenRow[]
   excluded: ScreenRow[]
   below_top_n: string[]
@@ -207,5 +217,5 @@ export const engineApi = {
   translate: (text: string, signal?: AbortSignal) => post<Translation>('/translate', { text }, signal),
   screen: (req: { strategy?: Strategy; strategy_id?: string }, signal?: AbortSignal) => post<ScreenResult>('/screen', req, signal),
   backtest: (req: { strategy?: Strategy; strategy_id?: string }, signal?: AbortSignal) => post<BacktestResult>('/backtest', req, signal),
-  risk: (codes: string[], asOf?: string) => post<{ as_of: string; items: RiskCheckItem[] }>('/risk', { codes, as_of: asOf }),
+  risk: (codes: string[], asOf?: string, signal?: AbortSignal) => post<{ as_of: string; items: RiskCheckItem[] }>('/risk', { codes, as_of: asOf }, signal),
 }

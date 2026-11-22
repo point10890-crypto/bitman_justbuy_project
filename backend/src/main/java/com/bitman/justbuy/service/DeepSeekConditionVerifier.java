@@ -5,6 +5,7 @@ import com.bitman.justbuy.dto.AgentResult;
 import com.bitman.justbuy.dto.condition.EvidencePacket;
 import com.bitman.justbuy.dto.condition.EvidenceVerdict;
 import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -30,6 +31,9 @@ import java.util.HashSet;
 public class DeepSeekConditionVerifier {
 
     private static final Logger log = LoggerFactory.getLogger(DeepSeekConditionVerifier.class);
+    private static final Map<String, String> VERDICT_LABELS = Map.of(
+        "VALID", "포착", "WATCH", "관찰", "OVERHEATED", "과열주의", "REJECT", "제외"
+    );
 
     private static final String SYSTEM_PROMPT =
         "너는 한국 주식 조건검색 결과를 검증하는 시스템이다. 종목을 새로 상상하지 않는다.\n"
@@ -40,17 +44,16 @@ public class DeepSeekConditionVerifier {
         + "3. 각 후보에 리스크(riskFlags)와 무효화 조건(invalidation)을 반드시 포함하라.\n"
         + "4. 응답은 오직 JSON 으로만 한다. 설명 문장, 마크다운, 코드펜스 없이 JSON 객체 하나만 출력한다.\n\n"
         + "verdict 허용값: VALID(조건 충족 견고), WATCH(관찰), OVERHEATED(과열 주의), REJECT(부적합).\n"
-        + "displayStatus 는 한국어 짧은 라벨(예: 포착, 관찰, 과열주의, 제외).\n"
         + "aiScore 는 0~99 정수.\n"
         + "반증 검증 역할: 자료 결측·출처·환경·관측 기간·단위를 먼저 확인하고 근거 부족은 조건 보류 사유로 설명한다.\n"
         + "KIS와 Kiwoom 근거는 독립 보존한다. MOCK은 서버 환경이다. 기간이 다른 수급 합산이나 가격 평균은 금지한다.\n"
         + "facts 카탈로그에 있는 factId와 value만 claims에 그대로 복사한다. claims는 최소 하나, 최대 열여섯 개이며 중복은 금지한다.\n"
         + "claim에는 factId/value 외 기간·출처·환경·단위 등을 추가하지 않는다. 원 출처와 기간은 서버가 보존한다.\n"
-        + "summary/riskFlags/invalidation/displayStatus에는 숫자나 한글 수량·가격·기간을 쓰지 않는다. 수치는 claims에만 넣는다.\n"
+        + "summary/riskFlags/invalidation에는 숫자나 한글 수량·가격·기간을 쓰지 않는다. 수치는 claims에만 넣는다.\n"
         + "evidence 텍스트를 작성하지 않는다. 서버가 원사실을 표시한다. claims 누락 또는 불일치는 해당 AI 판정 미사용이다.\n"
         + "PENDING/자료 미확인 값은 사실로 주장하지 않는다. 원 패킷 일치 검증을 수익성 검증으로 표현하지 않는다.\n\n"
         + "출력 스키마:\n"
-        + "{\"signals\":[{\"stockCode\":\"000000\",\"aiScore\":82,\"verdict\":\"WATCH\",\"summary\":\"...\",\"claims\":[{\"factId\":\"카탈로그 factId\",\"value\":\"카탈로그 원값\"}],\"riskFlags\":[\"...\"],\"invalidation\":\"...\",\"displayStatus\":\"관찰\"}]}";
+        + "{\"signals\":[{\"stockCode\":\"000000\",\"aiScore\":82,\"verdict\":\"WATCH\",\"summary\":\"...\",\"claims\":[{\"factId\":\"카탈로그 factId\",\"value\":\"카탈로그 원값\"}],\"riskFlags\":[\"...\"],\"invalidation\":\"...\"}]}";
 
     private final DeepSeekAgent deepSeekAgent;
     private final ObjectMapper mapper;
@@ -147,7 +150,10 @@ public class DeepSeekConditionVerifier {
             duplicateInputs.forEach(candidates::remove);
             Set<String> duplicateCodes = new HashSet<>();
             Set<String> seenCodes = new HashSet<>();
-            JsonNode root = mapper.reader().with(JsonParser.Feature.STRICT_DUPLICATE_DETECTION).readTree(stripToJson(content));
+            JsonNode root = mapper.reader()
+                .with(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+                .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                .readTree(stripToJson(content));
             if (root == null) return verdicts;
             JsonNode array = root.isArray() ? root : root.path("signals");
             if (!array.isArray()) array = root.path("results");
@@ -189,17 +195,18 @@ public class DeepSeekConditionVerifier {
         int aiScore = node.path("aiScore").asInt();
         if (aiScore < 0 || aiScore > 99) return null;
         String verdict = node.path("verdict").asText("");
-        if (!Set.of("VALID", "WATCH", "OVERHEATED", "REJECT").contains(verdict)) return null;
-        String summary = node.path("summary").asText("");
-        String invalidation = node.path("invalidation").asText("");
-        String displayStatus = node.path("displayStatus").asText("");
+        String displayStatus = VERDICT_LABELS.get(verdict);
+        if (displayStatus == null || !node.path("summary").isTextual() || !node.path("invalidation").isTextual()) return null;
+        String summary = node.path("summary").textValue();
+        String invalidation = node.path("invalidation").textValue();
         var checked = claimGuard.check(node.path("claims"),claimGuard.catalog(packet));
         if (!checked.valid()) return null;
         List<String> evidence = checked.evidence();
         List<String> risks = stringList(node.path("riskFlags"));
         if (summary.isBlank() || risks.isEmpty() || invalidation.isBlank()
             || !claimGuard.qualitative(summary) || !claimGuard.qualitative(invalidation)
-            || !claimGuard.qualitative(displayStatus) || risks.stream().anyMatch(risk -> !claimGuard.qualitative(risk))) return null;
+            || !claimGuard.qualitative(node.path("displayStatus").asText(""))
+            || risks.stream().anyMatch(risk -> !claimGuard.qualitative(risk))) return null;
         return new EvidenceVerdict(
             code,
             aiScore,

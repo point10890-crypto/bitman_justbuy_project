@@ -50,6 +50,66 @@ def test_screen_as_of_uses_only_that_day(engine):
         assert r["snapshot"]["r1"] > 0
 
 
+def test_screen_reports_observations_for_the_conditions_that_passed(engine):
+    day = engine.panel.dates[-1]
+    strategy = {**RISING, "when": {"all": [
+        {"f": "r1", "op": ">=", "v": 0.0005},
+        {"any": [{"sector_any": ["반도체"]}, {"sector_any": ["존재하지않는업종"]}]},
+        {"not": {"market_in": ["KOSDAQ"]}},
+    ]}}
+    result = engine.screen(strategy, as_of=str(day.date()))
+    row = next(row for row in result["excluded"] if row["code"] == CHASER)
+    checks = row["condition_checks"]
+    assert [check["label"] for check in checks] == [
+        "당일 등락률 +0.05% 이상", "업종: 반도체", "아님: 시장: KOSDAQ",
+    ]
+    assert checks[0]["detail"] == "+8.0%"
+    assert "반도체 제조업" in checks[1]["detail"]
+    assert checks[2]["detail"] == "KOSPI"
+
+
+def test_screen_agrees_with_historical_selection_for_requested_date(engine):
+    day = engine.panel.dates[-30]
+    strategy = dsl.validate_strategy(RISING)
+    historical = engine._stages(strategy)["published"].loc[day]
+    result = engine.screen(strategy, as_of=str(day.date()))
+    assert {row["code"] for row in result["results"]} == set(historical.index[historical])
+
+
+@pytest.mark.parametrize("feature", ["ma_aligned", "cross_up_ma20", "cross_down_ma20"])
+def test_screen_serializes_observed_moving_average_flags(engine, feature):
+    engine.feats[feature] = engine.feats[feature].eq(1)
+    strategy = {**RISING, "when": {"f": feature, "op": "==", "v": 1}, "guard": {}}
+    days_with_matches = engine._stages(dsl.validate_strategy(strategy))["published"].any(axis=1)
+    day = days_with_matches.index[days_with_matches][-1]
+    result = engine.screen(strategy, as_of=str(day.date()))
+    assert result["results"]
+    assert all(row["condition_checks"][0]["detail"] == "1" for row in result["results"])
+
+
+def test_unranked_matches_are_not_returned_as_below_top_n(engine):
+    day = engine.panel.dates[-1]
+    engine.feats["quality_score"].at[day, CHASER] = np.nan
+    strategy = {**RISING, "rank_by": {"f": "quality_score"}, "guard": {}}
+    result = engine.screen(strategy)
+    assert CHASER not in {row["code"] for row in result["results"]}
+    assert CHASER not in result["below_top_n"]
+    assert result["counts"]["unranked"] == 1
+
+
+@pytest.mark.parametrize("clause, columns", [
+    ({"market_in": ["KOSDAQ"]}, ["market"]),
+    ({"sector_any": ["금융"]}, ["sector", "industry"]),
+])
+def test_not_cannot_pass_with_missing_metadata(engine, clause, columns):
+    meta = engine.panel.meta.copy()
+    meta.loc[CHASER, columns] = None
+    ctx = dsl.Context(engine.feats, meta)
+    result = dsl.evaluate({"not": clause}, ctx).loc[ctx.index[-1]]
+    assert not result[CHASER]
+    assert result.any()
+
+
 def test_forward_return_uses_next_open(engine):
     fwd = forward_returns(engine.panel, 5, "open1")
     t, code = engine.panel.dates[100], engine.panel.codes[3]

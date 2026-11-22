@@ -52,6 +52,25 @@ class DeepSeekConditionVerifierTest {
         assertThat(verdict.displayStatus()).isEqualTo("포착");
     }
 
+    @Test void publishedStatusFollowsTheAcceptedVerdict() throws Exception {
+        var response = response("196170", List.of(Map.of("factId", "196170:/currentPrice", "value", 330000)), "관찰");
+        response.put("verdict", "OVERHEATED");
+        response.put("displayStatus", "포착");
+        var verdict = parseResponse(response, packet("196170")).get("196170");
+        assertThat(verdict.displayStatus()).isEqualTo("과열주의");
+    }
+
+    @Test void rejectsNonTextNarrativesAndMultipleJsonDocuments() throws Exception {
+        var response = response("196170", List.of(Map.of("factId", "196170:/currentPrice", "value", 330000)), "관찰");
+        String first = new ObjectMapper().writeValueAsString(response);
+        assertThat(verifier.parse(first + " {}", List.of(packet("196170")))).isEmpty();
+        response.put("summary", true);
+        assertThat(parseResponse(response, packet("196170"))).isEmpty();
+        response.put("summary", "관찰");
+        response.put("invalidation", false);
+        assertThat(parseResponse(response, packet("196170"))).isEmpty();
+    }
+
     @Test
     void invalidScoreCannotEnterVerdicts() {
         String content = "[{\"stockCode\":\"042660\",\"aiScore\":150,\"verdict\":\"REJECT\"}]";
