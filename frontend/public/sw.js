@@ -1,6 +1,6 @@
 /** BitMan Service Worker - freshness-first app shell */
 
-const CACHE_NAME = 'bitman-v20261117-onboarding-r27'
+const CACHE_NAME = 'bitman-v20261123-condition-evidence-r28'
 const SHELL_ASSETS = [
   '/manifest.json',
   '/install.html',
