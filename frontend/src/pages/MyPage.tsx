@@ -6,7 +6,7 @@ import { getStoredToken } from '../contexts/AuthContext'
 import { getSubscriptionPlan, subscribePath } from '../lib/subscriptionPlans'
 import { SubscriptionPaymentDetails } from '../components/app/SubscriptionPaymentDetails'
 import { SubscriptionExpiredNotice } from '../components/app/SubscriptionExpiredNotice'
-import { memberTierOf } from '../lib/memberTier'
+import { daysUntilSubscriptionEnd, memberTierOf, todayKst } from '../lib/memberTier'
 import { canUpgradeToSixMonths, isSixMonthUpgradePending } from '../lib/subscriptionUpgrade'
 import { SubscriptionUpgradeDetails } from '../components/app/SubscriptionUpgradeDetails'
 
@@ -31,6 +31,7 @@ function subscriptionActionLabel(subscription: string, expired?: boolean, renewa
 export default function MyPage() {
   const navigate = useNavigate()
   const { user, logout, updateProfile, changePassword, refreshUser } = useAuth()
+  const [today, setToday] = useState(todayKst)
   const [name, setName] = useState(user?.name || '')
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -53,13 +54,35 @@ export default function MyPage() {
     return () => clearInterval(interval)
   }, [pendingPlan, refreshUser])
 
+  useEffect(() => {
+    const updateToday = () => setToday(todayKst())
+    const nextMidnight = Date.parse(`${today}T24:00:00+09:00`)
+    const timer = window.setTimeout(updateToday, Math.max(0, nextMidnight - Date.now()))
+    window.addEventListener('focus', updateToday)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('focus', updateToday)
+    }
+  }, [today])
+
   if (!user) return null
 
   const currentPlan = getSubscriptionPlan(pendingPlan ? user.requestedSubscriptionPlan : user.subscriptionPlan)
-  const expired = memberTierOf(user) === 'EXPIRED' && !pendingPlan
-  const renewal = expired || (memberTierOf(user) === 'ACTIVE' && !pendingPlan)
+  const tier = memberTierOf(user)
+  const expired = tier === 'EXPIRED' && !pendingPlan
+  const renewal = expired || (tier === 'ACTIVE' && !pendingPlan)
   const hasPlan = user.subscription !== 'free' || user.subscriptionApprovedAt || user.subscriptionEndDate
   const unlimited = user.role === 'ADMIN' || (user.subscription === 'pro' && !user.subscriptionEndDate)
+  const daysRemaining = daysUntilSubscriptionEnd(user.subscriptionEndDate, today)
+  const endDate = unlimited || daysRemaining === undefined ? undefined : user.subscriptionEndDate
+  let periodStatus = ''
+  if (daysRemaining !== undefined && !unlimited) {
+    if (tier !== 'ACTIVE' || daysRemaining < 0) periodStatus = '이용 기간 종료'
+    else if (daysRemaining === 0) periodStatus = '오늘까지 이용'
+    else periodStatus = `${daysRemaining}일 남음`
+  }
+  const periodWithoutDate = unlimited ? '기간 제한 없음' : user.subscriptionEndDate || tier === 'EXPIRED' ? '만료일 확인 필요'
+    : pendingPlan ? '승인 후 표시' : '만료일 없음'
   const canUpgrade = canUpgradeToSixMonths(user)
   const upgradePending = isSixMonthUpgradePending(user)
 
@@ -140,16 +163,29 @@ export default function MyPage() {
       <section className="my-card">
         <div className="my-card-head">
           <h2>구독 관리</h2>
-          <p>이용권 플랜, 승인 상태와 만료일을 확인합니다.</p>
         </div>
-        {expired && <SubscriptionExpiredNotice plan={user.subscriptionPlan} endDate={user.subscriptionEndDate} />}
+        <section className="my-subscription-period" aria-label="이용 기간">
+          <h3>{unlimited ? '이용권 기간' : pendingPlan && endDate ? '기존 이용권 만료일' : '이용권 만료일'}</h3>
+          <div className="my-subscription-period-value">
+            {endDate ? <time dateTime={endDate}>{endDate}</time> : <strong>{periodWithoutDate}</strong>}
+            {periodStatus && <span aria-live="polite">{periodStatus}</span>}
+          </div>
+        </section>
+        <details className="my-subscription-guide">
+          <summary>구독 기간 안내</summary>
+          <ul>
+            <li>한국시간 기준으로 만료일 당일까지 이용할 수 있습니다.</li>
+            <li>처음 구독하거나 만료 후 재구독하면 승인일에 선택한 기간(1개월 또는 6개월)을 더합니다.</li>
+            <li>이용 중 연장이 승인되면 기존 만료일에 선택한 기간을 더합니다. 승인 대기 중에는 기존 만료일이 표시됩니다.</li>
+          </ul>
+        </details>
+        {expired && <SubscriptionExpiredNotice plan={user.subscriptionPlan} />}
         {upgradePending && <SubscriptionUpgradeDetails endDate={user.subscriptionEndDate} pending />}
         {pendingPlan && !unlimited && (
           <SubscriptionPaymentDetails plan={user.requestedSubscriptionPlan} depositorName={user.depositorName} />
         )}
         <div className="my-status-grid">
           <div><span>상태</span><strong>{subscriptionLabel(user.subscription, expired, user.subscriptionRenewalPending)}</strong></div>
-          <div><span>만료일</span><strong>{unlimited ? '기간 제한 없음' : user.subscriptionEndDate || '-'}</strong></div>
           <div><span>입금자명</span><strong>{user.depositorName || '-'}</strong></div>
           {!pendingPlan && <>
             <div><span>이용 플랜</span><strong>{user.role === 'ADMIN' ? '관리자 이용권' : unlimited ? '무기한 이용권' : hasPlan ? currentPlan.label : '미선택'}</strong></div>
@@ -169,7 +205,7 @@ export default function MyPage() {
               renewalPending: user.subscriptionRenewalPending,
               message: user.subscriptionRenewalPending
                 ? '기존 이용권은 유지되고 있으며, 선택한 플랜의 연장 승인을 기다리는 중입니다.'
-                : user.subscription === 'pro' && !user.subscriptionExpired
+                : tier === 'ACTIVE'
                 ? '기존 이용 기간은 유지하면서 선택한 플랜의 이용권을 연장 신청합니다.'
                 : undefined,
             },

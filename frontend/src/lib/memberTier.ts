@@ -27,6 +27,21 @@ export function todayKst(): string {
   }).format(new Date())
 }
 
+export function parseCalendarDate(value?: string | null): Date | undefined {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined
+  const date = new Date(`${value}T00:00:00Z`)
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) return undefined
+  return date
+}
+
+/** Compare KST calendar dates. Zero means access continues through today. */
+export function daysUntilSubscriptionEnd(endDate?: string | null, today = todayKst()): number | undefined {
+  const end = parseCalendarDate(endDate)
+  const start = parseCalendarDate(today)
+  if (!end || !start) return undefined
+  return (end.getTime() - start.getTime()) / 86_400_000
+}
+
 /**
  * 종료일이 지났는지. 종료일 당일은 아직 유효하다(백엔드와 동일).
  */

@@ -1,5 +1,5 @@
 import type { SubscriptionPlanId } from '../api/authApi'
-import { memberTierOf, todayKst, type MemberInput } from './memberTier'
+import { memberTierOf, parseCalendarDate as calendarDate, todayKst, type MemberInput } from './memberTier'
 import { getSubscriptionPlan } from './subscriptionPlans'
 
 interface UpgradeMember extends MemberInput {
@@ -7,13 +7,6 @@ interface UpgradeMember extends MemberInput {
   requestedSubscriptionPlan?: SubscriptionPlanId | null
   subscriptionRenewalPending?: boolean
   subscriptionRequestedAt?: string | null
-}
-
-function calendarDate(value?: string | null): Date | undefined {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined
-  const date = new Date(`${value}T00:00:00Z`)
-  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) return undefined
-  return date
 }
 
 function monthlyWithExpiry(member: UpgradeMember | null | undefined): member is UpgradeMember {

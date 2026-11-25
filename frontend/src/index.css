@@ -1011,6 +1011,60 @@
   font-weight: 950;
 }
 
+.my-subscription-period {
+  padding: 14px 16px;
+  border: 1px solid var(--maker-line);
+  border-radius: 8px;
+  background: #111318;
+}
+
+.my-subscription-period h3 {
+  margin: 0 0 4px;
+  color: var(--maker-muted);
+  font-size: 13px;
+}
+
+.my-subscription-period-value {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.my-subscription-period-value time,
+.my-subscription-period-value strong {
+  color: #fff;
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.my-subscription-period-value span {
+  color: var(--maker-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.my-subscription-guide {
+  margin: 8px 0 16px;
+  color: var(--maker-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.my-subscription-guide summary {
+  padding: 8px 4px;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.my-subscription-guide ul {
+  margin: 0;
+  padding: 0 8px 8px 24px;
+  list-style: disc;
+}
+
 .my-status-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createContext, useContext, useState, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import type { User } from '../contexts/AuthContext'
 import { fetchSubscriptionPlans, type SubscriptionPlanDto } from '../api/authApi'
@@ -289,10 +289,55 @@ describe('subscription selection through public auth and renewal pages', () => {
     expect(applyMock).not.toHaveBeenCalled()
   })
 
+  it('shows the expiry and remaining Korean calendar days with an expandable usage guide', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-11-24T16:00:00Z'))
+      renderFlow('/my', activeMonthlyUser({ subscriptionEndDate: '2026-12-02' }))
+      const period = within(screen.getByRole('region', { name: '이용 기간' }))
+      expect(period.getByText('2026-12-02').getAttribute('datetime')).toBe('2026-12-02')
+      expect(period.getByText('7일 남음')).toBeTruthy()
+      const guide = screen.getByText('구독 기간 안내')
+      fireEvent.click(guide)
+      expect(guide.closest('details')?.open).toBe(true)
+      expect(screen.getByText(/만료일 당일까지 이용/)).toBeTruthy()
+      expect(screen.getByText(/기존 만료일에 선택한 기간/)).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('changes from today to expired at Korean midnight while My Page is open', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-11-25T14:59:30Z'))
+      renderFlow('/my', activeMonthlyUser({ subscriptionEndDate: '2026-11-25' }))
+      const period = within(screen.getByRole('region', { name: '이용 기간' }))
+      expect(period.getByText('오늘까지 이용')).toBeTruthy()
+      act(() => vi.advanceTimersByTime(30_000))
+      expect(period.getByText('이용 기간 종료')).toBeTruthy()
+      expect(screen.getByRole('button', { name: '재구독 신청' })).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    ['first application', freeUser({ subscription: 'pending' }), '승인 후 표시'],
+    ['unlimited access', activeMonthlyUser({ subscriptionEndDate: undefined }), '기간 제한 없음'],
+    ['free account', freeUser(), '만료일 없음'],
+  ])('shows a meaningful period for %s', (_state, member, expected) => {
+    renderFlow('/my', member)
+    const period = within(screen.getByRole('region', { name: '이용 기간' }))
+    expect(period.getByText(expected)).toBeTruthy()
+    expect(period.queryByText(/일 남음|오늘까지 이용/)).toBeNull()
+  })
+
   it('keeps the current PRO expiry while showing the six-month renewal payment details', () => {
     renderFlow('/my', freeUser({ subscription: 'pro', subscriptionRenewalPending: true, subscriptionPlan: 'MONTHLY', requestedSubscriptionPlan: 'SIX_MONTHS', depositorName: '샘플입금자', subscriptionEndDate: '2099-12-31', subscriptionApprovedAt: '2026-01-01' }))
 
     expectSixMonthPaymentDetails()
+    expect(within(screen.getByRole('region', { name: '이용 기간' })).getByText('기존 이용권 만료일')).toBeTruthy()
     expect(screen.getAllByText('2099-12-31').length).toBeGreaterThan(0)
     expect(screen.getAllByText('연장 승인대기').length).toBeGreaterThan(0)
     expect(applyMock).not.toHaveBeenCalled()
