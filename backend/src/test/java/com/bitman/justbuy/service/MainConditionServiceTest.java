@@ -4,6 +4,7 @@ import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.StockPick;
 import com.bitman.justbuy.dto.condition.ConditionCheck;
 import com.bitman.justbuy.dto.condition.ConditionSignalDto;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -20,6 +21,7 @@ class MainConditionServiceTest {
 
     @Mock ConditionSearchPipeline conditionSearchPipeline;
     @Mock ShortTermRealtimeScanner shortTermRealtimeScanner;
+    @Mock JonggaV2SearchService jonggaV2SearchService;
 
     @Test
     void mainAlertsAreDerivedFromActualConditionSignals() {
@@ -140,6 +142,65 @@ class MainConditionServiceTest {
             .containsOnly("2026-05-17T09:10:00+09:00");
         assertThat(response.captures()).extracting(capture -> capture.capturedTime())
             .containsOnly("\uC624\uC804 09:10");
+    }
+
+    @Test
+    void closingSectionUsesArchiveUpdateButOnlyActualRowCaptureTimestamp() {
+        var archive = new ObjectMapper().createObjectNode()
+            .put("date", "2026-03-03").put("updated_at", "2026-03-03T08:17:25.139040Z");
+        var signals = archive.putArray("signals");
+        signals.addObject().put("stock_code", "005930").put("signal_date", "2026-03-03")
+            .put("captured_at", "2026-03-03T15:17:00+09:00");
+        signals.addObject().put("stock_code", "000660").put("signal_date", "20260303").put("change_pct", 7.5);
+        when(jonggaV2SearchService.latest()).thenReturn(archive);
+        var service = new MainConditionService(conditionSearchPipeline, shortTermRealtimeScanner, jonggaV2SearchService, null);
+
+        var section = service.getSection("closing-bet");
+
+        assertThat(section.sourceStatus()).isEqualTo("PRECOMPUTED");
+        assertThat(section.asOf()).isEqualTo("2026-03-03T17:17:25.13904+09:00");
+        assertThat(section.signals()).extracting(ConditionSignalDto::capturedAt)
+            .containsExactly("2026-03-03T15:17:00+09:00", "2026-03-03");
+        assertThat(section.signals().get(1).conditionChecks()).anySatisfy(check -> {
+            assertThat(check.id()).isEqualTo("technical.3");
+            assertThat(check.status()).isEqualTo("PASS");
+            assertThat(check.observedAt()).isEqualTo("2026-03-03");
+        });
+        assertThat(service.getCaptureTimes("closing-bet").captures().get(1).capturedTime()).isEmpty();
+    }
+
+    @Test
+    void closingArchiveKeepsSessionDateWhenTimestampsDisagreeAndOmitsWrongSessionRows() {
+        var archive = new ObjectMapper().createObjectNode()
+            .put("date", "2026-03-03").put("updated_at", "2026-03-04T01:12:00+09:00");
+        var signals = archive.putArray("signals");
+        signals.addObject().put("stock_code", "005930").put("signal_date", "2026-03-02");
+        signals.addObject().put("stock_code", "000660").put("captured_at", "2999-03-03T13:17:00+09:00");
+        when(jonggaV2SearchService.latest()).thenReturn(archive);
+        var service = new MainConditionService(conditionSearchPipeline, shortTermRealtimeScanner, jonggaV2SearchService, null);
+
+        var section = service.getSection("closing-bet");
+
+        assertThat(section.asOf()).isEqualTo("2026-03-03");
+        assertThat(section.signals()).singleElement().satisfies(signal -> {
+            assertThat(signal.stockCode()).isEqualTo("000660");
+            assertThat(signal.rank()).isOne();
+            assertThat(signal.capturedAt()).isEqualTo("2026-03-03");
+        });
+    }
+
+    @Test
+    void futureClosingArchiveDoesNotPublishRowsOrCurrentTime() {
+        var archive = new ObjectMapper().createObjectNode().put("date", "2999-03-03");
+        archive.putArray("signals").addObject().put("stock_code", "005930");
+        when(jonggaV2SearchService.latest()).thenReturn(archive);
+        var service = new MainConditionService(conditionSearchPipeline, shortTermRealtimeScanner, jonggaV2SearchService, null);
+
+        var section = service.getSection("closing-bet");
+
+        assertThat(section.asOf()).isEmpty();
+        assertThat(section.sourceStatus()).isEqualTo("DATA_UNAVAILABLE");
+        assertThat(section.signals()).isEmpty();
     }
 
     @Test

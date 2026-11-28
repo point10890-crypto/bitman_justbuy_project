@@ -13,19 +13,28 @@ import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.security.MessageDigest;
 import java.time.*;
 import java.time.format.DateTimeParseException;
 import java.util.*;
+import java.util.regex.Pattern;
 
 /** Market-only observations for matched-input research. Never a publication or order source. */
 @Service
 public class ConditionCaptureStore {
     private static final Logger log = LoggerFactory.getLogger(ConditionCaptureStore.class);
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final long SHARED_CAP_BYTES = 128L * 1024 * 1024;
-    private static final long BREAKOUT_CAP_BYTES = 16L * 1024 * 1024;
+    private static final long SHARED_SEGMENT_BYTES = 128L * 1024 * 1024;
+    private static final long BREAKOUT_SEGMENT_BYTES = 16L * 1024 * 1024;
+    private static final int SHARED_DAILY_SEGMENTS = 3;
+    private static final int BREAKOUT_DAILY_SEGMENTS = 2;
+    private static final Pattern CAPTURE_FILE = Pattern.compile(
+        "[0-9]{4}-[0-9]{2}-[0-9]{2}(?:-breakout)?(?:-part-([0-9]{6}))?\\.jsonl");
     private static final Set<String> BREAKOUT_KINDS = Set.of(
         "source", "candidate_selection", "verified_publication", "realtime_snapshot");
     private final ObjectMapper mapper;
@@ -33,9 +42,15 @@ public class ConditionCaptureStore {
     private final Path directory;
     private final Clock clock;
     private final Cache<String, Long> written = Caffeine.newBuilder().maximumSize(20000).build();
+    private final Cache<String, PayloadFingerprint> payloads = Caffeine.newBuilder().maximumSize(5000)
+        .expireAfterWrite(Duration.ofHours(36)).build();
+    private final Cache<String, Boolean> writeWarnings = Caffeine.newBuilder().maximumSize(16)
+        .expireAfterWrite(Duration.ofMinutes(5)).build();
+    private final Map<String, Integer> activeSegments = new HashMap<>();
     private final Map<String, String> watched = new LinkedHashMap<>();
     private int cursor;
     private LocalDate lastPruned;
+    private record PayloadFingerprint(LocalDate day, byte[] digest) {}
 
     @Autowired
     public ConditionCaptureStore(ObjectMapper mapper, KisApiService kis,
@@ -63,23 +78,33 @@ public class ConditionCaptureStore {
         long minute=recordedAt.getEpochSecond()/60;
         String key=kind+":"+mode+":"+code;
         String sidecarKey = "breakout-sidecar:" + key;
-        boolean shared = !Objects.equals(written.getIfPresent(key), minute);
+        // These callers repeatedly refetch a daily chart or reread a stored snapshot, including before the market opens.
+        boolean distinctPayload = ("daily".equals(kind) && "ALL_SECTIONS".equals(mode) && !"pool".equals(code))
+            || ("source".equals(kind) && "JONGGA_V2".equals(mode) && "pool".equals(code));
+        boolean shared = distinctPayload || !Objects.equals(written.getIfPresent(key), minute);
         boolean sidecar = isBreakoutStage(kind, mode, code, data)
             && !Objects.equals(written.getIfPresent(sidecarKey), minute);
         if (!shared && !sidecar) return;
         LocalDate day = recordedAt.atZone(KST).toLocalDate();
         prune(day);
         try {
+            byte[] digest = null;
+            if (distinctPayload) {
+                digest = MessageDigest.getInstance("SHA-256").digest(mapper.writeValueAsBytes(data));
+                PayloadFingerprint previous = payloads.getIfPresent(key);
+                if (previous != null && previous.day().equals(day) && Arrays.equals(previous.digest(), digest)) return;
+            }
             var row=new LinkedHashMap<String,Object>();
             row.put("schemaVersion",1); row.put("kind",kind); row.put("mode",mode); row.put("code",code);
             row.put("observedAt",observedAt.toString()); row.put("recordedAt",recordedAt.toString());
             row.put("data",data);
             byte[] line = (mapper.writeValueAsString(row) + "\n").getBytes(StandardCharsets.UTF_8);
-            // Keep the legacy log intact; its daily budget does not govern the dedicated scanner history.
-            if (sidecar && append(day + "-breakout.jsonl", line, BREAKOUT_CAP_BYTES - line.length))
+            if (sidecar && append(day + "-breakout", line, BREAKOUT_SEGMENT_BYTES, BREAKOUT_DAILY_SEGMENTS))
                 written.put(sidecarKey, minute);
-            if (shared && append(day + ".jsonl", line, SHARED_CAP_BYTES))
-                written.put(key, minute);
+            if (shared && append(day.toString(), line, SHARED_SEGMENT_BYTES, SHARED_DAILY_SEGMENTS)) {
+                if (distinctPayload) payloads.put(key, new PayloadFingerprint(day, digest));
+                else written.put(key, minute);
+            }
         } catch(Exception e) { log.warn("[ConditionCapture] serialization unavailable: {}",e.getClass().getSimpleName()); }
     }
 
@@ -91,26 +116,69 @@ public class ConditionCaptureStore {
         return "REALTIME_SCAN".equals(status) || "REALTIME_EMPTY".equals(status);
     }
 
-    private boolean append(String name, byte[] line, long maxExistingBytes) {
-        try {
-            Path file = directory.resolve(name);
-            if (maxExistingBytes < 0 || Files.exists(file, LinkOption.NOFOLLOW_LINKS) && Files.size(file) > maxExistingBytes) {
-                log.warn("[ConditionCapture] daily budget exceeded for {}", name);
-                return false;
-            }
-            Files.write(file, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND, LinkOption.NOFOLLOW_LINKS);
-            return true;
-        } catch (IOException e) {
-            log.warn("[ConditionCapture] write unavailable for {}: {}", name, e.getClass().getSimpleName());
+    private boolean append(String stem, byte[] line, long segmentBytes, int dailySegments) {
+        if (line.length > segmentBytes) {
+            warnWriteFailed(stem, "row exceeds segment size");
             return false;
         }
+        try {
+            Integer active = activeSegments.get(stem);
+            int part = active == null ? latestSegment(stem) : active;
+            while (part <= dailySegments) {
+                Path target = directory.resolve(part == 1 ? stem + ".jsonl"
+                    : String.format(Locale.ROOT, "%s-part-%06d.jsonl", stem, part));
+                if (appendIfFits(target, line, segmentBytes)) {
+                    activeSegments.put(stem, part);
+                    return true;
+                }
+                part++;
+            }
+            warnWriteFailed(stem, "daily segment limit reached");
+        } catch (IOException | OverlappingFileLockException e) {
+            warnWriteFailed(stem, e.getClass().getSimpleName());
+        }
+        return false;
+    }
+
+    private int latestSegment(String stem) throws IOException {
+        int latest = 1;
+        try (var files = Files.newDirectoryStream(directory, stem + "-part-??????.jsonl")) {
+            for (Path file : files) {
+                var name = CAPTURE_FILE.matcher(file.getFileName().toString());
+                if (name.matches()) latest = Math.max(latest, Integer.parseInt(name.group(1)));
+            }
+        }
+        return latest;
+    }
+
+    private static boolean appendIfFits(Path path, byte[] line, long segmentBytes) throws IOException {
+        try (var file = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+             var lock = file.lock()) {
+            long size = file.size();
+            if (size > segmentBytes - line.length) return false;
+            file.position(size);
+            try {
+                ByteBuffer buffer = ByteBuffer.wrap(line);
+                while (buffer.hasRemaining()) file.write(buffer);
+            } catch (IOException e) {
+                try { file.truncate(size); }
+                catch (IOException failedTruncate) { e.addSuppressed(failedTruncate); }
+                throw e;
+            }
+            return true;
+        }
+    }
+
+    private void warnWriteFailed(String stem, String reason) {
+        if (writeWarnings.asMap().putIfAbsent(stem + ":" + reason, true) == null)
+            log.warn("[ConditionCapture] write unavailable for {}: {}", stem, reason);
     }
 
     private void prune(LocalDate day) {
         if (day.equals(lastPruned)) return;
         try (var files = Files.list(directory)) {
-            for (Path owned : files.filter(p -> p.getFileName().toString()
-                    .matches("[0-9]{4}-[0-9]{2}-[0-9]{2}(?:-breakout)?\\.jsonl"))
+            activeSegments.keySet().removeIf(stem -> !stem.startsWith(day.toString()));
+            for (Path owned : files.filter(p -> CAPTURE_FILE.matcher(p.getFileName().toString()).matches())
                 .filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)).toList()) {
                 String name = owned.getFileName().toString();
                 try {

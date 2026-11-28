@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { fetchClosingBetPerformance, type JonggaPerformanceResponse, type JonggaPerformanceRow } from '../api/conditionApi'
 import ClosingBetHistoryPage from './ClosingBetHistoryPage'
@@ -11,7 +11,7 @@ const row = (result: string): JonggaPerformanceRow => ({rank:1,stockName:'팬오
 const response = (rows:JonggaPerformanceRow[]):JonggaPerformanceResponse => ({from:'2026-10-01',to:'2026-10-12',mode:'JONGGA_V2',title:'종가매매',totalSignals:rows.length,verifiedCount:0,wins:0,losses:0,flats:0,avgCloseReturnPct:'-',avgMaxReturnPct:'-',winRate:'-',targetHitRate:'-',stopHitRate:'-',avgBenchmarkReturnPct:'-',avgExcessReturnPct:'-',marketBeatRate:'-',days:[{date:'2026-10-08',verified:false,avgCloseReturnPct:'-',rows}],note:'실측 가능한 결과만 집계'})
 
 describe('closing result verification states', () => {
-  afterEach(cleanup)
+  afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks() })
   it('labels unmeasurable rows separately from results that are still waiting', async () => {
     vi.mocked(fetchClosingBetPerformance).mockResolvedValue(response([row('검증불가')]))
     render(<MemoryRouter><ClosingBetHistoryPage /></MemoryRouter>)
@@ -22,5 +22,21 @@ describe('closing result verification states', () => {
     vi.mocked(fetchClosingBetPerformance).mockResolvedValue(response([row('미검증')]))
     render(<MemoryRouter><ClosingBetHistoryPage /></MemoryRouter>)
     expect(await screen.findByText('익일 성과 검증 대기')).toBeTruthy()
+  })
+
+  it('uses Korea’s Saturday date before 09:00 and retains the Friday records when changing the range', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-27T23:55:00Z'))
+    vi.mocked(fetchClosingBetPerformance).mockResolvedValue({ ...response([row('미검증')]), days: [
+      { date: '2026-11-27', verified: false, avgCloseReturnPct: '-', rows: [row('미검증')] },
+    ] })
+
+    render(<MemoryRouter><ClosingBetHistoryPage /></MemoryRouter>)
+    expect(fetchClosingBetPerformance).toHaveBeenLastCalledWith('2026-10-29', '2026-11-28', 'fixture-admin')
+    expect(await screen.findByRole('heading', { name: /11월 27일.*금/ })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '최근 7일' }))
+    expect(fetchClosingBetPerformance).toHaveBeenLastCalledWith('2026-11-21', '2026-11-28', 'fixture-admin')
+    expect(await screen.findByText('팬오션')).toBeTruthy()
   })
 })

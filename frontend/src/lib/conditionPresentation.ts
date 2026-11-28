@@ -8,14 +8,22 @@ const timeFormatter = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
 })
 
+export function formatKstDateKey(date: Date) {
+  return dateFormatter.format(date)
+}
+
+export function isConditionDateOnly(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+}
+
 /** Dates remain explicit when a retained snapshot comes from another KST day. */
 export function formatConditionAsOf(value?: string, now = new Date(Date.now())) {
   if (!value) return ''
   const date = new Date(value)
   if (!Number.isFinite(date.getTime())) return ''
-  const day = dateFormatter.format(date)
-  const label = day === dateFormatter.format(now) ? '오늘' : day.replaceAll('-', '.')
-  return `${label} ${timeFormatter.format(date)}`
+  const day = formatKstDateKey(date)
+  const label = day === formatKstDateKey(now) ? '오늘' : day.replaceAll('-', '.')
+  return isConditionDateOnly(value) ? label : `${label} ${timeFormatter.format(date)}`
 }
 
 export function latestAnalysisPresentation(section?: ConditionSectionResponse, now = new Date(Date.now())) {

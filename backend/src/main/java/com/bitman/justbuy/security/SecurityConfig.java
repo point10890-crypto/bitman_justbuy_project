@@ -51,6 +51,10 @@ public class SecurityConfig {
                 .requestMatchers(new AntPathRequestMatcher("/manifest.json")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/sw.js")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/favicon.ico")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/images/bitman-agent-v1.png")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/install"),
+                                 new AntPathRequestMatcher("/install.html"),
+                                 new AntPathRequestMatcher("/install.js")).permitAll()
                 // SPA client-side routes (forwarded to index.html by SpaWebConfig)
                 .requestMatchers(new AntPathRequestMatcher("/login")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/register")).permitAll()
@@ -62,6 +66,7 @@ public class SecurityConfig {
                 .requestMatchers(new AntPathRequestMatcher("/admin")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/admin/**")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/search")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/performance")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/research/events")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/history")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/history/**")).permitAll()

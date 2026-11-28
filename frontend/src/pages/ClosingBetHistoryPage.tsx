@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getStoredToken, useAuth } from '../contexts/AuthContext'
 import { fetchClosingBetPerformance, type JonggaPerformanceResponse, type JonggaPerformanceRow } from '../api/conditionApi'
+import { formatKstDateKey } from '../lib/conditionPresentation'
 
 const RANGE_PRESETS = [
   { days: 7, label: '7일' },
@@ -9,15 +10,11 @@ const RANGE_PRESETS = [
   { days: 90, label: '90일' },
 ] as const
 
-function toIsoDate(date: Date) {
-  return date.toISOString().slice(0, 10)
-}
-
 function rangeFor(days: number) {
-  const to = new Date()
-  const from = new Date(to)
-  from.setDate(from.getDate() - days)
-  return { from: toIsoDate(from), to: toIsoDate(to) }
+  const to = formatKstDateKey(new Date())
+  const from = new Date(`${to}T00:00:00Z`)
+  from.setUTCDate(from.getUTCDate() - days)
+  return { from: from.toISOString().slice(0, 10), to }
 }
 
 function maskValue(value: string) {
@@ -68,7 +65,7 @@ export default function ClosingBetHistoryPage() {
   const [error, setError] = useState<string | null>(null)
 
   const locked = user?.role !== 'ADMIN' && user?.subscription !== 'pro'
-  const range = useMemo(() => rangeFor(rangeDays), [rangeDays])
+  const range = rangeFor(rangeDays)
 
   const load = useCallback(async () => {
     setLoading(true)

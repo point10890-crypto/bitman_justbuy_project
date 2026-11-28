@@ -80,6 +80,52 @@ const precloseSection = (sourceStatus: string, hasSignals: boolean): ConditionSe
     signals: hasSignals ? [{ ...sample.signals[0], section: 'closingBet', mode: 'JONGGA_V2', capturePrice: '12,300', currentPrice: '12,300' }] : [] }
 }
 
+it('keeps Friday’s closing snapshot and source date visible on Saturday in Korea', async () => {
+  vi.mocked(Date.now).mockReturnValue(Date.parse('2026-11-28T08:15:00+09:00'))
+  const friday = '2026-11-27T15:17:00+09:00'
+  const saved = precloseSection('PRECOMPUTED', true)
+  main.sections.closingBet = { ...saved, asOf: friday, signals: [
+    { ...saved.signals[0], stockName: '금요일 보관 종목', capturedAt: friday, highPrice: '13,200', stopLoss: '11,900' },
+  ] }
+  vi.mocked(fetchConditionSection).mockResolvedValue(main.sections.closingBet)
+
+  const { container } = render(tree())
+  const card = within(container.querySelector('#closing-bet') as HTMLElement)
+  expect(card.getByText('종가매매 저장 결과 · 2026.11.27 15:17 기준')).toBeTruthy()
+  expect(card.queryByText(/실시간 캐시/)).toBeNull()
+  expect(card.getByRole('button', { name: /금요일 보관 종목/ })).toBeTruthy()
+
+  fireEvent.click(card.getByRole('button', { name: '종가매매 상위 후보 새로고침' }))
+  await waitFor(() => expect(card.getByText('종가매매 저장 결과 · 2026.11.27 15:17 기준')).toBeTruthy())
+})
+
+it('shows a date-only closing archive without inventing a capture time', () => {
+  vi.mocked(Date.now).mockReturnValue(Date.parse('2026-11-28T08:15:00+09:00'))
+  const saved = precloseSection('PRECOMPUTED', true)
+  main.sections.closingBet = { ...saved, asOf: '2026-11-27', signals: [
+    { ...saved.signals[0], stockName: '날짜만 확인된 종목', capturedAt: '2026-11-27' },
+  ] }
+
+  const { container } = render(tree())
+  const card = within(container.querySelector('#closing-bet') as HTMLElement)
+  expect(card.getByText('종가매매 저장 결과 · 2026.11.27 기준')).toBeTruthy()
+  expect(card.getByRole('button', { name: /날짜만 확인된 종목/ })).toBeTruthy()
+  expect(card.queryByText(/09:00/)).toBeNull()
+})
+
+it('can recover a dated closing archive by refreshing an undated unavailable card', async () => {
+  vi.mocked(Date.now).mockReturnValue(Date.parse('2026-11-28T08:15:00+09:00'))
+  main.sections.closingBet = { ...precloseSection('DATA_UNAVAILABLE', false), asOf: '' }
+  const saved = precloseSection('PRECOMPUTED', true)
+  vi.mocked(fetchConditionSection).mockResolvedValue({ ...saved, asOf: '2026-11-27' })
+
+  const { container } = render(tree())
+  const card = within(container.querySelector('#closing-bet') as HTMLElement)
+  expect(card.getByText('데이터 준비 중')).toBeTruthy()
+  fireEvent.click(card.getByRole('button', { name: '종가매매 상위 후보 새로고침' }))
+  expect(await card.findByText('종가매매 저장 결과 · 2026.11.27 기준')).toBeTruthy()
+})
+
 it.each([
   ['CLOSING_PRECLOSE', '장마감 전 포착'],
   ['CLOSING_PRECLOSE_PARTIAL', '장마감 전 일부 확인'],

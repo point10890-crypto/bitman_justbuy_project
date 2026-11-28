@@ -1,13 +1,24 @@
 package com.bitman.justbuy.security;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.hamcrest.Matchers.anyOf;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -47,5 +58,44 @@ class UnauthenticatedRequestStatusTest {
     void publicEndpointStaysReachable() throws Exception {
         mockMvc.perform(get("/api/health"))
             .andExpect(status().isOk());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"/performance, /index.html", "/install, /install.html"})
+    void publicPagePathsForwardToTheirOwnDocument(String path, String document) throws Exception {
+        mockMvc.perform(get(path))
+            .andExpect(status().isOk())
+            .andExpect(forwardedUrl(document));
+    }
+
+    @Test
+    void serviceWorkerCanFetchTheStandaloneInstallerAndItsScript() throws Exception {
+        mockMvc.perform(get("/install.html"))
+            .andExpect(status().isOk())
+            .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_HTML))
+            .andExpect(content().string(containsString("id=\"install-title\"")))
+            .andExpect(content().string(containsString("src=\"/install.js\"")))
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-cache"));
+        mockMvc.perform(get("/install.js"))
+            .andExpect(status().isOk())
+            .andExpect(header().string(HttpHeaders.CONTENT_TYPE,
+                anyOf(startsWith("application/javascript"), startsWith("text/javascript"))))
+            .andExpect(content().string(containsString("beforeinstallprompt")))
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-cache"));
+    }
+
+    @Test
+    void publicLandingCanLoadItsMascot() throws Exception {
+        mockMvc.perform(get("/images/bitman-agent-v1.png"))
+            .andExpect(status().isOk())
+            .andExpect(content().contentTypeCompatibleWith(MediaType.IMAGE_PNG));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/performance/track-record", "/api/performance/short-term/daily-close",
+        "/api/performance/swing/cumulative"})
+    void performanceDataRemainsProtected(String path) throws Exception {
+        mockMvc.perform(get(path))
+            .andExpect(status().isUnauthorized());
     }
 }

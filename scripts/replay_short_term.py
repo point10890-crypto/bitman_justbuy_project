@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Replay 01c81c2's pre-AI short-term order on the newer scanner's recorded inputs.
 
-Example: python scripts/replay_short_term.py 2026-11-30.jsonl --day 2026-11-30 --max-scans 5
+Example: python scripts/replay_short_term.py 2026-11-30-breakout.jsonl --day 2026-11-30 --max-scans 5
+The original file and its numbered continuations are read as one stream.
 Uses the liquidity decisions measured in the same scan. It does not rerun KIS or AI.
 """
 
@@ -18,6 +19,7 @@ from pathlib import Path
 KST = timezone(timedelta(hours=9))
 RANKINGS = ("volume", "gainers", "foreignNetBuy", "turnover")
 CODE = re.compile(r"[0-9]{6}")
+CAPTURE_NAME = re.compile(r"(?P<stem>[0-9]{4}-[0-9]{2}-[0-9]{2}(?:-breakout)?)(?:-part-[0-9]{6})?\.jsonl")
 PRICE = re.compile(r"(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)\s*원?")
 LEGACY_EXCLUDED_PREFIXES = (
     "KODEX", "TIGER", "ACE", "KBSTAR", "RISE", "ARIRANG", "HANARO", "SOL", "KOSEF",
@@ -241,31 +243,54 @@ class Scan:
         return result
 
 
-def scans(paths, requested_day, start, end, counts):
-    for path in paths:
-        current = None
+def capture_streams(paths):
+    seen = set()
+    for given in paths:
+        path = given.resolve(strict=True)
+        match = CAPTURE_NAME.fullmatch(path.name)
+        if not match:
+            yield [path]
+            continue
+        stem = match["stem"]
+        first = path.with_name(stem + ".jsonl")
+        if first in seen:
+            continue
+        seen.add(first)
+        parts = sorted(part for part in path.parent.glob(stem + "-part-*.jsonl")
+                       if part.is_file() and CAPTURE_NAME.fullmatch(part.name))
+        yield ([first] if first.is_file() else []) + parts
+
+
+def scan_lines(parts):
+    for path in parts:
         with path.open("rb") as stream:
-            for line in stream:
-                if b'"BREAKOUT"' not in line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except (ValueError, UnicodeError):
-                    counts["invalidBreakoutLines"] += 1
-                    continue
-                if not isinstance(event, dict) or event.get("mode") != "BREAKOUT" or event.get("code") != "pool":
-                    continue
-                kind = event.get("kind")
-                counts[kind] += 1
-                if kind == "source":
-                    if current is not None:
-                        yield current.compare()
-                    at = instant(event.get("observedAt"))
-                    kst = at.astimezone(KST) if at else None
-                    current = Scan(event) if (kst and (not requested_day or kst.date() == requested_day)
-                                             and start <= kst.time() <= end) else None
-                elif current is not None:
-                    current.add(event)
+            yield from stream
+
+
+def scans(paths, requested_day, start, end, counts):
+    for parts in capture_streams(paths):
+        current = None
+        for line in scan_lines(parts):
+            if b'"BREAKOUT"' not in line:
+                continue
+            try:
+                event = json.loads(line)
+            except (ValueError, UnicodeError):
+                counts["invalidBreakoutLines"] += 1
+                continue
+            if not isinstance(event, dict) or event.get("mode") != "BREAKOUT" or event.get("code") != "pool":
+                continue
+            kind = event.get("kind")
+            counts[kind] += 1
+            if kind == "source":
+                if current is not None:
+                    yield current.compare()
+                at = instant(event.get("observedAt"))
+                kst = at.astimezone(KST) if at else None
+                current = Scan(event) if (kst and (not requested_day or kst.date() == requested_day)
+                                         and start <= kst.time() <= end) else None
+            elif current is not None:
+                current.add(event)
         if current is not None:
             yield current.compare()
 

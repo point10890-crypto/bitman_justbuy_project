@@ -25,13 +25,14 @@ public class SpaWebConfig implements WebMvcConfigurer {
                 .addResourceLocations("classpath:/static/")
                 .setCacheControl(CacheControl.noStore());
 
-        registry.addResourceHandler("/manifest.json", "/robots.txt", "/_headers")
+        registry.addResourceHandler("/manifest.json", "/robots.txt", "/_headers", "/install.html", "/install.js")
                 .addResourceLocations("classpath:/static/")
                 .setCacheControl(CacheControl.noCache());
     }
 
     @Override
     public void addViewControllers(ViewControllerRegistry registry) {
+        registry.addViewController("/install").setViewName("forward:/install.html");
         // 1단계 경로: /login, /register, /landing, /supply, /my, /admin, /subscribe
         registry.addViewController("/{path:[^\\.]*}")
                 .setViewName("forward:/index.html");

@@ -591,42 +591,44 @@ public class MainConditionService {
     }
 
     private ConditionSectionResponse closingBetSection() {
-        if (jonggaV2SearchService == null) {
-            return new ConditionSectionResponse(
-                ConditionSection.CLOSING_BET.responseKey(),
-                ConditionSection.CLOSING_BET.slug(),
-                ConditionSection.CLOSING_BET.title(),
-                ConditionSection.CLOSING_BET.legacyMode(),
-                "/api/conditions/" + ConditionSection.CLOSING_BET.slug(),
-                nowKst(),
-                "DATA_UNAVAILABLE",
-                List.of()
-            );
+        JsonNode latest = jonggaV2SearchService == null ? null : jonggaV2SearchService.latest();
+        if (latest == null || !latest.path("signals").isArray() || latest.hasNonNull("message")) {
+            return closingArchiveResponse("", List.of());
         }
+        Instant now = Instant.now();
+        LocalDate session = closingSession(latest.path("date").asText(""));
+        if (session == null || session.isAfter(now.atZone(KST).toLocalDate())) {
+            return closingArchiveResponse("", List.of());
+        }
+        if (captures != null) captures.record("source", "JONGGA_V2", "pool", now, latest);
 
-        JsonNode latest = jonggaV2SearchService.latest();
-        if (captures != null) captures.record("source", "JONGGA_V2", "pool", Instant.now(), latest);
+        OffsetDateTime updated = closingTimestamp(latest.path("updated_at").asText(""), session, now);
+        Instant captureLimit = updated == null ? now : updated.toInstant();
         List<ConditionSignalDto> signals = new ArrayList<>();
-        int rank = 1;
         for (JsonNode signal : latest.path("signals")) {
-            if (liquidity == null && rank > 3) break;
-            signals.add(toClosingBetSignal(signal, rank++));
+            if (liquidity == null && signals.size() == 3) break;
+            String rowDate = signal.path("signal_date").asText("");
+            if (!rowDate.isBlank() && !session.equals(closingSession(rowDate))) continue;
+            OffsetDateTime captured = closingTimestamp(signal.path("captured_at").asText(""), session, captureLimit);
+            signals.add(toClosingBetSignal(signal, signals.size() + 1, session, closingTimeOrDate(captured, session)));
         }
+        return closingArchiveResponse(closingTimeOrDate(updated, session), signals);
+    }
 
-        String date = latest.path("date").asText("");
+    private static ConditionSectionResponse closingArchiveResponse(String asOf, List<ConditionSignalDto> signals) {
         return new ConditionSectionResponse(
             ConditionSection.CLOSING_BET.responseKey(),
             ConditionSection.CLOSING_BET.slug(),
             ConditionSection.CLOSING_BET.title(),
             ConditionSection.CLOSING_BET.legacyMode(),
             "/api/conditions/" + ConditionSection.CLOSING_BET.slug(),
-            closingBetAsOf(date),
+            asOf,
             signals.isEmpty() ? "DATA_UNAVAILABLE" : "PRECOMPUTED",
             signals
         );
     }
 
-    private ConditionSignalDto toClosingBetSignal(JsonNode signal, int rank) {
+    private ConditionSignalDto toClosingBetSignal(JsonNode signal, int rank, LocalDate session, String capturedAt) {
         int score = signal.path("score").path("total").asInt(70);
         String entry = formatNumber(signal.path("entry_price").asLong(signal.path("current_price").asLong(0)));
         String current = formatNumber(signal.path("current_price").asLong(signal.path("entry_price").asLong(0)));
@@ -658,11 +660,11 @@ public class MainConditionService {
             closingBetEvidence(signal),
             List.of("종가 변동성", "익일 갭 리스크", "거래대금 급감"),
             "종가 기준 진입가 이탈, 거래대금 둔화, 뉴스 모멘텀 약화",
-            closingBetAsOf(signal.path("signal_date").asText("")),
-            com.bitman.justbuy.dto.condition.ConditionCheck.withDailyChange("JONGGA_V2",
+            capturedAt,
+            ConditionCheck.withDailyChange("JONGGA_V2",
                 signal.path("change_pct").isNumber() ? signal.path("change_pct").asDouble() : null,
                 "종가매매 V2 저장 시세",
-                signal.path("signal_date").asText("").isBlank() ? null : closingBetAsOf(signal.path("signal_date").asText()))
+                session.toString())
         );
     }
 
@@ -690,16 +692,27 @@ public class MainConditionService {
         return fallback;
     }
 
-    private static String closingBetAsOf(String date) {
-        if (date == null || date.isBlank()) return nowKst();
+    private static LocalDate closingSession(String date) {
         String normalized = date.trim();
-        if (normalized.matches("\\d{8}")) {
-            normalized = normalized.substring(0, 4) + "-" + normalized.substring(4, 6) + "-" + normalized.substring(6, 8);
+        try {
+            return normalized.length() == 8 ? LocalDate.parse(normalized, DateTimeFormatter.BASIC_ISO_DATE) : LocalDate.parse(normalized);
+        } catch (DateTimeParseException ignored) {
+            return null;
         }
-        if (normalized.matches("\\d{4}-\\d{2}-\\d{2}")) {
-            return normalized + "T15:00:00+09:00";
+    }
+
+    private static OffsetDateTime closingTimestamp(String timestamp, LocalDate session, Instant limit) {
+        if (timestamp.isBlank()) return null;
+        try {
+            OffsetDateTime observed = OffsetDateTime.parse(timestamp).atZoneSameInstant(KST).toOffsetDateTime();
+            return session.equals(observed.toLocalDate()) && !observed.toInstant().isAfter(limit) ? observed : null;
+        } catch (DateTimeParseException ignored) {
+            return null;
         }
-        return nowKst();
+    }
+
+    private static String closingTimeOrDate(OffsetDateTime timestamp, LocalDate session) {
+        return timestamp == null ? session.toString() : KST_FORMATTER.format(timestamp);
     }
 
     private static String formatNumber(long value) {

@@ -1,8 +1,12 @@
 package com.bitman.justbuy.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 import java.nio.ByteBuffer;
 import java.nio.file.*;
 import java.time.*;
@@ -35,6 +39,60 @@ class ConditionCaptureStoreTest {
         assertThat(text).contains("UNAVAILABLE","PROVIDER_MINUTE_BARS_PARTIAL_COVERAGE","attempted");
         assertThat(Files.readAllLines(dir.resolve("2026-10-14.jsonl"))).hasSize(2);
         verify(kis).fetchMinuteEvidence(org.mockito.ArgumentMatchers.eq("005930"),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test void recordsChangedDailyInputsAndClosingSourceOncePerUnchangedPayloadPerKstDay() throws Exception {
+        var mapper = new ObjectMapper();
+        var clock = new MutableClock(Instant.parse("2026-10-14T14:57:00Z"));
+        var store = new ConditionCaptureStore(mapper, mock(KisApiService.class), dir, clock);
+        for (int minute = 0; minute < 3; minute++) {
+            clock.at = Instant.parse("2026-10-14T14:57:00Z").plusSeconds(60L * minute);
+            store.record("daily", "ALL_SECTIONS", "005930", clock.instant(),
+                mapper.readTree(minute == 2 ? "{\"output2\":[101]}" : "{\"output2\":[100]}"));
+            store.record("source", "JONGGA_V2", "pool", clock.instant(), mapper.readTree("{\"date\":\"2026-10-14\"}"));
+            store.record("source", "BREAKOUT", "pool", clock.instant(), Map.of("scan", "unchanged-payload"));
+        }
+        var rows = Files.readAllLines(dir.resolve("2026-10-14.jsonl"));
+        var eventKinds = new ArrayList<String>();
+        for (String row : rows) {
+            var event = mapper.readTree(row);
+            eventKinds.add(event.path("kind").asText() + "/" + event.path("mode").asText());
+        }
+        assertThat(eventKinds).containsExactly("daily/ALL_SECTIONS", "source/JONGGA_V2",
+            "source/BREAKOUT", "source/BREAKOUT", "daily/ALL_SECTIONS", "source/BREAKOUT");
+        assertThat(rows.get(4)).contains("101");
+        assertThat(Files.readAllLines(dir.resolve("2026-10-14-breakout.jsonl"))).hasSize(3);
+
+        clock.at = Instant.parse("2026-10-14T15:00:00Z");
+        store.record("daily", "ALL_SECTIONS", "005930", clock.instant(), mapper.readTree("{\"output2\":[101]}"));
+        store.record("source", "JONGGA_V2", "pool", clock.instant(), mapper.readTree("{\"date\":\"2026-10-14\"}"));
+        assertThat(Files.readAllLines(dir.resolve("2026-10-15.jsonl"))).hasSize(2);
+    }
+
+    @Test void continuesSharedEventsAfterTheLegacyFileReachesCapacityAndAfterRestart() throws Exception {
+        var mapper = new ObjectMapper();
+        var kis = mock(KisApiService.class);
+        var clock = Clock.fixed(now, ZoneOffset.UTC);
+        long legacySize = 128L * 1024 * 1024 - 32;
+        Path shared = dir.resolve("2026-10-14.jsonl");
+        fillThrough(shared, legacySize);
+        Path continuation = dir.resolve("2026-10-14-part-000002.jsonl");
+        Path expiredPart = Files.createFile(dir.resolve("2026-08-14-part-000002.jsonl"));
+        Path retainedPart = Files.createFile(dir.resolve("2026-08-15-breakout-part-000002.jsonl"));
+        Path unrelated = Files.createFile(dir.resolve("2026-08-14-custom-part-000002.jsonl"));
+
+        var store = new ConditionCaptureStore(mapper, kis, dir, clock);
+        store.record("coverage", "FOLLOWUP", "pool", now, Map.of("first", 1));
+        var restarted = new ConditionCaptureStore(mapper, kis, dir, clock);
+        restarted.record("publication", "FLOW_LEADER", "pool", now, Map.of("second", 2));
+
+        assertThat(Files.size(shared)).isEqualTo(legacySize);
+        assertThat(Files.readAllLines(continuation)).hasSize(2)
+            .allSatisfy(row -> assertThat(mapper.readTree(row).path("schemaVersion").asInt()).isEqualTo(1));
+        assertThat(Files.readString(continuation)).contains("\"first\":1", "\"second\":2");
+        assertThat(Files.exists(expiredPart)).isFalse();
+        assertThat(Files.exists(retainedPart)).isTrue();
+        assertThat(Files.exists(unrelated)).isTrue();
     }
     @Test void refusesUnsafeIdentityAndDoesNotCollectOutsideTradingSession() throws Exception {
         var kis = mock(KisApiService.class);
@@ -76,7 +134,7 @@ class ConditionCaptureStoreTest {
         assertThat(rows.getLast()).contains("REALTIME_EMPTY");
     }
 
-    @Test void refusesAWholeBreakoutEntryThatWouldCrossTheStrictByteCap() throws Exception {
+    @Test void continuesWholeBreakoutEntriesInANewFileAtTheStrictByteCap() throws Exception {
         var store = new ConditionCaptureStore(new ObjectMapper(), mock(KisApiService.class), dir, Clock.fixed(now, ZoneOffset.UTC));
         Path dedicated = dir.resolve("2026-10-14-breakout.jsonl");
         long size = 16L * 1024 * 1024 - 200;
@@ -85,7 +143,43 @@ class ConditionCaptureStoreTest {
         store.record("realtime_snapshot", "BREAKOUT", "pool", now, Map.of("status", "가".repeat(60)));
 
         assertThat(Files.size(dedicated)).isEqualTo(size);
+        assertThat(Files.readAllLines(dir.resolve("2026-10-14-breakout-part-000002.jsonl"))).hasSize(1)
+            .allSatisfy(row -> assertThat(row).contains("가".repeat(60)));
         assertThat(Files.readAllLines(dir.resolve("2026-10-14.jsonl"))).hasSize(1);
+    }
+
+    @Test void boundsDailyDiskUseAndWarnsOnceWithoutBlockingTheIndependentBreakoutStream() throws Exception {
+        long sharedBytes = 128L * 1024 * 1024;
+        for (String name : List.of("2026-10-14.jsonl", "2026-10-14-part-000002.jsonl", "2026-10-14-part-000003.jsonl"))
+            fillThrough(dir.resolve(name), sharedBytes);
+        var store = new ConditionCaptureStore(new ObjectMapper(), mock(KisApiService.class), dir, Clock.fixed(now, ZoneOffset.UTC));
+        var logger = (Logger) LoggerFactory.getLogger(ConditionCaptureStore.class);
+        var logEvents = new ListAppender<ILoggingEvent>();
+        logEvents.start();
+        logger.addAppender(logEvents);
+        try {
+            for (int attempt = 0; attempt < 15; attempt++) {
+                store.record("coverage", "FOLLOWUP", "pool", now, Map.of("attempt", attempt));
+            }
+            store.record("source", "BREAKOUT", "pool", now, Map.of("scan", 42));
+        } finally {
+            logger.detachAppender(logEvents);
+            logEvents.stop();
+        }
+
+        assertThat(Files.exists(dir.resolve("2026-10-14-part-000004.jsonl"))).isFalse();
+        assertThat(Files.size(dir.resolve("2026-10-14-part-000003.jsonl"))).isEqualTo(sharedBytes);
+        assertThat(Files.readAllLines(dir.resolve("2026-10-14-breakout.jsonl"))).hasSize(1);
+        assertThat(logEvents.list).hasSize(1)
+            .allSatisfy(event -> assertThat(event.getFormattedMessage()).contains("daily segment limit reached"));
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant at;
+        MutableClock(Instant at) { this.at = at; }
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return Clock.fixed(at, zone); }
+        @Override public Instant instant() { return at; }
     }
 
     private static void fillThrough(Path file, long size) throws Exception {

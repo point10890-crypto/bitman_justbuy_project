@@ -9,7 +9,7 @@ import { AgentMascot } from '../components/app/AgentMascot'
 import { KeywordSearchPanel } from '../components/app/KeywordSearchPanel'
 import { useSearchUpgrade } from '../hooks/useSearchUpgrade'
 import { searchKeywordStocks, type KeywordSearchResponse } from '../api/keywordSearchApi'
-import { formatConditionAsOf, latestAnalysisPresentation } from '../lib/conditionPresentation'
+import { formatConditionAsOf, isConditionDateOnly, latestAnalysisPresentation } from '../lib/conditionPresentation'
 import './HomePage.css'
 
 type Section = {
@@ -66,7 +66,6 @@ const sections: Section[] = [
     title: '종가매매',
     mode: 'JONGGA_V2',
     query: '오늘 종가매매 후보 분석',
-    scheduleLabel: '종목 검출 시간 · 장중 오후 3시 검출',
     columns: ['종목명', '진입가', '목표가', '손절가'],
     rows: [],
   },
@@ -169,7 +168,7 @@ function sectionSourceStatus(section: ConditionSectionResponse | undefined) {
 }
 
 function formatKstTime(value?: string) {
-  if (!value) return ''
+  if (!value || isConditionDateOnly(value)) return ''
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
   return date.toLocaleTimeString('ko-KR', {
@@ -177,6 +176,10 @@ function formatKstTime(value?: string) {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function snapshotTime(value = '') {
+  return Date.parse(isConditionDateOnly(value) ? `${value}T00:00:00+09:00` : value)
 }
 
 function sectionWarning(section: ConditionSectionResponse | undefined) {
@@ -426,11 +429,14 @@ export default function HomePage() {
       undefined
 
     const manual = endpointSections[section.id]
+    const mainTime = snapshotTime(mainSection?.asOf)
+    const manualTime = snapshotTime(manual?.data.asOf)
     const usesManual = !!manual && manual.feed === mainConditions
-      && (!mainSection || Date.parse(manual.data.asOf) >= Date.parse(mainSection.asOf))
+      && (!mainSection || (Number.isFinite(manualTime) && (!Number.isFinite(mainTime) || manualTime >= mainTime)))
     const apiSection = manual && usesManual ? manual.data : mainSection
     const sourceStatus = apiSection?.sourceStatus
     const preclose = section.id === 'closing-bet' && sourceStatus ? PRECLOSE_PRESENTATION.get(sourceStatus) : undefined
+    const closingArchive = section.id === 'closing-bet' && (sourceStatus === 'PRECOMPUTED' || sourceStatus === 'STALE_CACHE')
     const latestAnalysis = preclose ? null : latestAnalysisPresentation(apiSection)
     const rows = rowsFromCondition(apiSection, section.rows, !!preclose)
     const observedChange = (section.id === 'short-term' && sourceStatus === 'REALTIME_SCAN')
@@ -446,7 +452,8 @@ export default function HomePage() {
       columns,
       rows,
       sourceStatus: endpointLoading === section.id ? '최신 후보 불러오는 중' : rows.length === 0 && latestAnalysis
-        ? latestAnalysis.label : preclose?.label ?? ((usesManual ? endpointStatus[section.id] : undefined) || sectionSourceStatus(apiSection)),
+        ? latestAnalysis.label : preclose?.label ?? (closingArchive ? '종가매매 저장 결과'
+          : (usesManual ? endpointStatus[section.id] : undefined) || sectionSourceStatus(apiSection)),
       asOf: apiSection?.asOf,
       asOfLabel: rows.length === 0 && latestAnalysis ? '' : formatConditionAsOf(apiSection?.asOf),
       latestAnalysisMessage: preclose?.message ?? (isEngineSection(apiSection) && rows.length === 0

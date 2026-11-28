@@ -1,5 +1,8 @@
 package com.bitman.justbuy.dto.condition;
 
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -19,7 +22,12 @@ public record ConditionCheck(String id, String category, String criterion, Strin
         List<ConditionCheck> checks = new ArrayList<>(unknown(mode));
         if (!("BREAKOUT".equals(mode) || "JONGGA_V2".equals(mode)) || change == null || !Double.isFinite(change)
             || at == null || at.isBlank() || source == null || source.isBlank()) return checks;
-        try { java.time.OffsetDateTime.parse(at); } catch (RuntimeException ignored) { return checks; }
+        try {
+            if ("JONGGA_V2".equals(mode) && at.length() == 10) LocalDate.parse(at);
+            else OffsetDateTime.parse(at);
+        } catch (DateTimeParseException ignored) {
+            return checks;
+        }
         String id = "BREAKOUT".equals(mode) ? BREAKOUT_DAILY_CHANGE_CHECK : "technical.3";
         double minimum = "BREAKOUT".equals(mode) ? 3 : 5;
         checks.replaceAll(c -> c.id().equals(id) ? new ConditionCheck(c.id(), c.category(), c.criterion(),
