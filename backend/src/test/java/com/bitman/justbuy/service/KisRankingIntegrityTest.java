@@ -68,6 +68,24 @@ class KisRankingIntegrityTest {
     }
 
     @Test
+    void emptySuccessfulRankingIsDistinctFromUnavailableOrMalformedData() {
+        when(http.exchange(contains("volume-rank"), eq(HttpMethod.GET), any(), eq(String.class)))
+            .thenReturn(ResponseEntity.ok("{\"rt_cd\":\"0\",\"output\":[]}"))
+            .thenReturn(ResponseEntity.ok("{\"rt_cd\":\"1\",\"output\":[]}"))
+            .thenReturn(ResponseEntity.ok("{\"rt_cd\":\"0\",\"output\":[{}]}"));
+
+        var empty = service.fetchRealtimeVolumeRankingSnapshot(10);
+        var failed = service.fetchRealtimeVolumeRankingSnapshot(11);
+        var malformed = service.fetchRealtimeVolumeRankingSnapshot(12);
+
+        assertThat(empty.rows()).isEmpty();
+        assertThat(empty.complete()).isTrue();
+        assertThat(empty.fetchedAt()).isNotNull();
+        assertThat(failed.complete()).isFalse();
+        assertThat(malformed.complete()).isFalse();
+    }
+
+    @Test
     void invalidIdentityAndPercentagePriceAreExcludedFromRanks() {
         when(http.exchange(contains("volume-rank"), eq(HttpMethod.GET), any(), eq(String.class)))
             .thenReturn(ResponseEntity.ok("""

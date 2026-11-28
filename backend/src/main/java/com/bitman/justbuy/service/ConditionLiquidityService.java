@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 public class ConditionLiquidityService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final String EVIDENCE_PREFIX = "유동성: ";
+    static final String LIQUIDITY_CHECK_SOURCE = "KIS 일봉 acml_tr_pbmn · 원(KRW)";
     private ConditionCaptureStore captures;
     @Autowired(required=false) public void configureCaptures(ConditionCaptureStore captures) { this.captures = captures; }
     private final KisApiService kis;
@@ -30,7 +31,9 @@ public class ConditionLiquidityService {
         .maximumSize(500).expireAfterWrite(60, TimeUnit.SECONDS).build();
     private record Amounts(BigDecimal today, BigDecimal average20, LocalDate date, Instant fetchedAt,
                            Map<LocalDate, ConditionTechnicalEvidence.Bar> bars) {}
-    private record Ranked(ConditionSignalDto signal, ConditionLiquidityPolicy.Result result) {}
+    private record Ranked(ConditionSignalDto signal, ConditionLiquidityPolicy.Result result,
+                          Amounts observations, ConditionCheck breakout) {}
+    record SignalSelection(List<ConditionSignalDto> signals, Map<String, Integer> orderingBonuses, boolean complete) {}
 
     @Autowired public ConditionLiquidityService(KisApiService kis) { this(kis, Clock.systemUTC()); }
     ConditionLiquidityService(KisApiService kis, Clock clock) { this.kis = kis; this.clock = clock; }
@@ -101,22 +104,51 @@ public class ConditionLiquidityService {
 
     /** Keep original rule/AI scores; use the measured turnover bonus only for ordering, once per pass. */
     public List<ConditionSignalDto> filterSignals(String mode, List<ConditionSignalDto> signals, int limit) {
+        return selectSignals(mode, signals, limit, false).signals();
+    }
+
+    /** A live BREAKOUT candidate must prove the setup before competing for the verification pool. */
+    SignalSelection selectShortTermSignals(List<ConditionSignalDto> signals, int limit) {
+        return selectSignals("BREAKOUT", signals, limit, true);
+    }
+
+    private SignalSelection selectSignals(String mode, List<ConditionSignalDto> signals, int limit, boolean requireBreakout) {
         long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
         List<Ranked> eligible = new ArrayList<>();
         List<Map<String, Object>> decisions = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
+        boolean complete = true;
         if (signals != null) for (ConditionSignalDto signal : signals) {
             if (signal == null || signal.stockCode() == null || !signal.stockCode().matches("[0-9]{6}") || !seen.add(signal.stockCode())) continue;
 
             var result = evaluate(mode, signal.stockCode(), deadline);
-            decisions.add(Map.of("code", signal.stockCode(), "eligible", result.eligible(), "reason", result.reason(), "bonus", result.bonus(), "status", (result.observedAt() == null || result.reason().contains("미확인")) ? "UNKNOWN" : result.eligible() ? "PASS" : "FAIL"));
-            if (result.eligible()) eligible.add(new Ranked(signal, result));
+            String liquidityStatus = result.observedAt() == null || result.reason().contains("미확인")
+                ? "UNKNOWN" : result.eligible() ? "PASS" : "FAIL";
+            Amounts observations = result.eligible() ? matchingObservations(signal.stockCode(), result) : null;
+            ConditionCheck breakout = requireBreakout && observations != null
+                ? ShortTermBreakoutEvidence.evaluate(signal, observations.bars(), observations.date(),
+                    observations.fetchedAt(), clock.instant())
+                : null;
+            String breakoutStatus = breakout == null ? "UNKNOWN" : breakout.status();
+            boolean qualified = result.eligible() && (!requireBreakout || "PASS".equals(breakoutStatus));
+            if (requireBreakout && ("UNKNOWN".equals(liquidityStatus)
+                || (result.eligible() && "UNKNOWN".equals(breakoutStatus)))) complete = false;
+            var decision = new LinkedHashMap<String, Object>(Map.of("code", signal.stockCode(), "eligible", qualified,
+                "reason", result.reason(), "bonus", result.bonus(), "status", liquidityStatus));
+            if (requireBreakout) {
+                decision.put("breakoutStatus", result.eligible() ? breakoutStatus : "NOT_EVALUATED");
+                if (breakout != null) decision.put("breakout", breakout);
+            }
+            decisions.add(decision);
+            if (qualified) eligible.add(new Ranked(signal, result, observations, breakout));
         }
         eligible.sort(Comparator.comparingInt((Ranked item) -> item.signal().finalScore() + item.result().bonus()).reversed());
         List<ConditionSignalDto> result = new ArrayList<>();
+        Map<String, Integer> orderingBonuses = new HashMap<>();
         for (Ranked item : eligible) {
             if (result.size() >= limit) break;
             var s = item.signal();
+            orderingBonuses.put(s.stockCode(), item.result().bonus());
             List<String> evidence = new ArrayList<>();
             if (s.evidence() != null) s.evidence().stream().filter(e -> !e.startsWith(EVIDENCE_PREFIX)).forEach(evidence::add);
             evidence.add(EVIDENCE_PREFIX + item.result().reason());
@@ -126,20 +158,26 @@ public class ConditionLiquidityService {
             checks.add(new ConditionCheck("liquidity.0", "liquidity",
                 "누적 " + rule.minimumEok() + "억 이상" + (rule.average20Eok() > 0 ? " · 직전 20거래일 평균 " + rule.average20Eok() + "억 이상" : "")
                     + " (장초반 완화 적용 시 실제 최소값은 관측값에 표시)",
-                "PASS", item.result().reason(), "KIS 일봉 acml_tr_pbmn · 원(KRW)", item.result().observedAt()));
+                "PASS", item.result().reason(), LIQUIDITY_CHECK_SOURCE, item.result().observedAt()));
             s.conditionChecks().stream().filter(c -> !"liquidity".equals(c.category())).forEach(checks::add);
             // Reuse the verified response already fetched for turnover: no extra request per card.
-            Amounts observations = cache.getIfPresent(marketDate(clock.instant().atZone(KST)) + ":" + s.stockCode());
-            if (observations != null && observations.fetchedAt().toString().equals(item.result().observedAt())) {
+            Amounts observations = item.observations();
+            if (observations != null) {
                 for (ConditionCheck measured : ConditionTechnicalEvidence.evaluate(mode, observations.bars(),
                     observations.date(), observations.fetchedAt())) {
                     if (!"technical".equals(measured.category())) continue;
+                    if (requireBreakout && (ShortTermBreakoutEvidence.BREAKOUT_CHECK.equals(measured.id())
+                        || ConditionCheck.BREAKOUT_DAILY_CHANGE_CHECK.equals(measured.id()))) continue;
                     boolean previousRefresh = checks.stream().anyMatch(c -> c.id().equals(measured.id())
                         && c.source() != null && c.source().startsWith("KIS 일봉 · "));
                     if ("UNKNOWN".equals(measured.status()) && !previousRefresh) continue;
                     checks.removeIf(c -> c.id().equals(measured.id()));
                     checks.add(measured);
                 }
+            }
+            if (item.breakout() != null) {
+                checks.removeIf(c -> ShortTermBreakoutEvidence.BREAKOUT_CHECK.equals(c.id()));
+                checks.add(item.breakout());
             }
             result.add(new ConditionSignalDto(s.section(), s.mode(), result.size() + 1, s.stockName(), s.stockCode(),
                 s.capturePrice(), s.currentPrice(), s.highPrice(), s.stopLoss(), s.maxReturnPct(), s.status(),
@@ -151,12 +189,18 @@ public class ConditionLiquidityService {
             var legacySelected = eligible.stream().filter(item -> legacyPrefix.contains(item.signal().stockCode())).limit(limit).map(item -> item.signal().stockCode()).toList();
             captures.record(limit > 3 ? "candidate_selection" : "selection", mode, "pool", clock.instant(), Map.of(
                 "candidates", signals == null ? List.of() : signals, "decisions", decisions,
-                "selected", result, "legacyPrefixSelectedCodes", legacySelected, "algorithm", "FULL_POOL_LIQUIDITY_V2",
+                "selected", result, "legacyPrefixSelectedCodes", legacySelected,
+                "algorithm", requireBreakout ? "CONFIRMED_BREAKOUT_V1" : "FULL_POOL_LIQUIDITY_V2",
                 "timeBudgetSeconds", 15, "unavailableIsNotRejectionEvidence", true));
             captures.watch(java.util.stream.Stream.concat(result.stream(), eligible.stream()
                 .filter(item -> legacySelected.contains(item.signal().stockCode())).map(Ranked::signal)).toList());
         }
-        return List.copyOf(result);
+        return new SignalSelection(List.copyOf(result), Map.copyOf(orderingBonuses), complete);
+    }
+
+    private Amounts matchingObservations(String code, ConditionLiquidityPolicy.Result result) {
+        var observed = cache.getIfPresent(marketDate(clock.instant().atZone(KST)) + ":" + code);
+        return observed != null && observed.fetchedAt().toString().equals(result.observedAt()) ? observed : null;
     }
 
     private Amounts load(String code, LocalDate date, long deadline) {

@@ -3,6 +3,7 @@ package com.bitman.justbuy.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import java.nio.ByteBuffer;
 import java.nio.file.*;
 import java.time.*;
 import java.util.*;
@@ -42,5 +43,56 @@ class ConditionCaptureStoreTest {
         store.collect();
         verifyNoInteractions(kis);
         try (var files = Files.list(dir)) { assertThat(files.count()).isZero(); }
+    }
+
+    @Test void keepsBreakoutPoolStagesAfterTheSharedDailyFileReachesItsCap() throws Exception {
+        var mapper = new ObjectMapper();
+        var store = new ConditionCaptureStore(mapper, mock(KisApiService.class), dir, Clock.fixed(now, ZoneOffset.UTC));
+        Path shared = dir.resolve("2026-10-14.jsonl");
+        long sharedSize = 128L * 1024 * 1024 + 1;
+        fillThrough(shared, sharedSize);
+        Path retained = dir.resolve("2026-08-15-breakout.jsonl");
+        Path expired = dir.resolve("2026-08-14-breakout.jsonl");
+        Files.createFile(retained);
+        Files.createFile(expired);
+
+        store.record("source", "FLOW_LEADER", "pool", now, Map.of());
+        store.record("source", "BREAKOUT", "005930", now, Map.of());
+        store.record("selection", "BREAKOUT", "pool", now, Map.of());
+        store.record("publication", "BREAKOUT", "pool", now, Map.of("sourceStatus", "PRECOMPUTED"));
+        for (String kind : List.of("source", "candidate_selection", "verified_publication", "realtime_snapshot")) {
+            store.record(kind, "BREAKOUT", "pool", now, Map.of("scan", 42));
+        }
+        store.record("publication", "BREAKOUT", "pool", now, Map.of("sourceStatus", "REALTIME_EMPTY"));
+        store.record("publication", "BREAKOUT", "pool", now, Map.of("sourceStatus", "REALTIME_SCAN"));
+
+        assertThat(Files.size(shared)).isEqualTo(sharedSize);
+        assertThat(Files.exists(retained)).isTrue();
+        assertThat(Files.exists(expired)).isFalse();
+        var rows = Files.readAllLines(dir.resolve("2026-10-14-breakout.jsonl"));
+        var kinds = new ArrayList<String>();
+        for (String line : rows) kinds.add(mapper.readTree(line).path("kind").asText());
+        assertThat(kinds).containsExactly("source", "candidate_selection", "verified_publication", "realtime_snapshot", "publication");
+        assertThat(rows.getLast()).contains("REALTIME_EMPTY");
+    }
+
+    @Test void refusesAWholeBreakoutEntryThatWouldCrossTheStrictByteCap() throws Exception {
+        var store = new ConditionCaptureStore(new ObjectMapper(), mock(KisApiService.class), dir, Clock.fixed(now, ZoneOffset.UTC));
+        Path dedicated = dir.resolve("2026-10-14-breakout.jsonl");
+        long size = 16L * 1024 * 1024 - 200;
+        fillThrough(dedicated, size);
+
+        store.record("realtime_snapshot", "BREAKOUT", "pool", now, Map.of("status", "가".repeat(60)));
+
+        assertThat(Files.size(dedicated)).isEqualTo(size);
+        assertThat(Files.readAllLines(dir.resolve("2026-10-14.jsonl"))).hasSize(1);
+    }
+
+    private static void fillThrough(Path file, long size) throws Exception {
+        try (var channel = Files.newByteChannel(file, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE,
+            StandardOpenOption.SPARSE)) {
+            channel.position(size - 1);
+            channel.write(ByteBuffer.wrap(new byte[]{'\n'}));
+        }
     }
 }

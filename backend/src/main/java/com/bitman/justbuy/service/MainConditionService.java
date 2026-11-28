@@ -18,9 +18,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -259,14 +261,42 @@ public class MainConditionService {
     public ConditionSectionResponse getSection(ConditionSection section) {
         ConditionSectionResponse raw = rawSection(section);
         if (liquidity == null || !section.hasAnalysisMode() || raw.signals().isEmpty()) return raw;
-        var signals = liquidity.filterSignals(section.legacyMode(), raw.signals(), 3);
+        boolean verifiedRealtime = isVerifiedShortTermPublication(section, raw);
+        var signals = verifiedRealtime ? raw.signals() : liquidity.filterSignals(section.legacyMode(), raw.signals(), 3);
         if (captures != null) {
             captures.record("publication",section.legacyMode(),"pool",Instant.now(),Map.of(
                 "sourceStatus",raw.sourceStatus(),"sourceAsOf",raw.asOf(),"signals",signals));
             captures.watch(signals);
         }
+        if (verifiedRealtime) return raw;
         return new ConditionSectionResponse(raw.key(), raw.slug(), raw.title(), raw.mode(), raw.endpoint(),
             raw.asOf(), signals.isEmpty() ? "LIQUIDITY_UNCONFIRMED" : raw.sourceStatus(), signals, raw.latestAnalysis());
+    }
+
+    private static boolean isVerifiedShortTermPublication(ConditionSection section, ConditionSectionResponse response) {
+        if (section != ConditionSection.SHORT_TERM || !"REALTIME_SCAN".equals(response.sourceStatus())
+            || response.signals().size() > 3) return false;
+        LocalDate session = observationSession(response.asOf());
+        return session != null && response.signals().stream().allMatch(signal -> signal != null
+            && section.legacyMode().equals(signal.mode())
+            && hasMeasuredPass(signal, "liquidity.0", "liquidity", ConditionLiquidityService.LIQUIDITY_CHECK_SOURCE, session)
+            && hasMeasuredPass(signal, ShortTermBreakoutEvidence.BREAKOUT_CHECK, "technical", ShortTermBreakoutEvidence.SOURCE, session));
+    }
+
+    private static boolean hasMeasuredPass(ConditionSignalDto signal, String id, String category, String source, LocalDate session) {
+        return signal.conditionChecks().stream().anyMatch(check -> id.equals(check.id()) && category.equals(check.category())
+            && "PASS".equals(check.status()) && source.equals(check.source())
+            && check.observedValue() != null && !check.observedValue().isBlank()
+            && session.equals(observationSession(check.observedAt())));
+    }
+
+    private static LocalDate observationSession(String value) {
+        if (value == null) return null;
+        try {
+            return OffsetDateTime.parse(value).atZoneSameInstant(KST).toLocalDate();
+        } catch (DateTimeParseException ignored) {
+            return null;
+        }
     }
 
     private ConditionSectionResponse rawSection(ConditionSection section) {
@@ -300,7 +330,7 @@ public class MainConditionService {
                     section.legacyMode(),
                     "/api/conditions/" + section.slug(),
                     snapshot.get().asOf(),
-                    "REALTIME_SCAN",
+                    snapshot.get().sourceStatus(),
                     snapshot.get().signals(),
                     latestAnalysis(section.legacyMode())
                 );

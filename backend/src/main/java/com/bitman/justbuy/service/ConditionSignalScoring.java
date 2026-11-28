@@ -5,6 +5,10 @@ import java.util.List;
 
 final class ConditionSignalScoring {
 
+    private static final int RANK_BONUS_LIMIT = 30;
+    private static final double SHORT_TERM_ENTRY_GAIN = 3.0;
+    private static final double SHORT_TERM_UPPER_GAIN = 15.0;
+
     private ConditionSignalScoring() {}
 
     record ScoreBreakdown(
@@ -21,24 +25,40 @@ final class ConditionSignalScoring {
                                     double changeRate,
                                     long volume,
                                     long foreignNetBuy) {
+        return shortTerm(volumeRank, gainerRank, foreignRank, changeRate, volume, foreignNetBuy, 0);
+    }
+
+    static ScoreBreakdown shortTerm(int volumeRank,
+                                    int gainerRank,
+                                    int foreignRank,
+                                    double changeRate,
+                                    long volume,
+                                    long foreignNetBuy,
+                                    int turnoverRank) {
         int score = 40;
         List<String> evidence = new ArrayList<>();
         List<String> riskFlags = new ArrayList<>();
 
-        int volumeScore = rankContribution(volumeRank, 18);
-        int momentumRankScore = rankContribution(gainerRank, 18);
-        int flowScore = rankContribution(foreignRank, 12);
-        int momentumScore = clamp((int) Math.round(Math.max(0, changeRate) * 2.5), 0, 25);
+        int volumeScore = shortTermRankContribution(volumeRank, 18);
+        int momentumRankScore = shortTermRankContribution(gainerRank, 18);
+        int flowScore = shortTermRankContribution(foreignRank, 12);
+        int turnoverScore = shortTermRankContribution(turnoverRank, 6);
+        // The entry band confirms direction. A larger daily gain inside it earns no extra points.
+        double scoredChange = changeRate > SHORT_TERM_UPPER_GAIN ? 0 : Math.min(Math.max(0, changeRate), SHORT_TERM_ENTRY_GAIN);
+        int momentumScore = (int) Math.round(scoredChange * 2.5);
         int liquidityScore = liquidityScore(volume);
-        int overlapScore = volumeRank > 0 && gainerRank > 0 ? 8 : 0;
+        int overlapScore = shortTermTopRank(volumeRank) && shortTermTopRank(gainerRank) ? 8 : 0;
 
-        score += volumeScore + momentumRankScore + flowScore + momentumScore + liquidityScore + overlapScore;
+        score += volumeScore + momentumRankScore + flowScore + turnoverScore + momentumScore + liquidityScore + overlapScore;
 
         if (volumeRank > 0) {
             evidence.add("\uAC70\uB798\uB7C9 \uC0C1\uC704 " + volumeRank + "\uC704");
         }
         if (gainerRank > 0) {
             evidence.add("\uC0C1\uC2B9\uB960 \uC0C1\uC704 " + gainerRank + "\uC704");
+        }
+        if (turnoverRank > 0) {
+            evidence.add("거래대금 상위 " + turnoverRank + "위");
         }
         if (volumeRank > 0 && gainerRank > 0) {
             evidence.add("\uAC70\uB798\uB7C9\uACFC \uC0C1\uC2B9\uB960 \uB3D9\uC2DC \uD655\uC778");
@@ -54,7 +74,7 @@ final class ConditionSignalScoring {
         if (changeRate >= 20) {
             riskPenalty += 10;
             riskFlags.add("\uB2E8\uAE30 \uACFC\uC5F4 \uAD6C\uAC04");
-        } else if (changeRate >= 15) {
+        } else if (changeRate > SHORT_TERM_UPPER_GAIN) {
             riskPenalty += 5;
             riskFlags.add("\uC0C1\uC2B9\uB960 \uACFC\uC5F4 \uC8FC\uC758");
         }
@@ -151,8 +171,16 @@ final class ConditionSignalScoring {
 
     private static int rankContribution(int rank, int maxPoints) {
         if (rank <= 0) return 0;
-        int capped = Math.min(rank, 30);
-        return clamp((int) Math.round(maxPoints * ((31D - capped) / 30D)), 0, maxPoints);
+        int capped = Math.min(rank, RANK_BONUS_LIMIT);
+        return clamp((int) Math.round(maxPoints * ((RANK_BONUS_LIMIT + 1D - capped) / RANK_BONUS_LIMIT)), 0, maxPoints);
+    }
+
+    private static boolean shortTermTopRank(int rank) {
+        return rank > 0 && rank <= RANK_BONUS_LIMIT;
+    }
+
+    private static int shortTermRankContribution(int rank, int maxPoints) {
+        return shortTermTopRank(rank) ? rankContribution(rank, maxPoints) : 0;
     }
 
     private static int liquidityScore(long volume) {

@@ -101,6 +101,12 @@ public class KisApiService {
     }
     private final ConcurrentHashMap<String, CachedEntry> cache = new ConcurrentHashMap<>();
 
+    public record SourceBatch<T>(List<T> rows, Instant fetchedAt, boolean complete) {
+        public SourceBatch { rows = List.copyOf(rows); }
+
+        static <T> SourceBatch<T> unavailable() { return new SourceBatch<>(List.of(), null, false); }
+    }
+
     public record RankedStock(
         String name,
         String code,
@@ -959,15 +965,21 @@ public class KisApiService {
      * 공통 순위 조회 (거래량/등락률 — volume-rank API 사용)
      */
     public List<RankedStock> fetchForeignNetBuyRankingStocks(int limit) {
-        if (!isAvailable() || limit <= 0) return List.of();
+        return fetchForeignNetBuyRankingSnapshot(limit).rows();
+    }
+
+    public SourceBatch<RankedStock> fetchForeignNetBuyRankingSnapshot(int limit) {
+        if (!isAvailable() || limit <= 0) return SourceBatch.unavailable();
         int resultLimit = Math.min(limit, 100);
+        Duration ttl = Duration.ofMinutes(1);
 
         String cacheKey = "kis_rank_foreign_structured_" + limit;
         CachedEntry cached = cache.get(cacheKey);
         if (cached != null && cached.isValid()) {
             try {
-                return objectMapper.readValue(cached.data(),
+                List<RankedStock> rows = objectMapper.readValue(cached.data(),
                     objectMapper.getTypeFactory().constructCollectionType(List.class, RankedStock.class));
+                return new SourceBatch<>(rows, cached.expiry().minus(ttl), true);
             } catch (Exception ignored) {}
         }
 
@@ -982,20 +994,26 @@ public class KisApiService {
 
             HttpHeaders headers = buildHeaders("FHPTJ04400000");
             ResponseEntity<String> resp = exchange(restTemplate, url, HttpMethod.GET, new HttpEntity<>(headers));
-            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return List.of();
+            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return SourceBatch.unavailable();
 
             JsonNode root = objectMapper.readTree(resp.getBody());
-            if (!"0".equals(root.path("rt_cd").asText(""))) return List.of();
+            if (!"0".equals(root.path("rt_cd").asText(""))) return SourceBatch.unavailable();
             JsonNode output = root.path("output");
-            if (!output.isArray()) return List.of();
+            if (!output.isArray()) return SourceBatch.unavailable();
 
             List<RankedStock> stocks = new ArrayList<>();
+            boolean complete = true;
             for (JsonNode item : output) {
                 String name = item.path("hts_kor_isnm").asText("");
                 String code = item.path("mksc_shrn_iscd").asText("");
-                long netBuy = parseLong(item.path("frgn_ntby_qty").asText("0"));
-                if (name.isBlank() || !code.matches("\\d{6}") || netBuy <= 0
-                    || !isPositivePrice(item.path("stck_prpr").asText(""))) continue;
+                Long netBuy = strictInvestorQuantity(item.path("frgn_ntby_qty"));
+                if (name.isBlank() || !code.matches("\\d{6}") || netBuy == null
+                    || !isPositivePrice(item.path("stck_prpr").asText(""))) {
+                    complete = false;
+                    continue;
+                }
+                if (netBuy <= 0) continue;
+                if (!isRankingChange(item)) complete = false;
                 stocks.add(new RankedStock(
                     name,
                     code,
@@ -1008,14 +1026,12 @@ public class KisApiService {
 
             stocks.sort(Comparator.comparingLong(RankedStock::foreignNetBuy).reversed().thenComparing(RankedStock::code));
             stocks = List.copyOf(stocks.subList(0, Math.min(resultLimit, stocks.size())));
-            if (!stocks.isEmpty()) {
-                cache.put(cacheKey, new CachedEntry(objectMapper.writeValueAsString(stocks),
-                    Instant.now().plus(1, ChronoUnit.MINUTES)));
-            }
-            return stocks;
+            Instant fetchedAt = Instant.now();
+            if (complete) cache.put(cacheKey, new CachedEntry(objectMapper.writeValueAsString(stocks), fetchedAt.plus(ttl)));
+            return new SourceBatch<>(stocks, fetchedAt, complete);
         } catch (Exception e) {
-            log.warn("[KIS] structured foreign net buy ranking failed: {}", e.getMessage());
-            return List.of();
+            log.warn("[KIS] structured foreign net buy ranking unavailable");
+            return SourceBatch.unavailable();
         }
     }
 
@@ -1030,17 +1046,29 @@ public class KisApiService {
     }
 
     public List<RankedStock> fetchRealtimeVolumeRankingStocks(int limit) {
-        return fetchRankingStocks("kis_rt_rank_volume_structured_" + limit, "FHPST01710000",
-            "/uapi/domestic-stock/v1/quotations/volume-rank", "J", limit, false, Duration.ofSeconds(50));
+        return fetchRealtimeVolumeRankingSnapshot(limit).rows();
+    }
+
+    public SourceBatch<RankedStock> fetchRealtimeVolumeRankingSnapshot(int limit) {
+        return fetchRankingSnapshot("kis_rt_rank_volume_structured_" + limit, "FHPST01710000",
+            "/uapi/domestic-stock/v1/quotations/volume-rank", "J", limit, false, Duration.ofSeconds(50), false);
     }
 
     public List<RankedStock> fetchRealtimeTurnoverRankingStocks(int limit) {
-        return fetchRankingStocks("kis_rt_rank_turnover_structured_" + limit, "FHPST01710000",
+        return fetchRealtimeTurnoverRankingSnapshot(limit).rows();
+    }
+
+    public SourceBatch<RankedStock> fetchRealtimeTurnoverRankingSnapshot(int limit) {
+        return fetchRankingSnapshot("kis_rt_rank_turnover_structured_" + limit, "FHPST01710000",
             "/uapi/domestic-stock/v1/quotations/volume-rank", "J", limit, false, Duration.ofSeconds(50), true);
     }
     public List<RankedStock> fetchRealtimeGainersRankingStocks(int limit) {
-        return fetchRankingStocks("kis_rt_rank_gainers_structured_" + limit, "FHPST01700000",
-            "/uapi/domestic-stock/v1/ranking/fluctuation", "J", limit, true, Duration.ofSeconds(50));
+        return fetchRealtimeGainersRankingSnapshot(limit).rows();
+    }
+
+    public SourceBatch<RankedStock> fetchRealtimeGainersRankingSnapshot(int limit) {
+        return fetchRankingSnapshot("kis_rt_rank_gainers_structured_" + limit, "FHPST01700000",
+            "/uapi/domestic-stock/v1/ranking/fluctuation", "J", limit, true, Duration.ofSeconds(50), false);
     }
 
     public InvestorFlowSnapshot fetchInvestorFlowSnapshot(String stockCode, int days) {
@@ -1245,18 +1273,20 @@ public class KisApiService {
 
     private List<RankedStock> fetchRankingStocks(String cacheKey, String trId, String path, String marketDiv,
                                                 int limit, boolean sortByChange, Duration ttl) {
-        return fetchRankingStocks(cacheKey, trId, path, marketDiv, limit, sortByChange, ttl, false);
+        return fetchRankingSnapshot(cacheKey, trId, path, marketDiv, limit, sortByChange, ttl, false).rows();
     }
-    private List<RankedStock> fetchRankingStocks(String cacheKey, String trId, String path, String marketDiv,
+
+    private SourceBatch<RankedStock> fetchRankingSnapshot(String cacheKey, String trId, String path, String marketDiv,
             int limit, boolean sortByChange, Duration ttl, boolean turnover) {
-        if (!isAvailable() || limit <= 0) return List.of();
+        if (!isAvailable() || limit <= 0) return SourceBatch.unavailable();
         int resultLimit = Math.min(limit, 100);
 
         CachedEntry cached = cache.get(cacheKey);
         if (cached != null && cached.isValid()) {
             try {
-                return objectMapper.readValue(cached.data(),
+                List<RankedStock> rows = objectMapper.readValue(cached.data(),
                     objectMapper.getTypeFactory().constructCollectionType(List.class, RankedStock.class));
+                return new SourceBatch<>(rows, cached.expiry().minus(ttl), true);
             } catch (Exception ignored) {}
         }
 
@@ -1286,18 +1316,23 @@ public class KisApiService {
 
             HttpHeaders headers = buildHeaders(trId);
             ResponseEntity<String> resp = exchange(restTemplate, url, HttpMethod.GET, new HttpEntity<>(headers));
-            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return List.of();
+            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return SourceBatch.unavailable();
 
             JsonNode root = objectMapper.readTree(resp.getBody());
-            if (!"0".equals(root.path("rt_cd").asText(""))) return List.of();
+            if (!"0".equals(root.path("rt_cd").asText(""))) return SourceBatch.unavailable();
             JsonNode output = root.path("output");
-            if (!output.isArray()) return List.of();
+            if (!output.isArray()) return SourceBatch.unavailable();
 
             List<RankedStock> stocks = new ArrayList<>();
+            boolean complete = true;
             for (JsonNode item : output) {
                 String name = item.path("hts_kor_isnm").asText("");
                 String code = item.path(fluctuation ? "stck_shrn_iscd" : "mksc_shrn_iscd").asText("");
-                if (name.isBlank() || !code.matches("\\d{6}") || !isPositivePrice(item.path("stck_prpr").asText(""))) continue;
+                if (name.isBlank() || !code.matches("\\d{6}") || !isPositivePrice(item.path("stck_prpr").asText(""))) {
+                    complete = false;
+                    continue;
+                }
+                if (!isRankingChange(item)) complete = false;
                 stocks.add(new RankedStock(
                     name,
                     code,
@@ -1313,15 +1348,17 @@ public class KisApiService {
             }
             if (stocks.size() > resultLimit) stocks = new ArrayList<>(stocks.subList(0, resultLimit));
 
-            if (!stocks.isEmpty()) {
-                cache.put(cacheKey, new CachedEntry(objectMapper.writeValueAsString(stocks),
-                    Instant.now().plus(ttl)));
-            }
-            return stocks;
+            Instant fetchedAt = Instant.now();
+            if (complete) cache.put(cacheKey, new CachedEntry(objectMapper.writeValueAsString(stocks), fetchedAt.plus(ttl)));
+            return new SourceBatch<>(stocks, fetchedAt, complete);
         } catch (Exception e) {
-            log.warn("[KIS] structured ranking failed ({}): {}", cacheKey, e.getMessage());
-            return List.of();
+            log.warn("[KIS] structured ranking unavailable ({})", cacheKey);
+            return SourceBatch.unavailable();
         }
+    }
+
+    private static boolean isRankingChange(JsonNode item) {
+        return item.path("prdy_ctrt").asText("").trim().matches("[+-]?[0-9]+(?:\\.[0-9]+)?%?");
     }
 
     private String fetchRanking(String cacheKey, String trId, String path, String marketDiv, String title, boolean sortByChange) {

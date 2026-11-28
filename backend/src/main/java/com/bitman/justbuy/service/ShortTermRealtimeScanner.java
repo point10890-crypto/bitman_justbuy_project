@@ -17,6 +17,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.text.NumberFormat;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -30,6 +31,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -44,11 +46,13 @@ public class ShortTermRealtimeScanner {
     private static final LocalTime SESSION_END = LocalTime.of(15, 20);
     private static final int RAW_SCAN_LIMIT = 80;
     private static final int FOREIGN_SCAN_LIMIT = 40;
-    private static final String KIS_SOURCE = "KIS OpenAPI";
+    private static final int VERIFICATION_POOL_SIZE = 6;
+    private static final String KIS_SOURCE = ShortTermBreakoutEvidence.QUOTE_SOURCE;
 
     private final KisApiService kisApiService;
     private final TrackRecordService trackRecordService;
     private final DeepSeekConditionVerifier verifier;
+    private final Clock clock;
     private KiwoomConditionEnricher kiwoomEnricher;
     private ConditionLiquidityService liquidity;
     private ConditionCaptureStore captures;
@@ -88,9 +92,15 @@ public class ShortTermRealtimeScanner {
     ShortTermRealtimeScanner(KisApiService kisApiService,
                              TrackRecordService trackRecordService,
                              DeepSeekConditionVerifier verifier) {
+        this(kisApiService, trackRecordService, verifier, Clock.system(KST));
+    }
+
+    ShortTermRealtimeScanner(KisApiService kisApiService, TrackRecordService trackRecordService,
+                             DeepSeekConditionVerifier verifier, Clock clock) {
         this.kisApiService = kisApiService;
         this.trackRecordService = trackRecordService;
         this.verifier = verifier;
+        this.clock = clock;
     }
 
     public record ScanSnapshot(
@@ -110,7 +120,7 @@ public class ShortTermRealtimeScanner {
         initialDelayString = "${bitman.short-term.realtime.initial-delay-ms:45000}"
     )
     public void scheduledScan() {
-        ZonedDateTime now = ZonedDateTime.now(KST);
+        ZonedDateTime now = clock.instant().atZone(KST);
         if (!isTradingSession(now)) return;
         try {
             scanNow();
@@ -120,7 +130,7 @@ public class ShortTermRealtimeScanner {
     }
 
     public synchronized ScanSnapshot scanNow() {
-        ZonedDateTime now = ZonedDateTime.now(KST);
+        ZonedDateTime now = clock.instant().atZone(KST);
         resetDailySeen(now.toLocalDate());
 
         if (!isTradingSession(now)) {
@@ -128,25 +138,53 @@ public class ShortTermRealtimeScanner {
             return latest;
         }
 
-        List<KisApiService.RankedStock> volume = kisApiService.fetchRealtimeVolumeRankingStocks(RAW_SCAN_LIMIT);
-        List<KisApiService.RankedStock> gainers = kisApiService.fetchRealtimeGainersRankingStocks(RAW_SCAN_LIMIT);
-        List<KisApiService.RankedStock> foreignNetBuy =
-            kisApiService.fetchForeignNetBuyRankingStocks(FOREIGN_SCAN_LIMIT);
-        List<KisApiService.RankedStock> turnover = kisApiService.fetchRealtimeTurnoverRankingStocks(30);
-        ZonedDateTime checkedAt = ZonedDateTime.now(KST);
-        var independent=queryCandidateEvidence(volume,gainers,foreignNetBuy);
-        List<ConditionSignalDto> signals = buildCandidates(volume, gainers, foreignNetBuy, checkedAt, 6, false, turnover);
-        signals = publishVerified(signals, checkedAt, independent);
+        var rankings = new Rankings(
+            kisApiService.fetchRealtimeVolumeRankingSnapshot(RAW_SCAN_LIMIT),
+            kisApiService.fetchRealtimeGainersRankingSnapshot(RAW_SCAN_LIMIT),
+            kisApiService.fetchForeignNetBuyRankingSnapshot(FOREIGN_SCAN_LIMIT),
+            kisApiService.fetchRealtimeTurnoverRankingSnapshot(30));
+        ZonedDateTime checkedAt = clock.instant().atZone(KST);
+        if (!isTradingSession(checkedAt)) {
+            latest = new ScanSnapshot(nowKst(checkedAt), checkedAt.toInstant(), "REALTIME_WAITING", false, latest.signals());
+            return latest;
+        }
+        Rankings received = rankings;
+        rankings = received.recentAt(checkedAt);
+        List<Candidate> ranked = rankCandidates(rankings);
+        captureRankings(received, rankings, checkedAt);
+        List<Candidate> inBand = ranked.stream().filter(Candidate::hasBreakoutChange).toList();
+        var candidates = toSignals(inBand, checkedAt);
+        var selection = liquidity == null
+            ? new ConditionLiquidityService.SignalSelection(List.of(), Map.of(), candidates.isEmpty())
+            : liquidity.selectShortTermSignals(candidates, VERIFICATION_POOL_SIZE);
+        List<ConditionSignalDto> verified = List.of();
+        if (!selection.signals().isEmpty()) {
+            var independent = queryCandidateEvidence(inBand);
+            verified = verifyAndEnrich(selection.signals(), clock.instant().atZone(KST), independent,
+                selection.orderingBonuses());
+        }
+        ZonedDateTime publishedAt = clock.instant().atZone(KST);
+        if (!isTradingSession(publishedAt) || !checkedAt.toLocalDate().equals(publishedAt.toLocalDate())) {
+            latest = new ScanSnapshot(nowKst(publishedAt), publishedAt.toInstant(), "REALTIME_WAITING", false, latest.signals());
+            return latest;
+        }
+        List<ConditionSignalDto> signals = selection.signals().isEmpty() ? List.of()
+            : publish(selection.signals(), verified, publishedAt);
+        boolean confirmedEmpty = rankings.complete() && selection.complete() && signals.isEmpty();
         latest = new ScanSnapshot(
-            nowKst(checkedAt),
-            checkedAt.toInstant(),
-            signals.isEmpty() ? "REALTIME_EMPTY" : "REALTIME_SCAN",
+            nowKst(publishedAt),
+            publishedAt.toInstant(),
+            !signals.isEmpty() ? "REALTIME_SCAN" : confirmedEmpty ? "REALTIME_EMPTY" : "REALTIME_UNAVAILABLE",
             true,
             signals
         );
-        recordTrackableSignals(signals, checkedAt);
+        if (captures != null) captures.record("realtime_snapshot", "BREAKOUT", "pool", publishedAt.toInstant(), Map.of(
+            "scanInputAt", checkedAt.toInstant().toString(), "sourceStatus", latest.sourceStatus(),
+            "asOf", latest.asOf(), "sourcesComplete", rankings.complete(), "selectionComplete", selection.complete(),
+            "signals", signals));
+        recordTrackableSignals(signals, publishedAt);
         log.info("[ShortTermRealtime] scan completed: picks={}, volumeRank={}, gainerRank={}, foreignRank={}",
-            signals.size(), volume.size(), gainers.size(), foreignNetBuy.size());
+            signals.size(), rankings.volume().rows().size(), rankings.gainers().rows().size(), rankings.foreign().rows().size());
         return latest;
     }
 
@@ -164,9 +202,10 @@ public class ShortTermRealtimeScanner {
 
     public Optional<ScanSnapshot> latestFresh() {
         ScanSnapshot snapshot = latest;
-        if (snapshot.signals().isEmpty()) return Optional.empty();
-        if (!"REALTIME_SCAN".equals(snapshot.sourceStatus())) return Optional.empty();
-        if (Duration.between(snapshot.scannedAt(), Instant.now()).compareTo(freshTtl()) > 0) {
+        Instant now = clock.instant();
+        if (!"REALTIME_SCAN".equals(snapshot.sourceStatus()) && !"REALTIME_EMPTY".equals(snapshot.sourceStatus())) return Optional.empty();
+        if (!isTradingSession(now.atZone(KST)) || snapshot.scannedAt().isAfter(now)
+            || Duration.between(snapshot.scannedAt(), now).compareTo(freshTtl()) > 0) {
             return Optional.empty();
         }
         return Optional.of(snapshot);
@@ -198,33 +237,92 @@ public class ShortTermRealtimeScanner {
     List<ConditionSignalDto> buildCandidates(List<KisApiService.RankedStock> volume,
             List<KisApiService.RankedStock> gainers, List<KisApiService.RankedStock> foreignNetBuy,
             ZonedDateTime now, int limit, boolean remember, List<KisApiService.RankedStock> turnover) {
-        if (captures != null) captures.record("source", "BREAKOUT", "pool", now.toInstant(), Map.of(
-            "volume", volume, "gainers", gainers, "foreignNetBuy", foreignNetBuy, "turnover", turnover));
-        List<Candidate> sorted=rankCandidates(volume,gainers,foreignNetBuy,turnover).stream()
-            .filter(candidate -> candidate.score >= 58 || (candidate.turnoverRank > 0 && candidate.changeRate >= 3 && candidate.changeRate <= 15)).toList();
-        List<ConditionSignalDto> signals = new ArrayList<>();
-        int signalRank = 1;
-        String checkedAt = nowKst(now);
-        for (Candidate candidate : sorted) {
-            Capture capture = firstSeenByCode.getOrDefault(candidate.code,
-                new Capture(checkedAt, formatPrice(candidate.currentPrice)));
-            signals.add(candidate.toSignal(signalRank++, capture, checkedAt));
-        }
-        List<ConditionSignalDto> accepted = liquidity == null ? signals.stream().limit(limit).toList() : liquidity.filterSignals("BREAKOUT", signals, limit);
+        var rankings = rankingsAt(volume, gainers, foreignNetBuy, turnover, now.toInstant());
+        var ranked = rankCandidates(rankings).stream()
+            .filter(candidate -> candidate.score >= 58 || (candidate.turnoverRank > 0 && candidate.hasBreakoutChange()))
+            .toList();
+        var signals = toSignals(ranked, now);
+        var accepted = liquidity == null ? signals.stream().limit(limit).toList() : liquidity.filterSignals("BREAKOUT", signals, limit);
         if (remember) for (ConditionSignalDto signal : accepted) {
             firstSeenByCode.putIfAbsent(signal.stockCode(), new Capture(signal.capturedAt(), signal.capturePrice()));
         }
         return accepted;
     }
 
+    private record Rankings(KisApiService.SourceBatch<KisApiService.RankedStock> volume,
+            KisApiService.SourceBatch<KisApiService.RankedStock> gainers,
+            KisApiService.SourceBatch<KisApiService.RankedStock> foreign,
+            KisApiService.SourceBatch<KisApiService.RankedStock> turnover) {
+        boolean complete() { return volume.complete() && gainers.complete() && foreign.complete() && turnover.complete(); }
+
+        Rankings recentAt(ZonedDateTime checkedAt) {
+            return new Rankings(recent(volume, checkedAt), recent(gainers, checkedAt),
+                recent(foreign, checkedAt), recent(turnover, checkedAt));
+        }
+
+        private static KisApiService.SourceBatch<KisApiService.RankedStock> recent(
+                KisApiService.SourceBatch<KisApiService.RankedStock> batch, ZonedDateTime checkedAt) {
+            if (batch == null || batch.fetchedAt() == null) return KisApiService.SourceBatch.unavailable();
+            Instant now = checkedAt.toInstant();
+            Instant open = checkedAt.toLocalDate().atTime(SESSION_START).atZone(KST).toInstant();
+            if (batch.fetchedAt().isBefore(open) || batch.fetchedAt().isBefore(now.minusSeconds(120))
+                || batch.fetchedAt().isAfter(now)) return KisApiService.SourceBatch.unavailable();
+            return batch;
+        }
+    }
+
+    private static Rankings rankingsAt(List<KisApiService.RankedStock> volume, List<KisApiService.RankedStock> gainers,
+            List<KisApiService.RankedStock> foreign, List<KisApiService.RankedStock> turnover, Instant observedAt) {
+        return new Rankings(new KisApiService.SourceBatch<>(safeList(volume), observedAt, true),
+            new KisApiService.SourceBatch<>(safeList(gainers), observedAt, true),
+            new KisApiService.SourceBatch<>(safeList(foreign), observedAt, true),
+            new KisApiService.SourceBatch<>(safeList(turnover), observedAt, true));
+    }
+
+    private void captureRankings(Rankings received, Rankings accepted, ZonedDateTime now) {
+        if (captures != null) captures.record("source", "BREAKOUT", "pool", now.toInstant(), Map.of(
+            "volume", accepted.volume().rows(), "gainers", accepted.gainers().rows(),
+            "foreignNetBuy", accepted.foreign().rows(), "turnover", accepted.turnover().rows(),
+            "sourceCoverage", Map.of(
+                "volume", sourceCoverage(received.volume(), accepted.volume()),
+                "gainers", sourceCoverage(received.gainers(), accepted.gainers()),
+                "foreignNetBuy", sourceCoverage(received.foreign(), accepted.foreign()),
+                "turnover", sourceCoverage(received.turnover(), accepted.turnover()))));
+    }
+
+    private static Map<String, Object> sourceCoverage(KisApiService.SourceBatch<?> received, KisApiService.SourceBatch<?> accepted) {
+        return Map.of(
+            "fetchedAt", received == null || received.fetchedAt() == null ? "" : received.fetchedAt().toString(),
+            "complete", accepted.complete(),
+            "rowsReceived", received == null ? 0 : received.rows().size(),
+            "rowsUsed", accepted.rows().size());
+    }
+
+    private List<ConditionSignalDto> toSignals(List<Candidate> ranked, ZonedDateTime now) {
+        List<ConditionSignalDto> signals = new ArrayList<>();
+        int signalRank = 1;
+        String checkedAt = nowKst(now);
+        for (Candidate candidate : ranked) {
+            Capture capture = firstSeenByCode.getOrDefault(candidate.code,
+                new Capture(checkedAt, formatPrice(candidate.currentPrice)));
+            signals.add(candidate.toSignal(signalRank++, capture));
+        }
+        return signals;
+    }
+
     List<ConditionSignalDto> publishVerified(List<ConditionSignalDto> candidates, ZonedDateTime now,
             KiwoomConditionEnricher.Result independent) {
-        var verified = verifyAndEnrich(candidates, now, independent);
+        return publish(candidates, verifyAndEnrich(candidates, now, independent), now);
+    }
+
+    private List<ConditionSignalDto> publish(List<ConditionSignalDto> candidates,
+            List<ConditionSignalDto> verified, ZonedDateTime now) {
         List<ConditionSignalDto> published = new ArrayList<>();
         for (var signal : verified) {
             if (published.size() == 3) break;
-            firstSeenByCode.putIfAbsent(signal.stockCode(), new Capture(signal.capturedAt(), signal.capturePrice()));
-            published.add(reRank(signal, published.size()+1));
+            Capture capture = firstSeenByCode.computeIfAbsent(signal.stockCode(),
+                ignored -> new Capture(nowKst(now), signal.currentPrice()));
+            published.add(reRank(signal, published.size() + 1, capture));
         }
         if (captures != null) captures.record("verified_publication", "BREAKOUT", "pool", now.toInstant(), Map.of(
             "verificationPool", candidates, "verified", verified, "published", published));
@@ -233,42 +331,41 @@ public class ShortTermRealtimeScanner {
     /** Queue cross-provider facts for the ranked original pool, before the published TOP3 reduction. */
     KiwoomConditionEnricher.Result queryCandidateEvidence(List<KisApiService.RankedStock> volume,
             List<KisApiService.RankedStock> gainers,List<KisApiService.RankedStock> foreignNetBuy) {
-        if(kiwoomEnricher==null) return KiwoomConditionEnricher.empty("NOT_CONFIGURED");
-        Map<String,String> names=new LinkedHashMap<>();
-        rankCandidates(volume,gainers,foreignNetBuy).stream().limit(KiwoomSupplementPolicy.CANDIDATE_LIMIT)
+        return queryCandidateEvidence(rankCandidates(rankingsAt(volume, gainers, foreignNetBuy, List.of(), clock.instant())));
+    }
+
+    private KiwoomConditionEnricher.Result queryCandidateEvidence(List<Candidate> ranked) {
+        if (kiwoomEnricher == null) return KiwoomConditionEnricher.empty("NOT_CONFIGURED");
+        Map<String,String> names = new LinkedHashMap<>();
+        ranked.stream().limit(KiwoomSupplementPolicy.CANDIDATE_LIMIT)
             .forEach(candidate->names.put(candidate.code,candidate.name));
         try {return java.util.Objects.requireNonNullElse(kiwoomEnricher.enrich(names),KiwoomConditionEnricher.empty("UNAVAILABLE"));}
         catch(RuntimeException ignored) {return KiwoomConditionEnricher.empty("UNAVAILABLE");}
     }
 
-    private List<Candidate> rankCandidates(List<KisApiService.RankedStock> volume,
-            List<KisApiService.RankedStock> gainers,List<KisApiService.RankedStock> foreignNetBuy) {
-
-        return rankCandidates(volume, gainers, foreignNetBuy, List.of());
-    }
-    private List<Candidate> rankCandidates(List<KisApiService.RankedStock> volume,
-            List<KisApiService.RankedStock> gainers, List<KisApiService.RankedStock> foreignNetBuy,
-            List<KisApiService.RankedStock> turnover) {
+    private List<Candidate> rankCandidates(Rankings rankings) {
         Map<String, Candidate> candidates = new LinkedHashMap<>();
         int rank = 1;
-        for (KisApiService.RankedStock stock : safeList(volume)) {
-            merge(candidates, stock).volumeRank = rank++;
+        for (KisApiService.RankedStock stock : rankings.volume().rows()) {
+            merge(candidates, stock, rankings.volume().fetchedAt()).volumeRank = rank++;
         }
 
         rank = 1;
-        for (KisApiService.RankedStock stock : safeList(gainers)) {
-            merge(candidates, stock).gainerRank = rank++;
+        for (KisApiService.RankedStock stock : rankings.gainers().rows()) {
+            merge(candidates, stock, rankings.gainers().fetchedAt()).gainerRank = rank++;
         }
 
         rank = 1;
-        for (KisApiService.RankedStock stock : safeList(foreignNetBuy)) {
-            Candidate candidate = merge(candidates, stock);
+        for (KisApiService.RankedStock stock : rankings.foreign().rows()) {
+            Candidate candidate = merge(candidates, stock, rankings.foreign().fetchedAt());
             candidate.foreignRank = rank++;
             candidate.foreignNetBuy = Math.max(candidate.foreignNetBuy, stock.foreignNetBuy());
         }
 
         int moneyRank = 1;
-        for (var stock : safeList(turnover)) merge(candidates, stock).turnoverRank = moneyRank++;
+        for (var stock : rankings.turnover().rows()) {
+            merge(candidates, stock, rankings.turnover().fetchedAt()).turnoverRank = moneyRank++;
+        }
         return candidates.values().stream()
             .filter(Candidate::hasUsableCode)
             .filter(candidate -> StockUniverseFilters.isKoreanSpotEquity(candidate.name, candidate.code))
@@ -299,6 +396,11 @@ public class ShortTermRealtimeScanner {
     }
 
     List<ConditionSignalDto> verifyAndEnrich(List<ConditionSignalDto> signals,ZonedDateTime now,KiwoomConditionEnricher.Result independent) {
+        return verifyAndEnrich(signals, now, independent, Map.of());
+    }
+
+    private List<ConditionSignalDto> verifyAndEnrich(List<ConditionSignalDto> signals, ZonedDateTime now,
+            KiwoomConditionEnricher.Result independent, Map<String, Integer> orderingBonuses) {
         if(signals==null || signals.isEmpty()) return signals;
         independent=java.util.Objects.requireNonNullElse(independent,KiwoomConditionEnricher.empty("UNAVAILABLE"));
         if(!independent.facts().isEmpty()) {
@@ -324,6 +426,16 @@ public class ShortTermRealtimeScanner {
                         "fetchedAt", check.observedAt(),
                         "unit", "%"
                     )));
+                signal.conditionChecks().stream()
+                    .filter(check -> ShortTermBreakoutEvidence.BREAKOUT_CHECK.equals(check.id())
+                        && ShortTermBreakoutEvidence.SOURCE.equals(check.source()) && "PASS".equals(check.status())
+                        && check.observedAt() != null && check.observedValue() != null)
+                    .findFirst()
+                    .ifPresent(check -> metrics.put("breakout", Map.of(
+                        "observation", check.observedValue(),
+                        "source", check.source(),
+                        "fetchedAt", check.observedAt()
+                    )));
                 if(!independent.forCode(signal.stockCode()).isEmpty()) {
                     metrics.put("kiwoomEvidence",independent.forCode(signal.stockCode()));
                     metrics.put("kiwoomCoverage",independent.coverage());
@@ -346,15 +458,19 @@ public class ShortTermRealtimeScanner {
             if (verdicts == null || verdicts.isEmpty()) return signals;
 
             List<ConditionSignalDto> enriched = new ArrayList<>();
-            int rank = 1;
             for (ConditionSignalDto signal : signals) {
                 EvidenceVerdict verdict = verdicts.get(signal.stockCode());
                 if (verdict == null) {
-                    enriched.add(reRank(signal, rank++));
+                    enriched.add(signal);
                     continue;
                 }
                 if (verdict.rejected()) continue;
-                enriched.add(applyVerdict(signal, verdict, rank++));
+                enriched.add(applyVerdict(signal, verdict, signal.rank()));
+            }
+            enriched.sort(Comparator.comparingInt((ConditionSignalDto signal) ->
+                signal.finalScore() + orderingBonuses.getOrDefault(signal.stockCode(), 0)).reversed());
+            for (int i = 0; i < enriched.size(); i++) {
+                enriched.set(i, reRank(enriched.get(i), i + 1));
             }
             return enriched;
         } catch (Exception e) {
@@ -417,14 +533,19 @@ public class ShortTermRealtimeScanner {
     }
 
     private static ConditionSignalDto reRank(ConditionSignalDto signal, int rank) {
-        if (signal.rank() == rank) return signal;
+        return reRank(signal, rank, new Capture(signal.capturedAt(), signal.capturePrice()));
+    }
+
+    private static ConditionSignalDto reRank(ConditionSignalDto signal, int rank, Capture capture) {
+        if (signal.rank() == rank && Objects.equals(capture.capturedAt(), signal.capturedAt())
+            && Objects.equals(capture.price(), signal.capturePrice())) return signal;
         return new ConditionSignalDto(
             signal.section(),
             signal.mode(),
             rank,
             signal.stockName(),
             signal.stockCode(),
-            signal.capturePrice(),
+            capture.price(),
             signal.currentPrice(),
             signal.highPrice(),
             signal.stopLoss(),
@@ -437,7 +558,7 @@ public class ShortTermRealtimeScanner {
             signal.evidence(),
             signal.riskFlags(),
             signal.invalidation(),
-            signal.capturedAt(), signal.conditionChecks()
+            capture.capturedAt(), signal.conditionChecks()
         );
     }
 
@@ -445,16 +566,21 @@ public class ShortTermRealtimeScanner {
         return Math.max(min, Math.min(max, value));
     }
 
-    private Candidate merge(Map<String, Candidate> candidates, KisApiService.RankedStock stock) {
+    private Candidate merge(Map<String, Candidate> candidates, KisApiService.RankedStock stock, Instant observedAt) {
         String code = normalize(stock.code());
         Candidate candidate = candidates.computeIfAbsent(code, ignored -> new Candidate());
         candidate.name = firstNonBlank(stock.name(), candidate.name);
         candidate.code = firstNonBlank(code, candidate.code);
-        candidate.currentPrice = firstNonBlank(stock.currentPrice(), candidate.currentPrice);
-        candidate.changeRateText = firstNonBlank(stock.changeRate(), candidate.changeRateText);
-        candidate.changeRate = Math.max(candidate.changeRate, parseDouble(stock.changeRate()));
-        candidate.volumeText = firstNonBlank(stock.volume(), candidate.volumeText);
-        candidate.volume = Math.max(candidate.volume, parseLong(stock.volume()));
+        double quotedChange = parseDouble(stock.changeRate());
+        if (observedAt != null && (candidate.quoteObservedAt == null || !observedAt.isBefore(candidate.quoteObservedAt))
+            && parsePrice(stock.currentPrice()) > 0 && Double.isFinite(quotedChange)) {
+            candidate.currentPrice = stock.currentPrice();
+            candidate.changeRateText = stock.changeRate();
+            candidate.changeRate = quotedChange;
+            candidate.volumeText = stock.volume();
+            candidate.volume = parseLong(stock.volume());
+            candidate.quoteObservedAt = observedAt;
+        }
         candidate.foreignNetBuy = Math.max(candidate.foreignNetBuy, stock.foreignNetBuy());
         return candidate;
     }
@@ -503,14 +629,9 @@ public class ShortTermRealtimeScanner {
     }
 
     private static double parseDouble(String value) {
-        if (value == null) return 0;
-        String normalized = value.replace("%", "").replace("+", "").replace(",", "").trim();
-        if (normalized.isBlank()) return 0;
-        try {
-            return Double.parseDouble(normalized);
-        } catch (NumberFormatException ignored) {
-            return 0;
-        }
+        if (value == null || !value.trim().matches("[+-]?[0-9]+(?:\\.[0-9]+)?%?")) return Double.NaN;
+        try { return Double.parseDouble(value.trim().replace("%", "")); }
+        catch (NumberFormatException ignored) { return Double.NaN; }
     }
 
     private static String formatPrice(String value) {
@@ -519,7 +640,7 @@ public class ShortTermRealtimeScanner {
         return NumberFormat.getInstance(Locale.KOREA).format(price);
     }
 
-    private static long parsePrice(String value) {
+    static long parsePrice(String value) {
         if (value == null || !value.trim().matches("(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)\\s*원?")) return 0;
         try {
             long price = Long.parseLong(value.trim().replace(",", "").replace("원", "").trim());
@@ -544,6 +665,7 @@ public class ShortTermRealtimeScanner {
         String changeRateText = "";
         String volumeText = "";
         double changeRate;
+        Instant quoteObservedAt;
         long volume;
         long foreignNetBuy;
         int turnoverRank;
@@ -557,6 +679,10 @@ public class ShortTermRealtimeScanner {
             return code != null && code.matches("\\d{6}") && name != null && !name.isBlank();
         }
 
+        boolean hasBreakoutChange() {
+            return changeRate >= 3 && changeRate <= 15;
+        }
+
         void calculateScore() {
             scoreBreakdown = ConditionSignalScoring.shortTerm(
                 volumeRank,
@@ -564,12 +690,13 @@ public class ShortTermRealtimeScanner {
                 foreignRank,
                 changeRate,
                 volume,
-                foreignNetBuy
+                foreignNetBuy,
+                turnoverRank
             );
             score = scoreBreakdown.finalScore();
         }
 
-        ConditionSignalDto toSignal(int rank, Capture capture, String checkedAt) {
+        ConditionSignalDto toSignal(int rank, Capture capture) {
             String price = formatPrice(currentPrice);
             String pct = changeRateText == null || changeRateText.isBlank()
                 ? formatPercent(changeRate)
@@ -580,7 +707,6 @@ public class ShortTermRealtimeScanner {
 
             List<String> evidence = new ArrayList<>();
             evidence.add("KIS 정규장 실시간 스캔");
-            if (turnoverRank > 0) evidence.add("KIS 거래대금 상위 " + turnoverRank + "위 후보 원천");
             evidence.add("거래량 " + volumeLabel);
             if (scoreBreakdown != null) {
                 evidence.addAll(scoreBreakdown.evidence());
@@ -625,7 +751,8 @@ public class ShortTermRealtimeScanner {
                 List.copyOf(riskFlags),
                 "상승률 둔화, 거래량 순위 이탈, 고점 대비 급락",
                 capture.capturedAt(),
-                ConditionCheck.withDailyChangeText("BREAKOUT", changeRateText, KIS_SOURCE, checkedAt)
+                ConditionCheck.withDailyChange("BREAKOUT", changeRate, KIS_SOURCE,
+                    quoteObservedAt == null ? null : KST_FORMATTER.format(quoteObservedAt))
             );
         }
 

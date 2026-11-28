@@ -12,8 +12,11 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.time.*;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 
 /** Market-only observations for matched-input research. Never a publication or order source. */
@@ -21,6 +24,10 @@ import java.util.*;
 public class ConditionCaptureStore {
     private static final Logger log = LoggerFactory.getLogger(ConditionCaptureStore.class);
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final long SHARED_CAP_BYTES = 128L * 1024 * 1024;
+    private static final long BREAKOUT_CAP_BYTES = 16L * 1024 * 1024;
+    private static final Set<String> BREAKOUT_KINDS = Set.of(
+        "source", "candidate_selection", "verified_publication", "realtime_snapshot");
     private final ObjectMapper mapper;
     private final KisApiService kis;
     private final Path directory;
@@ -52,33 +59,68 @@ public class ConditionCaptureStore {
     public synchronized void record(String kind, String mode, String code, Instant observedAt, Object data) {
         if (observedAt==null || kind==null || !kind.matches("[a-z_]{1,30}") || mode==null
             || !mode.matches("[A-Z][A-Z0-9_]{0,39}") || code==null || !(code.matches("[0-9]{6}") || code.equals("pool"))) return;
-        long minute=clock.instant().getEpochSecond()/60;
+        Instant recordedAt = clock.instant();
+        long minute=recordedAt.getEpochSecond()/60;
         String key=kind+":"+mode+":"+code;
-        if (Objects.equals(written.getIfPresent(key), minute)) return;
+        String sidecarKey = "breakout-sidecar:" + key;
+        boolean shared = !Objects.equals(written.getIfPresent(key), minute);
+        boolean sidecar = isBreakoutStage(kind, mode, code, data)
+            && !Objects.equals(written.getIfPresent(sidecarKey), minute);
+        if (!shared && !sidecar) return;
+        LocalDate day = recordedAt.atZone(KST).toLocalDate();
+        prune(day);
         try {
-            LocalDate day=clock.instant().atZone(KST).toLocalDate();
-            if (!day.equals(lastPruned)) {
-                try(var files=Files.list(directory)) {
-                    for(Path owned:files.filter(p -> p.getFileName().toString().matches("[0-9]{4}-[0-9]{2}-[0-9]{2}\\.jsonl"))
-                        .filter(p -> Files.isRegularFile(p,LinkOption.NOFOLLOW_LINKS)).toList()) {
-                        if(LocalDate.parse(owned.getFileName().toString().substring(0,10)).isBefore(day.minusDays(60)))
-                            Files.deleteIfExists(owned);
-                    }
-                }
-                lastPruned=day;
-            }
-            Path file=directory.resolve(day+".jsonl");
-            // Preserve existing history; stop recording explicitly if the daily disk budget is exceeded.
-            if (Files.exists(file) && Files.size(file)>128L*1024*1024) {
-                log.warn("[ConditionCapture] daily 128 MiB budget exceeded"); return;
-            }
             var row=new LinkedHashMap<String,Object>();
             row.put("schemaVersion",1); row.put("kind",kind); row.put("mode",mode); row.put("code",code);
-            row.put("observedAt",observedAt.toString()); row.put("recordedAt",clock.instant().toString());
+            row.put("observedAt",observedAt.toString()); row.put("recordedAt",recordedAt.toString());
             row.put("data",data);
-            Files.writeString(file,mapper.writeValueAsString(row)+"\n",StandardOpenOption.CREATE,StandardOpenOption.APPEND);
-            written.put(key,minute);
-        } catch(Exception e) { log.warn("[ConditionCapture] write unavailable: {}",e.getClass().getSimpleName()); }
+            byte[] line = (mapper.writeValueAsString(row) + "\n").getBytes(StandardCharsets.UTF_8);
+            // Keep the legacy log intact; its daily budget does not govern the dedicated scanner history.
+            if (sidecar && append(day + "-breakout.jsonl", line, BREAKOUT_CAP_BYTES - line.length))
+                written.put(sidecarKey, minute);
+            if (shared && append(day + ".jsonl", line, SHARED_CAP_BYTES))
+                written.put(key, minute);
+        } catch(Exception e) { log.warn("[ConditionCapture] serialization unavailable: {}",e.getClass().getSimpleName()); }
+    }
+
+    private static boolean isBreakoutStage(String kind, String mode, String code, Object data) {
+        if (!"BREAKOUT".equals(mode) || !"pool".equals(code)) return false;
+        if (BREAKOUT_KINDS.contains(kind)) return true;
+        if (!"publication".equals(kind) || !(data instanceof Map<?, ?> publication)) return false;
+        Object status = publication.get("sourceStatus");
+        return "REALTIME_SCAN".equals(status) || "REALTIME_EMPTY".equals(status);
+    }
+
+    private boolean append(String name, byte[] line, long maxExistingBytes) {
+        try {
+            Path file = directory.resolve(name);
+            if (maxExistingBytes < 0 || Files.exists(file, LinkOption.NOFOLLOW_LINKS) && Files.size(file) > maxExistingBytes) {
+                log.warn("[ConditionCapture] daily budget exceeded for {}", name);
+                return false;
+            }
+            Files.write(file, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND, LinkOption.NOFOLLOW_LINKS);
+            return true;
+        } catch (IOException e) {
+            log.warn("[ConditionCapture] write unavailable for {}: {}", name, e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
+    private void prune(LocalDate day) {
+        if (day.equals(lastPruned)) return;
+        try (var files = Files.list(directory)) {
+            for (Path owned : files.filter(p -> p.getFileName().toString()
+                    .matches("[0-9]{4}-[0-9]{2}-[0-9]{2}(?:-breakout)?\\.jsonl"))
+                .filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)).toList()) {
+                String name = owned.getFileName().toString();
+                try {
+                    if (LocalDate.parse(name.substring(0, 10)).isBefore(day.minusDays(60))) Files.deleteIfExists(owned);
+                } catch (DateTimeParseException ignored) { }
+            }
+            lastPruned = day;
+        } catch (IOException e) {
+            log.warn("[ConditionCapture] retention cleanup unavailable: {}", e.getClass().getSimpleName());
+        }
     }
     public synchronized void watch(List<ConditionSignalDto> signals) {
         watched.entrySet().removeIf(e -> Instant.parse(e.getValue()).isBefore(clock.instant().minus(Duration.ofDays(35))));
