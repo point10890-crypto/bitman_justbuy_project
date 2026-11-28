@@ -34,6 +34,11 @@ const nameOutcomeLabel: Record<KeywordSearchResponse['outcome'], string> = {
   UNAVAILABLE: '종목명 조회 불가',
   UNSUPPORTED: '지원하지 않는 종목명 검색',
 }
+const translationSourceLabels = new Map([
+  ['rules', '규칙'],
+  ['openai', 'OpenAI'],
+  ['gemini', 'Gemini'],
+])
 
 function formatNumber(value: number | null | undefined, unit: string, signed = false) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '미확인'
@@ -278,7 +283,7 @@ function EngineBody({ up }: { up: Extract<SearchUpgrade, { mode: 'engine' }> }) 
     : flowLabel ? flowLabel
     : mixed && live?.outcome === 'PARTIAL' ? `일부 자료 미확인 · 확인 범위에서 ${shown}종목 일치`
     : mixed && live?.scope.truncated ? `수급 조회 범위에서 ${shown}종목 일치`
-    : shown > 0 ? (combined ? '검색 완료 · 수급과 일봉 조건 결합' : '검색 완료 · AI 조건 해석') : '조건 일치 0건'
+    : shown > 0 ? (combined ? '검색 완료 · 수급과 일봉 조건 결합' : '검색 완료') : '조건 일치 0건'
   const notes = [
     ...(t.fallback_reason ? [t.fallback_reason] : []),
     ...t.warnings,
@@ -305,6 +310,7 @@ function EngineBody({ up }: { up: Extract<SearchUpgrade, { mode: 'engine' }> }) 
       <FlowReadiness result={live} trackingError={realtime?.trackingError} exhausted={realtime?.trackingExhausted} />
       <section className="keyword-search-scope" aria-label="검색 조건과 범위">
         <h3>적용한 조건</h3>
+        <p>조건 해석 · {translationSourceLabels.get(t.source) ?? '출처 미확인'}</p>
         <ul>
           {t.conditions.map(c => <li key={`d-${c}`}>{c}</li>)}
           {(live?.appliedConditions ?? []).map(c => <li key={`r-${c}`}>{/^결과\s+최대\s+\d+\s*종목$/.test(c) ? `수급 조회 ${c}` : c}</li>)}

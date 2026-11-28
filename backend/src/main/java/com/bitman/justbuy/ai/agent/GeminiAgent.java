@@ -24,7 +24,7 @@ import java.util.Map;
  * 담당: L3 Capital Flow + L5 Derivatives + Google Search Grounding (실시간 웹 정보).
  *
  * v2.8.6 (2026-04-29): xAI Grok team_blocked 사태로 Grok 대체.
- *  - 모델: gemini-2.5-flash (분석용 — 토큰 효율 + Grounding 지원)
+ *  - 모델: Gemini 3.5 Flash-Lite (분석용, Grounding 지원)
  *  - 도구: googleSearch (Grok 의 web_search 등가물)
  *
  * 활성 조건: bitman.ai.gemini-api-key 가 비어있지 않을 때만 빈 등록.
@@ -35,7 +35,7 @@ public class GeminiAgent implements AiAgent {
 
     private static final String BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
     // 분석용: 빠르고 저렴, Grounding 지원 (실시간 검색)
-    static final String ANALYSIS_MODEL = "gemini-2.5-flash";
+    static final String ANALYSIS_MODEL = "gemini-3.5-flash-lite";
     // 추론용 (사용 시): 더 강력하지만 비쌈
     static final String REASONING_MODEL = "gemini-2.5-pro";
 
@@ -83,11 +83,12 @@ public class GeminiAgent implements AiAgent {
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("x-goog-api-key", props.geminiApiKey());
 
             // Gemini API 요청 본문
             //  - systemInstruction: 시스템 프롬프트
             //  - contents: 사용자 메시지
-            //  - generationConfig: 출력 길이/temperature
+            //  - generationConfig: 출력 길이
             //  - tools: googleSearch (grounding)
             Map<String, Object> body = new LinkedHashMap<>();
 
@@ -100,10 +101,7 @@ public class GeminiAgent implements AiAgent {
                 "parts", List.of(Map.of("text", userMessage))
             )));
 
-            body.put("generationConfig", Map.of(
-                "maxOutputTokens", 4096,
-                "temperature", 0.7
-            ));
+            body.put("generationConfig", Map.of("maxOutputTokens", 4096));
 
             // Grounding (googleSearch) 활성 — 실시간 정보 필요한 분석에서
             if (grounding) {
@@ -112,8 +110,7 @@ public class GeminiAgent implements AiAgent {
                 body.put("tools", tools);
             }
 
-            // URL: ?key={API_KEY} (헤더 인증 아님)
-            String url = BASE_URL + "/" + model + ":generateContent?key=" + props.geminiApiKey();
+            String url = BASE_URL + "/" + model + ":generateContent";
 
             HttpEntity<String> request = new HttpEntity<>(mapper.writeValueAsString(body), headers);
             ResponseEntity<String> response = restTemplate.exchange(

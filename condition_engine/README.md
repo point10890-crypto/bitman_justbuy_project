@@ -23,7 +23,7 @@
 | `engine.py` | 검색(단계별: 통과 → 위험 제외 → 후보 → 표시)과 백테스트 |
 | `evaluation.py` | 라벨, 탐색 70% / 확인 30% 분할, h일 간격 t값, 판정 |
 | `strategies.py` | 큐레이션 전략과 상태(후보 / 레짐 조건부 / 측정 중 / 검증 탈락) |
-| `agent.py` | 자연어 → DSL. OpenAI → Gemini → 규칙 번역 순서로 시도하고, 검증을 통과한 답만 쓴다 |
+| `agent.py` | 자연어 → DSL. 규칙을 먼저 적용하고, 남은 표현은 OpenAI·Gemini가 지원 의도에 연결한다 |
 | `ledger.py` | SQLite 원장. 모든 실행의 단계별 종목, 이후 시세 기준 연구 성과, LLM 호출 기록 |
 | `api.py` | FastAPI (`127.0.0.1:8090`, `/engine/*`) |
 
@@ -58,8 +58,8 @@ Vite 가 `/engine` 을 8090 으로 프록시한다. 독립 `/lab` 라우트는 d
 ## LLM 번역기
 
 `CONDITION_ENGINE_LLM` = `auto`(기본) | `openai` | `gemini` | `none`.
-키는 `.env`, `backend/.env` 에서 읽는다. 모델은 `CONDITION_ENGINE_OPENAI_MODEL`(기본 `gpt-5.5`, Spring Boot `ChatGptAgent` 와 같은 모델), `CONDITION_ENGINE_GEMINI_MODEL`(기본 `gemini-2.5-flash`).
-LLM 이 없는 피처를 만들거나 호출이 실패하면 규칙 번역으로 넘어가고, 그 사유를 응답의 `fallback_reason` 에 남긴다.
+키는 `.env`, `backend/.env`에서 읽는다. 모델은 `CONDITION_ENGINE_GEMINI_MODEL`(기본 `gemini-3.5-flash-lite`), `CONDITION_ENGINE_OPENAI_MODEL`(기본 `gpt-5.5`)로 지정한다.
+규칙 번역에서 처리하지 못한 표현이 있으면 Gemini, OpenAI 순서로 의도를 분류한다. 응답이 남은 표현을 순서대로 모두 포함하고 등록된 의도만 사용하면 서버가 기존 규칙을 추가한다. 시장·정렬·개수 등 입력에서 읽은 기준은 그대로 적용한다. 분류가 실패하면 미해석 표현과 `fallback_reason`을 반환한다.
 호출 기록은 `GET /engine/usage` 로 본다.
 
 2026-10-14 기준 이 PC 의 상태: OpenAI 키는 `gpt-5.5` 만 접근 가능(`gpt-4o` 는 403). `.env` 의 `GEMINI_API_KEY` 와 `backend/.env` 의 `GOOGLE_API_KEY` 는 둘 다 `API_KEY_INVALID` 다.

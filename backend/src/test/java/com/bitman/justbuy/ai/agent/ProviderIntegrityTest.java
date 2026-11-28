@@ -5,6 +5,7 @@ import com.bitman.justbuy.dto.AgentResult;
 import com.bitman.justbuy.service.RuntimeAiConfigService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpEntity;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.client.ResourceAccessException;
@@ -66,6 +67,15 @@ class ProviderIntegrityTest {
         assertThat(gemini.analyze("s", "u").status()).isEqualTo("error");
         response("{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"answer\"}]}}]}");
         assertThat(gemini.analyze("s", "u").status()).isEqualTo("error");
+    }
+
+    @Test void geminiUsesTheSupportedModelAndHeaderAuthentication() {
+        response("{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"fixture answer\"}]}}]}");
+        AgentResult result = new GeminiAgent(new AiProperties("", "", "fixture-key"), rest, mapper).analyze("s", "u");
+        assertThat(result.status()).isEqualTo("success");
+        verify(rest).exchange(eq("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"),
+            any(), argThat((HttpEntity<?> request) -> "fixture-key".equals(request.getHeaders().getFirst("x-goog-api-key"))
+                && !String.valueOf(request.getBody()).contains("temperature")), eq(String.class));
     }
 
     DeepSeekAgent deepSeek(String baseUrl) {

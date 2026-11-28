@@ -317,9 +317,40 @@ it('a daily-bar query the live search refuses is answered by the engine in the s
   expect(within(matches).getByText('추정 거래대금 49,923,178,496원')).toBeTruthy()
   const checks = within(matches).getByRole('list', { name: '일봉 조건 확인' })
   expect(within(checks).getByText('관측 +3.0%')).toBeTruthy()
-  expect(within(panel).getByText('검색 완료 · AI 조건 해석')).toBeTruthy()
+  expect(within(panel).getByText('검색 완료')).toBeTruthy()
+  expect(within(panel).getByText('조건 해석 · 규칙')).toBeTruthy()
   expect(within(within(panel).getByRole('region', { name: '검색 조건과 범위' })).getByText('20일선 이격 +0.0% 초과', { selector: 'li' })).toBeTruthy()
   expect(within(panel).queryByText(/지원하지 않는 조건이 있습니다/)).toBeNull()             // the refusal is replaced, not stacked
+})
+
+it('screens a Gemini-only interpretation and identifies the model separately from the measured daily evidence', async () => {
+  const query = '완만하게 오르는 종목 7개'
+  const conditions = ['20일 수익률 0% 초과', 'ATR 비율 3.5% 이하']
+  const strategy = { ...dailyStrategy, title: query, top_n: 7, when: { all: [
+    { f: 'r20', op: '>', v: 0 }, { f: 'atr14_pct', op: '<=', v: 0.035 },
+  ] } }
+  const assumption = '완만하게 오르는 → 20일 수익률 0% 초과, ATR 비율 3.5% 이하'
+  const base = engineRow('033780', '일봉으로 확인한 종목')
+  const row = { ...base, snapshot: { ...base.snapshot, r20: 0.03 }, condition_checks: [
+    { label: conditions[0], detail: '관측 +3.0%' }, { label: conditions[1], detail: '관측 2.2%' },
+  ] }
+  const fetchMock = routed({
+    translate: translated({ source: 'gemini', strategy, conditions, assumptions: [assumption] }),
+    screen: { ...screenResponse([row]), strategy, conditions },
+    keyword: q => ({ ...keywordResponse(q), outcome: 'UNSUPPORTED', unsupportedTerms: ['완만하게 오르는'], matches: [] }),
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  render(tree())
+  const panel = within(await search(query))
+  const matches = await panel.findByRole('region', { name: '조건 일치 종목' })
+  expect(panel.getByText('조건 해석 · Gemini')).toBeTruthy()
+  expect(panel.getByText(assumption)).toBeTruthy()
+  expect(panel.getByText('일봉 2026-10-13 확정 종가')).toBeTruthy()
+  expect(within(matches).getByText('일봉으로 확인한 종목')).toBeTruthy()
+  expect(within(matches).getByText('종가 180,100원')).toBeTruthy()
+  expect(within(matches).getByText('관측 +3.0%')).toBeTruthy()
+  const screenRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/api/engine/screen'))
+  expect(JSON.parse(String(screenRequest?.[1]?.body))).toEqual({ strategy })
 })
 
 it('does not execute a partially translated condition when the live parser refuses it', async () => {

@@ -1,6 +1,6 @@
 /** BitMan Service Worker - freshness-first app shell */
 
-const CACHE_NAME = 'bitman-v20261128-keyword-recovery-r31'
+const CACHE_NAME = 'bitman-v20261128-gemini-keyword-r32'
 const SHELL_ASSETS = [
   '/manifest.json',
   '/install.html',
