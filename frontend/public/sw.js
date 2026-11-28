@@ -1,6 +1,6 @@
 /** BitMan Service Worker - freshness-first app shell */
 
-const CACHE_NAME = 'bitman-v20261128-jongga-preclose-r30'
+const CACHE_NAME = 'bitman-v20261128-keyword-recovery-r31'
 const SHELL_ASSETS = [
   '/manifest.json',
   '/install.html',

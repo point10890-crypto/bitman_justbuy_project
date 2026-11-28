@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from . import config, dsl
-from .features import MA_WINDOWS, REGISTRY
+from .features import MA_WINDOWS, REGISTRY, SURGE_PULLBACK_REBOUND_ASSUMPTION
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +64,10 @@ NUMBER = r"(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?"
 MA = re.compile(r"(\d+)\s*일\s*(?:이평선|이동평균선|이평|선)\s*(위|아래|상향\s*돌파|하향\s*(?:이탈|돌파)|돌파|이탈|지지)"
                 r"(?=$|\W|(?:에|에서|인|이고|이며|이면서|인데|한|하는|하고)(?:$|\W))")
 MA_ALIGNMENT = re.compile(r"(?:(?:이평선|이동평균선)\s*)?정배열")
+SURGE_PULLBACK_REBOUND = re.compile(
+    r"급등\s*(?:한\s*)?(?:이후|후|뒤)\s*눌림(?:\s*목)?\s*(?:구간\s*)?"
+    r"(?:(?:이후|후|뒤|에서)\s*)?반등(?:하는|한|중인)?"
+)
 PRICE = re.compile(rf"(?:종가\s*)?(?<![\d.,+-])({NUMBER})\s*(만원|천원|원)\s*({COMPARATOR})")
 VALUE = re.compile(rf"거래대금\s*({NUMBER})\s*(조원?|억원?|만원?|원)\s*({COMPARATOR})?")
 VOLUME_RATIO = re.compile(rf"거래량\s*(?:20\s*(?:거래일|일)\s*평균\s*(?:대비(?:의)?|의)?\s*)?({NUMBER})\s*배\s*({COMPARATOR})?")
@@ -168,7 +172,11 @@ class RuleTranslator:
             take(m)
             leaves.append({"f": "ma_aligned", "op": "==", "v": 1})
             assumptions.append("정배열은 5일 이동평균 > 20일 이동평균 > 60일 이동평균으로 판정합니다")
-        if (m := re.search(r"(얕은 )?눌림", t)):
+        if (m := SURGE_PULLBACK_REBOUND.search(t)):
+            take(m)
+            leaves.append({"f": "surge_pullback_rebound", "op": "==", "v": 1})
+            assumptions.append(SURGE_PULLBACK_REBOUND_ASSUMPTION)
+        elif (m := re.search(r"(얕은 )?눌림(?:목)?", t)):
             take(m)
             shallow = bool(m.group(1))
             leaves.append({"between": ["dd20", -0.06 if shallow else -0.10, -0.02 if shallow else -0.03]})

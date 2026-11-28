@@ -342,6 +342,45 @@ it('does not execute a partially translated condition when the live parser refus
   expect((input as HTMLInputElement).value).toBe('20일선 위이며 배당수익률 3% 이상')
 })
 
+it('offers a separate stock-name search when a condition phrase falls back to an empty name lookup', async () => {
+  const query = '급등후 눌림목 반등 종목'
+  const fetchMock = routed({
+    translate: { ...engineMiss, unparsed: ['급등후 눌림목 반등'] },
+    keyword: q => ({ ...keywordResponse(q), outcome: 'EMPTY',
+      appliedConditions: ['종목명에 급등후 눌림목 반등 포함', '결과 최대 10종목'],
+      scope: { ...keywordResponse(q).scope, matchedCount: 0 }, matches: [] }),
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  render(tree())
+  const panel = within(await search(query))
+  expect(await panel.findByText('일봉 조건 해석이 필요합니다')).toBeTruthy()
+  expect(panel.queryByText('조회한 범위에서 조건에 맞는 종목이 없습니다.')).toBeNull()
+  expect(panel.queryByText('종목명에 급등후 눌림목 반등 포함')).toBeNull()
+
+  fireEvent.click(panel.getByRole('button', { name: '종목명으로 검색' }))
+
+  expect(panel.getByText('종목명 검색 0건')).toBeTruthy()
+  expect(panel.getByText('조회한 범위에서 해당 이름을 포함한 종목이 없습니다.')).toBeTruthy()
+  expect(panel.queryByText('조건 일치 0건')).toBeNull()
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/api/analysis/keyword-search'))).toHaveLength(1)
+})
+
+it('shows a verified stock-name search directly even when there is no daily strategy', async () => {
+  const fetchMock = routed({
+    translate: engineMiss,
+    keyword: query => ({ ...keywordResponse(query, '삼성전자'),
+      appliedConditions: ['종목명에 삼성전자 포함', '결과 최대 10종목'] }),
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  render(tree())
+  const panel = within(await search('삼성전자'))
+  const matches = await panel.findByRole('region', { name: '종목명 검색 결과' })
+  expect(within(matches).getByText('삼성전자')).toBeTruthy()
+  expect(panel.queryByRole('button', { name: '종목명으로 검색' })).toBeNull()
+  expect(panel.queryByText('일봉 조건 해석이 필요합니다')).toBeNull()
+  expect(fetchMock.mock.calls.some(([url]) => /\/api\/engine\/screen$/.test(url))).toBe(false)
+})
+
 it('retains independently verified live matches and skips a partial daily backtest', async () => {
   const fetchMock = routed({
     translate: translated({ unsupported: ['일봉에서 배당수익률 확인 불가'] }),

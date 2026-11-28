@@ -155,6 +155,20 @@ describe('keyword search evidence presentation', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(onClose).toHaveBeenCalledTimes(1)
   })
+
+  it('keeps stocks from an ambiguous name match behind explicit confirmation after an engine failure', () => {
+    const query = '가격 5만원 이하 검증'
+    const ambiguous = { ...result, query, appliedConditions: ['현재가 50,000원 이하', '종목명에 검증 포함'] }
+    render(<KeywordSearchPanel query={query} loading={false} error={null} result={ambiguous}
+      onClose={vi.fn()} upgrade={{ status: 'failed', message: '일봉 조건검색을 완료하지 못했습니다.' }} />)
+    expect(screen.getByRole('alert').textContent).toContain('일봉 조건검색을 완료하지 못했습니다.')
+    expect(screen.queryByText('검증 종목')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '종목명으로 검색' }))
+
+    expect(within(screen.getByRole('region', { name: '종목명 검색 결과' })).getByText('검증 종목')).toBeTruthy()
+    expect(screen.queryByRole('region', { name: '조건 일치 종목' })).toBeNull()
+  })
 })
 
 const mixed = (live: KeywordSearchResponse): Extract<SearchUpgrade, { mode: 'engine' }> => ({

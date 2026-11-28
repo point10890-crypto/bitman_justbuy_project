@@ -70,6 +70,45 @@ def test_ma_alignment_uses_the_order_of_averages():
     assert features["ma_aligned"].iloc[-1][[aligned, reverse]].tolist() == [1, 0]
 
 
+def test_surge_pullback_rebound_uses_ordered_sessions_and_inclusive_thresholds():
+    bars = make_bars(n_days=26)
+    oldest, newest, expired, today_surge, no_pullback, higher_surge, no_rebound = SEMIS[:7]
+    # Close 270,000 is an exact 8% surge from 250,000. Both bounds of the pullback range appear.
+    changes = {
+        oldest: {-21: 270_000, -2: 261_900, -1: 264_519},
+        newest: {-3: 270_000, -2: 243_000, -1: 245_430},
+        expired: {-22: 270_000, -2: 261_900, -1: 264_519},
+        today_surge: {-1: 270_000},
+        no_pullback: {-5: 243_000, -3: 270_000, -2: 272_000, -1: 274_720},
+        higher_surge: {-8: 300_000, -5: 270_000, -2: 261_900, -1: 264_519},
+        no_rebound: {-3: 270_000, -2: 261_900, -1: 264_518},
+    }
+    for code, scenario in changes.items():
+        prices = [250_000] * 26
+        for i, price in scenario.items():
+            prices[i] = price
+        for column in ("open", "high", "low", "close"):
+            bars.loc[bars["code"] == code, column] = prices
+    feature = compute_features(panel_from(bars))["surge_pullback_rebound"]
+    assert feature.iloc[-1][list(changes)].tolist() == [1, 1, 0, 0, 0, 0, 0]
+    assert feature.iloc[20][list(changes)].isna().all()
+
+
+def test_surge_pullback_rebound_does_not_fill_a_halt_or_action_jump():
+    bars = make_bars(n_days=26)
+    valid, halted, split = SEMIS[:3]
+    closes = [250_000] * 19 + [270_000] + [250_000] * 4 + [261_900, 264_519]
+    for code in (valid, halted, split):
+        prices = [500_000] * 6 + closes[6:] if code == split else closes
+        for column in ("open", "high", "low", "close"):
+            bars.loc[bars["code"] == code, column] = prices
+    dates = sorted(bars["date"].unique())
+    bars.loc[(bars["code"] == halted) & (bars["date"] == dates[5]), "volume"] = 0
+    feature = compute_features(panel_from(bars))["surge_pullback_rebound"].iloc[-1]
+    assert feature[valid] == 1
+    assert feature[[halted, split]].isna().all()
+
+
 def test_volume_ratio_requires_the_claimed_twenty_previous_sessions():
     bars = make_bars(n_days=50)
     code = SEMIS[0]

@@ -69,9 +69,11 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(now) })
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 it('does not reinterpret an exact stock-name lookup as an unrelated daily strategy', async () => {
-  const keyword = response(['005930'], {
-    query: '삼성전자', outcome: 'COMPLETE', appliedConditions: ['종목명에 삼성전자 포함', '결과 최대 10종목'],
-  })
+  const lookup = response(['005930'])
+  const keyword = { ...lookup, query: '삼성전자', outcome: 'COMPLETE' as const,
+    appliedConditions: ['종목명에 삼성전자 포함', '결과 최대 10종목'],
+    matches: [{ ...lookup.matches[0], name: '삼성전자' }],
+  }
   const fetchMock = routes(complete(), () => complete())
   vi.stubGlobal('fetch', fetchMock)
   const { result } = renderHook(() => useSearchUpgrade('삼성전자', { result: keyword, loading: false, error: null }))
@@ -79,6 +81,19 @@ it('does not reinterpret an exact stock-name lookup as an unrelated daily strate
   expect(result.current).toMatchObject({ status: 'done', mode: 'keyword', backtest: null })
   expect(requestPaths(fetchMock)).not.toContain('/api/engine/screen')
   expect(requestPaths(fetchMock)).not.toContain('/api/engine/backtest')
+})
+
+it('runs supported daily conditions when the name fallback found no listed name', async () => {
+  const query = '급등후 눌림목 반등'
+  const keyword = response([], {
+    query, outcome: 'EMPTY', appliedConditions: [`종목명에 ${query} 포함`, '결과 최대 10종목'],
+  })
+  const fetchMock = routes(complete(), () => complete())
+  vi.stubGlobal('fetch', fetchMock)
+  const { result } = renderHook(() => useSearchUpgrade(query, { result: keyword, loading: false, error: null }))
+  await tick()
+  expect(result.current).toMatchObject({ status: 'done', mode: 'engine' })
+  expect(requestPaths(fetchMock)).toContain('/api/engine/screen')
 })
 
 it.each(['engine', 'keyword'] as const)('shows %s results while historical analysis is pending and enriches them later', async mode => {

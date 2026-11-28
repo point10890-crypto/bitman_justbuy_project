@@ -32,6 +32,10 @@ class FeatureDef:
 
 REGISTRY: dict[str, FeatureDef] = {}
 MA_WINDOWS = (5, 20, 60, 120)
+SURGE_PULLBACK_REBOUND_ASSUMPTION = (
+    "완료 일봉 기준, 2~20거래일 전 중 전일 대비 8% 이상 오른 날의 최고 종가를 기준으로 "
+    "직전 거래일 종가가 3~10% 낮고 최신 거래일 종가가 직전 거래일보다 1% 이상 오르면 충족합니다"
+)
 
 
 def _reg(d: FeatureDef) -> None:
@@ -69,6 +73,9 @@ for d in [
     FeatureDef("dd20", "20일 고가 대비", "ratio", 20, "종가 / 20일 최고가 - 1 (0 = 고가, -0.05 = 고가 대비 5% 아래)",
                "견고한 양의 신호: 고가에 가까울수록 이후 수익이 높았다 (5일 IC +0.053 / +0.083)",
                '{"between":["dd20",-0.08,-0.02]}'),
+    FeatureDef("surge_pullback_rebound", "급등 후 눌림목 반등", "flag", 22,
+               SURGE_PULLBACK_REBOUND_ASSUMPTION,
+               example='{"f":"surge_pullback_rebound","op":"==","v":1}'),
     FeatureDef("dd120", "120일 고가 대비", "ratio", 120, "종가 / 120일 최고가 - 1", "대체로 양의 신호"),
     FeatureDef("new_high120", "120일 신고가", "flag", 120, "종가가 직전 119일 최고 종가 이상이면 1",
                "거래량 동반 신고가 돌파는 음수(5일 -2.47%)"),
@@ -131,6 +138,7 @@ def compute_features(panel: Panel) -> dict[str, pd.DataFrame]:
     # With the same positive close, a smaller gap means a higher moving average.
     f["ma_aligned"] = (gap5.lt(gap20) & gap20.lt(gap60)).where(gap5.notna() & gap20.notna() & gap60.notna())
     f["dd20"] = g(c / h.rolling(20, min_periods=20).max() - 1, 20)
+    f["surge_pullback_rebound"] = g(_surge_pullback_rebound(c, prev_c), 22)
     f["dd120"] = g(c / h.rolling(120, min_periods=120).max() - 1, 120)
     prior_hi = c.shift(1).rolling(119, min_periods=119).max()
     f["new_high120"] = g((c >= prior_hi).astype(float).where(prior_hi.notna() & c.notna()), 120)
@@ -151,6 +159,20 @@ def compute_features(panel: Panel) -> dict[str, pd.DataFrame]:
     f["is_kospi"] = pd.DataFrame(np.tile((market == "KOSPI").to_numpy(float), (len(c), 1)), index=c.index, columns=c.columns).where(c.notna())
     f["is_kosdaq"] = pd.DataFrame(np.tile((market == "KOSDAQ").to_numpy(float), (len(c), 1)), index=c.index, columns=c.columns).where(c.notna())
     return {k: frame.astype(F32) for k, frame in f.items()}
+
+
+def _surge_pullback_rebound(close: pd.DataFrame, previous: pd.DataFrame) -> pd.DataFrame:
+    # Shift the eligible surge closes before taking the maximum of sessions t-20 through t-2.
+    # Compare prices with integer percentage multipliers to include exact boundaries.
+    close100 = close * 100
+    surged = close100.ge(previous * 108)
+    surge_peak = close.where(surged).shift(2).rolling(19, min_periods=1).max()
+    previous100 = previous * 100
+    pulled_back = previous100.ge(surge_peak * 90) & previous100.le(surge_peak * 97)
+    rebounded = close100.ge(previous * 101)
+    # The oldest surge needs the preceding close at t-21; trading halts are missing bars.
+    observed = close.gt(0).rolling(22, min_periods=22).sum().eq(22)
+    return (pulled_back & rebounded).where(observed)
 
 
 def add_quality_score(feats: dict[str, pd.DataFrame], universe: pd.DataFrame) -> None:

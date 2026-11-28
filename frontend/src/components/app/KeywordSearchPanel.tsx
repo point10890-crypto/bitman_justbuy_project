@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getFlowCoverage, getSearchProgress, type KeywordSearchMatch, type KeywordSearchResponse } from '../../api/keywordSearchApi'
 import type { DailyConditionCheck, RiskCheckItem } from '../../api/engineApi'
-import { canVerifyKeywordConditions, fellBackToNameSearch, type SearchUpgrade, type TranslationIssue } from '../../hooks/useSearchUpgrade'
+import { canVerifyKeywordConditions, fellBackToNameSearch, isExactNameLookup, type SearchUpgrade, type TranslationIssue } from '../../hooks/useSearchUpgrade'
 import { DailyConditionEvidence, DailyEvidence, EngineMatchCard, PastPerformance } from './SearchUpgradeViews'
 
 interface KeywordSearchPanelProps {
@@ -26,6 +26,13 @@ const outcomeMessage: Partial<Record<KeywordSearchResponse['outcome'], string>> 
   EMPTY: '조회한 범위에서 조건에 맞는 종목이 없습니다.',
   UNAVAILABLE: '실데이터를 조회하지 못했습니다. 잠시 후 다시 검색해 주세요.',
   UNSUPPORTED: '지원하지 않는 조건이 있습니다. 아래 조건을 바꿔 다시 검색해 주세요.',
+}
+const nameOutcomeLabel: Record<KeywordSearchResponse['outcome'], string> = {
+  COMPLETE: '종목명 조회 완료',
+  PARTIAL: '종목명 검색 일부 확인',
+  EMPTY: '종목명 검색 0건',
+  UNAVAILABLE: '종목명 조회 불가',
+  UNSUPPORTED: '지원하지 않는 종목명 검색',
 }
 
 function formatNumber(value: number | null | undefined, unit: string, signed = false) {
@@ -196,9 +203,12 @@ function KeywordBody({ result: initialResult, upgrade }: { result: KeywordSearch
   const isNameLookup = fellBackToNameSearch(result)
   const isPartialMatch = result.outcome === 'PARTIAL' && result.unsupportedTerms.length > 0
   const matchTitle = isNameLookup ? '종목명 검색 결과' : isPartialMatch ? '확인한 조건의 후보' : '조건 일치 종목'
-  const label = isNameLookup ? '종목명으로 검색' : isPartialMatch ? '일부 조건만 확인' : canUseFlowLabel
+  const label = isNameLookup ? nameOutcomeLabel[result.outcome] : isPartialMatch ? '일부 조건만 확인' : canUseFlowLabel
     ? flowReadinessLabel(result, result.matches.length, enriched?.trackingError, enriched?.trackingExhausted) ?? outcomeLabel[result.outcome]
     : outcomeLabel[result.outcome]
+  const emptyMessage = isNameLookup && result.outcome === 'EMPTY'
+    ? '조회한 범위에서 해당 이름을 포함한 종목이 없습니다.' : outcomeMessage[result.outcome]
+  const matchCountLabel = isNameLookup ? '종목명 일치' : isPartialMatch ? '확인한 조건에 일치' : '조건 일치'
   const showMatches = result.matches.length > 0 && (isNameLookup || isPartialMatch || canVerifyKeywordConditions(result))
   return (
     <>
@@ -206,7 +216,7 @@ function KeywordBody({ result: initialResult, upgrade }: { result: KeywordSearch
         <strong>{label}</strong>
         <span>조회 시각 {formatKstTimestamp(result.fetchedAt)}</span>
       </div>
-      {outcomeMessage[result.outcome] && <p className="keyword-search-empty">{outcomeMessage[result.outcome]}</p>}
+      {emptyMessage && <p className="keyword-search-empty">{emptyMessage}</p>}
       <FlowReadiness result={result} trackingError={enriched?.trackingError} exhausted={enriched?.trackingExhausted} />
       {result.providers && result.providers.length > 0 && (
         <section className="keyword-search-scope" aria-label="조회 출처와 상태">
@@ -231,7 +241,7 @@ function KeywordBody({ result: initialResult, upgrade }: { result: KeywordSearch
           ? <ul>{result.appliedConditions.map((condition, index) => <li key={index}>{condition}</li>)}</ul>
           : <p>적용한 조건이 없습니다.</p>}
         <p>검색 범위: {result.scope.label}</p>
-        <p>시세 확인 {result.scope.examinedCount.toLocaleString('ko-KR')}개 · 시세 조건 통과 {result.scope.eligibleCount.toLocaleString('ko-KR')}개 · {isPartialMatch ? '확인한 조건에 일치' : '조건 일치'} {result.scope.matchedCount.toLocaleString('ko-KR')}개</p>
+        <p>시세 확인 {result.scope.examinedCount.toLocaleString('ko-KR')}개 · 시세 조건 통과 {result.scope.eligibleCount.toLocaleString('ko-KR')}개 · {matchCountLabel} {result.scope.matchedCount.toLocaleString('ko-KR')}개</p>
         {result.scope.truncated && <p className="keyword-search-caution">검색 범위 제한</p>}
       </section>
       {(result.unsupportedTerms.length > 0 || result.warnings.length > 0) && (
@@ -326,6 +336,7 @@ function EngineBody({ up }: { up: Extract<SearchUpgrade, { mode: 'engine' }> }) 
 export function KeywordSearchPanel({ query, loading, error, result, onClose, onEdit, upgrade }: KeywordSearchPanelProps) {
   const closeRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
+  const [openedNameLookup, setOpenedNameLookup] = useState<KeywordSearchResponse | null>(null)
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     closeRef.current?.focus()
@@ -351,6 +362,11 @@ export function KeywordSearchPanel({ query, loading, error, result, onClose, onE
 
   const engineLed = upgrade?.status === 'done' && upgrade.mode === 'engine' ? upgrade : null
   const upgrading = upgrade?.status === 'working' && !loading
+  const exactNameLookup = isExactNameLookup(result, query)
+  const hasNameFallback = fellBackToNameSearch(result) && !exactNameLookup
+  const nameFallbackOpen = hasNameFallback && openedNameLookup === result
+  const showKeywordResult = result && !loading && (exactNameLookup || nameFallbackOpen
+    || !hasNameFallback && (!upgrading || canVerifyKeywordConditions(result)))
 
   return (
     <div ref={dialogRef} className="maker-analysis-panel keyword-search-panel" role="dialog" aria-modal="true" aria-label="실데이터 조건검색">
@@ -364,7 +380,7 @@ export function KeywordSearchPanel({ query, loading, error, result, onClose, onE
         </header>
         <div className="maker-analysis-body keyword-search-body">
           {loading && <div className="analysis-loading" role="status">실데이터를 조회하고 조건을 확인하고 있습니다.</div>}
-          {upgrading && (
+          {upgrading && !exactNameLookup && (
             <div className="analysis-loading" role="status">일봉으로 확인할 수 있는 조건을 해석하고 있습니다.</div>
           )}
           {engineLed ? <EngineBody up={engineLed} /> : (
@@ -373,7 +389,13 @@ export function KeywordSearchPanel({ query, loading, error, result, onClose, onE
               {error && !upgrading && <div className="auth-error" role="alert">{error}</div>}
               {upgrade?.status === 'blocked' && <TranslationLimits issue={upgrade.issue} blocked onEdit={onEdit} />}
               {upgrade?.status === 'failed' && <div className="auth-error" role="alert">{upgrade.message}</div>}
-              {result && !loading && (!upgrading || canVerifyKeywordConditions(result)) && <KeywordBody result={result} upgrade={upgrade} />}
+              {hasNameFallback && !loading && !upgrading && (
+                <button className="keyword-edit-button" type="button" aria-expanded={nameFallbackOpen}
+                  onClick={() => setOpenedNameLookup(nameFallbackOpen ? null : result)}>
+                  {nameFallbackOpen ? '종목명 검색 접기' : '종목명으로 검색'}
+                </button>
+              )}
+              {showKeywordResult && <KeywordBody result={result} upgrade={upgrade} />}
             </>
           )}
         </div>

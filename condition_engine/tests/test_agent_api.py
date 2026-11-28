@@ -58,6 +58,29 @@ def test_rule_translator_full_sentence():
     assert t.strategy["guard"]["exclude_risk"] == ["chase", "high_vol"]
 
 
+@pytest.mark.parametrize("text", ["급등후 눌림목 반등 종목", "급등 한 뒤 눌림목에서 반등한 종목"])
+def test_surge_pullback_rebound_is_a_complete_ordered_condition_without_ai(text):
+    class UnexpectedProvider:
+        def complete_json(self, system, user):
+            pytest.fail("a complete ordered condition should use the deterministic translator")
+
+    t = LlmTranslator(UnexpectedProvider()).translate(text)
+    assert t.source == "rules" and t.error is None and not t.unparsed and not t.unsupported
+    assert leaves(t.strategy) == [{"f": "surge_pullback_rebound", "op": "==", "v": 1}]
+    assert t.strategy["guard"]["exclude_risk"] == ["chase", "high_vol"]
+    assert any("8%" in a and "3~10%" in a and "1%" in a for a in t.assumptions)
+
+
+def test_surge_pullback_rebound_composes_with_supported_conditions_and_limits():
+    t = RuleTranslator().translate("코스닥 급등 후 눌림목 뒤 반등, 거래량 1.5배 5개")
+    assert not t.unparsed and not t.unsupported
+    assert {"market_in": ["KOSDAQ"]} in leaves(t.strategy)
+    assert {"f": "volr", "op": ">=", "v": 1.5} in leaves(t.strategy)
+    assert t.strategy["top_n"] == 5
+    t = RuleTranslator().translate("급등 후 눌림목 반등, 배당 3% 이상")
+    assert t.strategy is None and t.unsupported
+
+
 def test_rule_translator_keeps_both_bounds():
     t = RuleTranslator().translate("거래대금 100억 초과, 거래대금 200억 이하")
     assert leaves(t.strategy) == [
@@ -283,6 +306,15 @@ def test_translate_then_screen_then_backtest(client):
     assert "run_id" in s and s["counts"]["published"] == len(s["results"])
     b = client.post("/engine/backtest", json={"strategy": t["strategy"]}).json()
     assert b["horizons"]["5"]["verdict"]["label"]
+
+
+def test_surge_pullback_rebound_api_executes_the_complete_strategy(client):
+    translation = client.post("/engine/translate", json={"text": "급등후 눌림목 반등 종목"}).json()
+    assert translation["strategy"] and not translation["unparsed"]
+    response = client.post("/engine/screen", json={"strategy": translation["strategy"]})
+    assert response.status_code == 200
+    row = response.json()
+    assert row["as_of"] and row["counts"]["published"] == len(row["results"])
 
 
 def test_library_strategy_runs_and_retired_one_is_refused(client):

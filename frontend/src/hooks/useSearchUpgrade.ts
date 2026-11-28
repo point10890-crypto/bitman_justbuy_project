@@ -86,11 +86,13 @@ export function fellBackToNameSearch(result: KeywordSearchResponse | null) {
   return !!result && result.appliedConditions.some(c => c.startsWith('종목명에'))
 }
 
-function isExactNameLookup(result: KeywordSearchResponse | null, query: string) {
-  if (!result || result.unsupportedTerms.length) return false
-  const normalize = (input: string) => input.trim().replace(/\s+/g, ' ').toLowerCase()
+export function isExactNameLookup(result: KeywordSearchResponse | null, query: string) {
+  if (!result || result.unsupportedTerms.length || !query.trim()) return false
+  const normalize = (input: string) => input.replace(/\s+/g, '').toLowerCase()
+  const term = normalize(query)
   const conditions = result.appliedConditions.filter(condition => !/^결과 최대 \d+종목$/.test(condition))
-  return conditions.length === 1 && normalize(conditions[0]) === `종목명에 ${normalize(query)} 포함`
+  return conditions.length === 1 && normalize(conditions[0]) === `종목명에${term}포함`
+    && result.matches.some(match => normalize(match.name).includes(term))
 }
 
 export function canVerifyKeywordConditions(result: KeywordSearchResponse | null) {
