@@ -73,6 +73,52 @@ it('manual section rows use the same response timestamp and yield to a later fee
   expect(card.getByText(/12:00 기준/)).toBeTruthy()
 })
 
+const precloseSection = (sourceStatus: string, hasSignals: boolean): ConditionSectionResponse => {
+  const sample = section('장마감 전 검증 종목', '2026-10-12T15:11:00+09:00')
+  return { ...sample, key: 'closingBet', slug: 'closing-bet', title: '종가매매', mode: 'JONGGA_V2', sourceStatus,
+    endpoint: '/api/conditions/closing-bet',
+    signals: hasSignals ? [{ ...sample.signals[0], section: 'closingBet', mode: 'JONGGA_V2', capturePrice: '12,300', currentPrice: '12,300' }] : [] }
+}
+
+it.each([
+  ['CLOSING_PRECLOSE', '장마감 전 포착'],
+  ['CLOSING_PRECLOSE_PARTIAL', '장마감 전 일부 확인'],
+  ['CLOSING_PRECLOSE_LAST', '장마감 전 마지막 포착'],
+])('displays measured preclose columns and status for %s', (status, label) => {
+  main.sections.closingBet = precloseSection(status, true)
+
+  const { container } = render(tree())
+  const card = within(container.querySelector('#closing-bet') as HTMLElement)
+  const row = card.getByRole('button', { name: /장마감 전 검증 종목/ })
+  expect(card.getByText(label, { exact: false })).toBeTruthy()
+  expect(card.getByText('정규장 15:06·15:11·15:16 스캔 · 완료 분봉 기준')).toBeTruthy()
+  expect(row.querySelector('[data-mobile-label="포착가"]')?.textContent).toBe('12,300')
+  expect(row.querySelector('[data-mobile-label="현재가"]')?.textContent).toBe('12,300')
+  expect(row.querySelector('[data-mobile-label="당일 등락률"]')?.textContent).toBe('+5.21%')
+  expect(card.queryByText('목표가')).toBeNull()
+  expect(card.queryByText('손절가')).toBeNull()
+  expect(card.getByRole('button', { name: '기존 종가매매 성과 보기' })).toBeTruthy()
+})
+
+it.each([
+  ['CLOSING_PRECLOSE_EMPTY', '장마감 전 포착 0건', '확인한 범위에 장마감 전 조건을 충족한 종목이 없습니다.'],
+  ['CLOSING_PRECLOSE_LAST_EMPTY', '장마감 전 마지막 포착 0건', '마지막 검색에서 조건을 충족한 종목이 없습니다.'],
+  ['CLOSING_PRECLOSE_UNAVAILABLE', '장마감 전 자료 미확인', '필요한 자료를 확인할 수 없어 후보 표시를 보류했습니다.'],
+  ['CLOSING_PRECLOSE_PARTIAL', '장마감 전 일부 확인', '일부 종목의 자료를 확인하지 못했습니다.'],
+])('keeps preclose %s explicit when there are no rows', (status, label, message) => {
+  main.sections.closingBet = { ...precloseSection(status, false), latestAnalysis: {
+    checkedAt: '2026-10-12T15:00:00+09:00', outcome: 'COMPLETE', agentsUsed: 1, agentsSucceeded: 1, publishedCount: 3,
+  } }
+
+  const { container } = render(tree())
+  const card = within(container.querySelector('#closing-bet') as HTMLElement)
+  expect(card.getByText(label, { exact: false })).toBeTruthy()
+  expect(card.getByText(message)).toBeTruthy()
+  expect(card.getByText(/오늘 15:11 기준/)).toBeTruthy()
+  expect(card.queryByText(/후보 3개를 저장했습니다/)).toBeNull()
+  expect(card.getByText('당일 등락률')).toBeTruthy()
+})
+
 it('a section refresh started against an older feed cannot replace a later feed', async () => {
   let resolve!: (value: ConditionSectionResponse) => void
   const pending = new Promise<ConditionSectionResponse>(res => { resolve = res })

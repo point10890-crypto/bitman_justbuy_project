@@ -4,6 +4,7 @@ import com.bitman.justbuy.dto.AnalysisResponse;
 import com.bitman.justbuy.dto.StockPick;
 import com.bitman.justbuy.dto.condition.ConditionCheck;
 import com.bitman.justbuy.dto.condition.ConditionSection;
+import com.bitman.justbuy.dto.condition.ConditionSectionResponse;
 import com.bitman.justbuy.dto.condition.ConditionSignalDto;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,30 @@ import static org.mockito.Mockito.*;
 
 class MainConditionLiquidityTest {
     private static final Instant SCAN_AT = Instant.parse("2026-11-24T02:00:00Z");
+
+    @Test void closingPrecloseResultsReachTheApiWithoutRequeryOrReplacementByLegacyData() {
+        var preclose = mock(JonggaPrecloseScanner.class);
+        var legacy = mock(JonggaV2SearchService.class);
+        var liquidity = mock(ConditionLiquidityService.class);
+        var pipeline = mock(ConditionSearchPipeline.class);
+        var service = new MainConditionService(pipeline, null, legacy);
+        service.configureJonggaPreclose(preclose);
+        service.configureLiquidity(liquidity);
+        var section = ConditionSection.CLOSING_BET;
+        var at = "2026-11-30T15:16:27+09:00";
+        var signal = new ConditionSignalDto(section.responseKey(), section.legacyMode(), 1, "검증 종목",
+            "005930", "10,600", "10,600", "-", "-", "+6.00%", "마감 전 포착", 95, 0, 95,
+            "마감 전 강세 지속", List.of(), List.of(), "", at);
+        var detected = new ConditionSectionResponse(section.responseKey(), section.slug(), section.title(),
+            section.legacyMode(), "/api/conditions/closing-bet", at, JonggaPrecloseScanner.POSITIVE, List.of(signal));
+        var empty = new ConditionSectionResponse(section.responseKey(), section.slug(), section.title(),
+            section.legacyMode(), "/api/conditions/closing-bet", at, JonggaPrecloseScanner.EMPTY, List.of());
+        when(preclose.section()).thenReturn(Optional.of(detected), Optional.of(empty));
+
+        assertThat(service.getSection("closing-bet")).isSameAs(detected);
+        assertThat(service.getSection("closing-bet")).isSameAs(empty);
+        verifyNoInteractions(legacy, liquidity, pipeline);
+    }
 
     @Test void preservesMeasuredShortTermPublicationWithoutRepeatingLiquidity() {
         var scanner = mock(ShortTermRealtimeScanner.class);

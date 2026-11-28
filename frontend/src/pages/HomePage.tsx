@@ -97,21 +97,22 @@ function maskValue(value: string) {
   return `${value[0]}${value.slice(1).replace(/[가-힣A-Za-z0-9]/g, 'X')}`
 }
 
-function rowsFromCondition(section: ConditionSectionResponse | undefined, fallbackRows: Section['rows']) {
+function rowsFromCondition(section: ConditionSectionResponse | undefined, fallbackRows: Section['rows'], preclose: boolean) {
   // API 응답이 없을 때 예시 데이터를 보여주면 PRO 회원이 장애 중에 가짜 수치를
   // 실제 포착으로 오인한다. 빈 목록을 돌려 '데이터 준비 중' 상태를 노출한다.
   void fallbackRows
   if (!section) return []
   if (!section.signals?.length) return []
   const engine = isEngineSection(section)
+  const riskPrices = !engine && !preclose && usesRiskPriceColumns(section)
   return section.signals.slice(0, 3).map(signal => ({
     name: signal.stockName,
     signal,
     code: signal.stockCode,
-    a: signal.capturePrice || signal.currentPrice || '-',
-    b: !engine && usesRiskPriceColumns(section) ? signal.highPrice || '-' : signal.currentPrice || '-',
-    c: engine ? signal.maxReturnPct || '-'
-      : usesRiskPriceColumns(section) ? signal.stopLoss || '-' : signal.maxReturnPct && signal.maxReturnPct !== '-' ? signal.maxReturnPct : signal.status,
+    a: signal.capturePrice || (preclose ? '-' : signal.currentPrice || '-'),
+    b: (riskPrices ? signal.highPrice : signal.currentPrice) || '-',
+    c: engine || preclose ? signal.maxReturnPct || '-'
+      : riskPrices ? signal.stopLoss || '-' : signal.maxReturnPct && signal.maxReturnPct !== '-' ? signal.maxReturnPct : signal.status,
     summary: signal.summary,
     capturedAt: signal.capturedAt,
     captureTime: formatKstTime(signal.capturedAt),
@@ -127,6 +128,15 @@ const isEngineSection = (section: ConditionSectionResponse | undefined) => !!sec
 
 // 조건검색기 카드: 종목명(포착 시각) | 포착가 | 현재가 | 포착 후
 const ENGINE_COLUMNS = ['종목명', '포착가', '현재가', '포착 후']
+const PRECLOSE_COLUMNS = ['종목명', '포착가', '현재가', '당일 등락률']
+const PRECLOSE_PRESENTATION = new Map<string, { label: string; message?: string }>([
+  ['CLOSING_PRECLOSE', { label: '장마감 전 포착' }],
+  ['CLOSING_PRECLOSE_EMPTY', { label: '장마감 전 포착 0건', message: '확인한 범위에 장마감 전 조건을 충족한 종목이 없습니다.' }],
+  ['CLOSING_PRECLOSE_PARTIAL', { label: '장마감 전 일부 확인', message: '일부 종목의 자료를 확인하지 못했습니다.' }],
+  ['CLOSING_PRECLOSE_UNAVAILABLE', { label: '장마감 전 자료 미확인', message: '필요한 자료를 확인할 수 없어 후보 표시를 보류했습니다.' }],
+  ['CLOSING_PRECLOSE_LAST', { label: '장마감 전 마지막 포착' }],
+  ['CLOSING_PRECLOSE_LAST_EMPTY', { label: '장마감 전 마지막 포착 0건', message: '마지막 검색에서 조건을 충족한 종목이 없습니다.' }],
+])
 
 const ENGINE_RULES: Record<string, string> = {
   'short-term': '갭 하락 출발 시 시가 매수 · 당일 종가 청산 · 전날 급등주의 갭 상승 추격 금지',
@@ -419,25 +429,28 @@ export default function HomePage() {
     const usesManual = !!manual && manual.feed === mainConditions
       && (!mainSection || Date.parse(manual.data.asOf) >= Date.parse(mainSection.asOf))
     const apiSection = manual && usesManual ? manual.data : mainSection
-    const latestAnalysis = latestAnalysisPresentation(apiSection)
-    const rows = rowsFromCondition(apiSection, section.rows)
-    const observedChange = (section.id === 'short-term' && apiSection?.sourceStatus === 'REALTIME_SCAN')
-      || (section.id === 'leaders' && apiSection?.sourceStatus === 'LEADER_SCAN')
-    const columns = isEngineSection(apiSection) ? [...ENGINE_COLUMNS] : [...section.columns]
+    const sourceStatus = apiSection?.sourceStatus
+    const preclose = section.id === 'closing-bet' && sourceStatus ? PRECLOSE_PRESENTATION.get(sourceStatus) : undefined
+    const latestAnalysis = preclose ? null : latestAnalysisPresentation(apiSection)
+    const rows = rowsFromCondition(apiSection, section.rows, !!preclose)
+    const observedChange = (section.id === 'short-term' && sourceStatus === 'REALTIME_SCAN')
+      || (section.id === 'leaders' && sourceStatus === 'LEADER_SCAN')
+    const columns = preclose ? PRECLOSE_COLUMNS : isEngineSection(apiSection) ? [...ENGINE_COLUMNS] : [...section.columns]
     if ((section.id === 'short-term' || section.id === 'leaders') && apiSection && !observedChange && !isEngineSection(apiSection)) {
       columns[3] = '목표 상승 여력'
     }
 
     return {
       ...section,
+      preclose: !!preclose,
       columns,
       rows,
       sourceStatus: endpointLoading === section.id ? '최신 후보 불러오는 중' : rows.length === 0 && latestAnalysis
-        ? latestAnalysis.label : (usesManual ? endpointStatus[section.id] : undefined) || sectionSourceStatus(apiSection),
+        ? latestAnalysis.label : preclose?.label ?? ((usesManual ? endpointStatus[section.id] : undefined) || sectionSourceStatus(apiSection)),
       asOf: apiSection?.asOf,
       asOfLabel: rows.length === 0 && latestAnalysis ? '' : formatConditionAsOf(apiSection?.asOf),
-      latestAnalysisMessage: isEngineSection(apiSection) && rows.length === 0
-        ? engineEmptyMessage(section.id) : latestAnalysis?.message,
+      latestAnalysisMessage: preclose?.message ?? (isEngineSection(apiSection) && rows.length === 0
+        ? engineEmptyMessage(section.id) : latestAnalysis?.message),
       warning: sectionWarning(apiSection),
     }
   })
@@ -535,6 +548,8 @@ export default function HomePage() {
             </div>
           )}
 
+          {section.preclose && <div className="condition-warning-strip">정규장 15:06·15:11·15:16 스캔 · 완료 분봉 기준</div>}
+
           {section.rows.length > 0 && section.latestAnalysisMessage && (
             <div className="condition-warning-strip" role="status">{section.latestAnalysisMessage}</div>
           )}
@@ -604,7 +619,7 @@ export default function HomePage() {
               type="button"
               onClick={() => navigate('/history/closing-bet')}
             >
-              종가매매 추천종목 히스토리 보기
+              {section.preclose ? '기존 종가매매 성과 보기' : '종가매매 추천종목 히스토리 보기'}
             </button>
           )}
         </section>

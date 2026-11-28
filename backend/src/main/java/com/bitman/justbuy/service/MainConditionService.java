@@ -52,6 +52,7 @@ public class MainConditionService {
     private final TrackRecordService trackRecordService;
     private ConditionRunService conditionRunService;
     private ConditionEngineSectionService engineSections;
+    private JonggaPrecloseScanner jonggaPreclose;
 
     @Autowired(required = false)
     void configureConditionRuns(ConditionRunService conditionRunService) {
@@ -62,6 +63,11 @@ public class MainConditionService {
     @Autowired(required = false)
     void configureEngineSections(ConditionEngineSectionService engineSections) {
         this.engineSections = engineSections;
+    }
+
+    @Autowired(required = false)
+    void configureJonggaPreclose(JonggaPrecloseScanner jonggaPreclose) {
+        this.jonggaPreclose = jonggaPreclose;
     }
 
     public MainConditionService(ConditionSearchPipeline conditionSearchPipeline) {
@@ -260,6 +266,9 @@ public class MainConditionService {
 
     public ConditionSectionResponse getSection(ConditionSection section) {
         ConditionSectionResponse raw = rawSection(section);
+        if (section == ConditionSection.CLOSING_BET && JonggaPrecloseScanner.isPrecloseStatus(raw.sourceStatus())) {
+            return raw; // Preserve the frozen selection and observations used in the cutoff decision.
+        }
         if (liquidity == null || !section.hasAnalysisMode() || raw.signals().isEmpty()) return raw;
         boolean verifiedRealtime = isVerifiedShortTermPublication(section, raw);
         var signals = verifiedRealtime ? raw.signals() : liquidity.filterSignals(section.legacyMode(), raw.signals(), 3);
@@ -313,6 +322,11 @@ public class MainConditionService {
             signals.addAll(themes.signals());
             signals.addAll(closingBet.signals());
             return alertsSection(signals, alertSourceStatus(shortTerm, swing, leaders, themes, closingBet));
+        }
+
+        if (section == ConditionSection.CLOSING_BET && jonggaPreclose != null) {
+            var preview = jonggaPreclose.section();
+            if (preview.isPresent()) return preview.get();
         }
 
         if (engineSections != null) {

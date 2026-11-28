@@ -1,6 +1,6 @@
 /** BitMan Service Worker - freshness-first app shell */
 
-const CACHE_NAME = 'bitman-v20261125-subscription-expiry-r29'
+const CACHE_NAME = 'bitman-v20261128-jongga-preclose-r30'
 const SHELL_ASSETS = [
   '/manifest.json',
   '/install.html',
